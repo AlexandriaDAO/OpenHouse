@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "src/crash_backend"
+]
+resolver = "2"
