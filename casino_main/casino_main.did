@@ -1,0 +1,113 @@
+type UserAccount = record {
+    principal: principal;
+    balance: nat64;
+    total_deposited: nat64;
+    total_withdrawn: nat64;
+    total_wagered: nat64;
+    is_locked: bool;
+    created_at: nat64;
+    last_activity: nat64;
+};
+
+type DepositRecord = record {
+    user: principal;
+    amount: nat64;
+    timestamp: nat64;
+    block_index: nat64;
+};
+
+type WithdrawalRecord = record {
+    user: principal;
+    amount: nat64;
+    timestamp: nat64;
+    block_index: nat64;
+};
+
+type GameTransaction = record {
+    user: principal;
+    game: text;
+    bet_amount: nat64;
+    payout: nat64;
+    profit: int64;
+    timestamp: nat64;
+};
+
+type CasinoStats = record {
+    total_users: nat64;
+    total_deposits: nat64;
+    total_withdrawals: nat64;
+    total_volume: nat64;
+    house_profit: int64;
+};
+
+type ReservesReport = record {
+    total_user_balances: nat64;
+    is_solvent: bool;
+    timestamp: nat64;
+};
+
+type RollDirection = variant { Over; Under };
+
+type DiceResult = record {
+    player: principal;
+    bet_amount: nat64;
+    target_number: nat8;
+    direction: RollDirection;
+    rolled_number: nat8;
+    win_chance: float64;
+    multiplier: float64;
+    payout: nat64;
+    is_win: bool;
+    timestamp: nat64;
+    client_seed: text;
+    nonce: nat64;
+    server_seed_hash: text;
+};
+
+type RiskLevel = variant { Low; Medium; High };
+
+type PlinkoResult = record {
+    player: principal;
+    bet_amount: nat64;
+    rows: nat8;
+    risk: RiskLevel;
+    path: vec bool;
+    final_position: nat8;
+    multiplier: float64;
+    payout: nat64;
+    timestamp: nat64;
+};
+
+type GenericGameResult = record {
+    player: principal;
+    bet_amount: nat64;
+    payout: nat64;
+    timestamp: nat64;
+};
+
+service : {
+    // Deposit & Withdrawal
+    "deposit": (nat64) -> (variant { Ok: nat64; Err: text });
+    "withdraw": (nat64) -> (variant { Ok: nat64; Err: text });
+
+    // Game Play (Inter-canister)
+    "play_dice": (nat64, nat8, RollDirection, text) -> (variant { Ok: DiceResult; Err: text });
+    "play_plinko": (nat64, nat8, RiskLevel) -> (variant { Ok: PlinkoResult; Err: text });
+    "play_crash": (nat64) -> (variant { Ok: GenericGameResult; Err: text });
+    "play_mines": (nat64, nat8) -> (variant { Ok: GenericGameResult; Err: text });
+
+    // Query Functions
+    "get_balance": () -> (variant { Ok: nat64; Err: text }) query;
+    "get_account_info": () -> (variant { Ok: UserAccount; Err: text }) query;
+    "get_deposit_history": (nat32) -> (vec DepositRecord) query;
+    "get_withdrawal_history": (nat32) -> (vec WithdrawalRecord) query;
+    "get_game_history": (nat32) -> (vec GameTransaction) query;
+    "get_casino_stats": () -> (CasinoStats) query;
+
+    // Audit Functions
+    "get_total_user_balances": () -> (nat64) query;
+    "verify_reserves": () -> (ReservesReport) query;
+
+    // Test Function
+    "greet": (text) -> (text) query;
+}

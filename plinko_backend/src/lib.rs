@@ -14,6 +14,9 @@ type Memory = VirtualMemory<DefaultMemoryImpl>;
 const MIN_BET: u64 = 100_000_000; // 1 ICP
 const MAX_BET: u64 = 10_000_000_000; // 100 ICP
 
+// Casino main canister ID (for inter-canister auth)
+const CASINO_MAIN_CANISTER: &str = "TBD-AFTER-DEPLOYMENT";
+
 // Risk levels affect multipliers
 #[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
 pub enum RiskLevel {
@@ -273,6 +276,74 @@ async fn play_plinko(bet_amount: u64, rows: u8, risk: RiskLevel) -> Result<Plink
     });
 
     // TODO: Actually transfer ICP for bet and payout
+
+    Ok(result)
+}
+
+// Inter-canister play function - called by casino_main
+#[update]
+async fn play_from_casino(
+    player: Principal,
+    bet_amount: u64,
+    rows: u8,
+    risk: RiskLevel,
+) -> Result<PlinkoResult, String> {
+    // Authorization check - only casino_main can call this
+    let caller = ic_cdk::caller();
+    let casino_main = Principal::from_text(CASINO_MAIN_CANISTER)
+        .map_err(|_| "Invalid casino_main principal".to_string())?;
+
+    if caller != casino_main {
+        return Err("Only casino_main can call this function".to_string());
+    }
+
+    // Validate input
+    if bet_amount < MIN_BET {
+        return Err(format!("Minimum bet is {} ICP", MIN_BET / 100_000_000));
+    }
+    if bet_amount > MAX_BET {
+        return Err(format!("Maximum bet is {} ICP", MAX_BET / 100_000_000));
+    }
+    if ![8, 12, 16].contains(&rows) {
+        return Err("Rows must be 8, 12, or 16".to_string());
+    }
+
+    let path = generate_ball_path(rows).await;
+    let final_position = calculate_position(&path);
+    let multiplier = get_multiplier(rows, &risk, final_position);
+    let payout = (bet_amount as f64 * multiplier) as u64;
+
+    let result = PlinkoResult {
+        player,
+        bet_amount,
+        rows,
+        risk,
+        path,
+        final_position,
+        multiplier,
+        payout,
+        timestamp: ic_cdk::api::time(),
+    };
+
+    // Update stats
+    GAME_STATS.with(|stats| {
+        let mut stats = stats.borrow_mut();
+        stats.total_games += 1;
+        stats.total_volume += bet_amount;
+        stats.total_payouts += payout;
+        stats.house_profit = (stats.total_volume as i64) - (stats.total_payouts as i64);
+    });
+
+    // Store in history
+    let game_id = NEXT_GAME_ID.with(|id| {
+        let current = *id.borrow();
+        *id.borrow_mut() = current + 1;
+        current
+    });
+
+    GAME_HISTORY.with(|history| {
+        history.borrow_mut().insert(game_id, result.clone());
+    });
 
     Ok(result)
 }

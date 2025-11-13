@@ -13,6 +13,10 @@ RUN_TESTS=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --casino-only)
+            DEPLOY_TARGET="casino"
+            shift
+            ;;
         --crash-only)
             DEPLOY_TARGET="crash"
             shift
@@ -43,6 +47,7 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: ./deploy.sh [options]"
             echo ""
             echo "Options:"
+            echo "  --casino-only      Deploy only casino_main (unified wallet)"
             echo "  --crash-only       Deploy only crash backend"
             echo "  --plinko-only      Deploy only plinko backend"
             echo "  --mines-only       Deploy only mines backend"
@@ -53,6 +58,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Examples:"
             echo "  ./deploy.sh                    # Deploy everything to mainnet"
+            echo "  ./deploy.sh --casino-only      # Deploy only casino_main"
             echo "  ./deploy.sh --crash-only       # Deploy only crash backend"
             echo "  ./deploy.sh --plinko-only      # Deploy only plinko backend"
             echo "  ./deploy.sh --mines-only       # Deploy only mines backend"
@@ -106,6 +112,36 @@ use_daopad_identity() {
     export DFX_WARNING=-mainnet_plaintext_identity
     dfx identity use daopad
     echo "Using identity: daopad"
+    echo ""
+}
+
+# Function to deploy casino_main (unified wallet)
+deploy_casino_main() {
+    echo "================================================"
+    echo "Deploying Casino Main Canister (Unified Wallet)"
+    echo "================================================"
+
+    # Build the canister
+    echo "Building casino_main canister..."
+    cargo build --release --target wasm32-unknown-unknown --package casino_main
+
+    echo "Using pre-defined candid interface..."
+
+    # Deploy to mainnet (specify subnet type for new canister)
+    echo "Deploying casino_main to mainnet..."
+    dfx deploy casino_main --network ic --subnet-type application
+
+    # Get and display the canister ID
+    CASINO_MAIN_ID=$(dfx canister --network ic id casino_main)
+    echo ""
+    echo "✅ Casino Main Canister ID: $CASINO_MAIN_ID"
+    echo ""
+    echo "⚠️  IMPORTANT: Update game backends with this canister ID!"
+    echo "Replace CASINO_MAIN_CANISTER constant in:"
+    echo "  - dice_backend/src/lib.rs"
+    echo "  - plinko_backend/src/lib.rs"
+    echo ""
+    echo "Casino Main deployment completed!"
     echo ""
 }
 
@@ -271,6 +307,9 @@ main() {
     use_daopad_identity
 
     case $DEPLOY_TARGET in
+        casino)
+            deploy_casino_main
+            ;;
         crash)
             deploy_crash
             ;;
@@ -287,6 +326,7 @@ main() {
             deploy_frontend
             ;;
         all)
+            deploy_casino_main
             deploy_crash
             deploy_plinko
             deploy_mines

@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "casino_main",
     "crash_backend",
     "plinko_backend",
     "mines_backend",

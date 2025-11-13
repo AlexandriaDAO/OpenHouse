@@ -1,5 +1,10 @@
 {
   "canisters": {
+    "casino_main": {
+      "type": "rust",
+      "package": "casino_main",
+      "candid": "casino_main/casino_main.did"
+    },
     "crash_backend": {
       "type": "rust",
       "package": "crash_backend",
@@ -28,7 +33,7 @@
       "type": "assets",
       "source": ["openhouse_frontend/dist"],
       "specified_id": "pezw3-laaaa-aaaal-qssoa-cai",
-      "dependencies": ["crash_backend", "plinko_backend", "mines_backend", "dice_backend"]
+      "dependencies": ["casino_main", "crash_backend", "plinko_backend", "mines_backend", "dice_backend"]
     }
   },
   "defaults": {

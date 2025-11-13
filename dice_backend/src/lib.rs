@@ -94,6 +94,10 @@ const MAX_BET: u64 = 10_000_000_000; // 100 ICP
 const HOUSE_EDGE: f64 = 0.03; // 3% house edge
 const MAX_NUMBER: u8 = 100; // Dice rolls 0-100
 
+// Casino main canister ID (for inter-canister auth)
+// This will be updated after casino_main is deployed
+const CASINO_MAIN_CANISTER: &str = "TBD-AFTER-DEPLOYMENT";
+
 // Direction to predict
 #[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
 pub enum RollDirection {
@@ -417,6 +421,127 @@ fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection, clien
     // TODO: Actually transfer ICP for bet and payout
     // NOTE: Currently in practice/testing mode - all games record stats but don't move real ICP
     // Real money integration will be added after randomness system is proven secure and fair
+
+    Ok(result)
+}
+
+// Inter-canister play function - called by casino_main
+#[update]
+fn play_from_casino(
+    player: Principal,
+    bet_amount: u64,
+    target_number: u8,
+    direction: RollDirection,
+    client_seed: String,
+) -> Result<DiceResult, String> {
+    // Authorization check - only casino_main can call this
+    let caller = ic_cdk::caller();
+    let casino_main = Principal::from_text(CASINO_MAIN_CANISTER)
+        .map_err(|_| "Invalid casino_main principal".to_string())?;
+
+    if caller != casino_main {
+        return Err("Only casino_main can call this function".to_string());
+    }
+
+    // Validate input
+    if bet_amount < MIN_BET {
+        return Err(format!("Minimum bet is {} ICP", MIN_BET / 100_000_000));
+    }
+    if bet_amount > MAX_BET {
+        return Err(format!("Maximum bet is {} ICP", MAX_BET / 100_000_000));
+    }
+
+    // Validate target number based on direction
+    match direction {
+        RollDirection::Over => {
+            if target_number >= MAX_NUMBER {
+                return Err(format!(
+                    "Target must be less than {} for Over rolls",
+                    MAX_NUMBER
+                ));
+            }
+            if target_number < 1 {
+                return Err("Target must be at least 1 for Over rolls".to_string());
+            }
+        }
+        RollDirection::Under => {
+            if target_number <= 0 {
+                return Err("Target must be greater than 0 for Under rolls".to_string());
+            }
+            if target_number > MAX_NUMBER {
+                return Err(format!(
+                    "Target must be at most {} for Under rolls",
+                    MAX_NUMBER
+                ));
+            }
+        }
+    }
+
+    let win_chance = calculate_win_chance(target_number, &direction);
+
+    // Ensure win chance is reasonable
+    if win_chance < 0.01 || win_chance > 0.98 {
+        return Err("Invalid target number - win chance must be between 1% and 98%".to_string());
+    }
+
+    // Validate client seed length (DoS protection)
+    if client_seed.len() > 256 {
+        return Err("Client seed too long (max 256 characters)".to_string());
+    }
+
+    // Check if seed needs rotation
+    maybe_schedule_seed_rotation();
+
+    let multiplier = calculate_multiplier(win_chance);
+    let (rolled_number, nonce, server_seed_hash) = generate_dice_roll_instant(&client_seed)?;
+
+    // Determine if player won
+    let is_win = match direction {
+        RollDirection::Over => rolled_number > target_number,
+        RollDirection::Under => rolled_number < target_number,
+    };
+
+    let payout = if is_win {
+        (bet_amount as f64 * multiplier) as u64
+    } else {
+        0
+    };
+
+    let result = DiceResult {
+        player,
+        bet_amount,
+        target_number,
+        direction,
+        rolled_number,
+        win_chance,
+        multiplier,
+        payout,
+        is_win,
+        timestamp: ic_cdk::api::time(),
+        client_seed,
+        nonce,
+        server_seed_hash,
+    };
+
+    // Update stats
+    GAME_STATS.with(|stats| {
+        let mut stats = stats.borrow_mut();
+        stats.total_games += 1;
+        stats.total_volume += bet_amount;
+        stats.total_payouts += payout;
+        stats.house_profit = (stats.total_volume as i64) - (stats.total_payouts as i64);
+    });
+
+    // Store in history
+    let game_id = NEXT_GAME_ID.with(|id| {
+        let current = *id.borrow();
+        *id.borrow_mut() = current + 1;
+        current
+    });
+
+    GAME_HISTORY.with(|history| {
+        history.borrow_mut().insert(game_id, result.clone());
+    });
 
     Ok(result)
 }
