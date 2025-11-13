@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import useDiceActor from '../hooks/actors/useDiceActor';
 import { useAuth } from '../providers/AuthProvider';
 import type { Principal } from '@dfinity/principal';
+import { DiceAnimation } from '../components/DiceAnimation';
 
 interface GameResult {
   player: Principal;
@@ -23,81 +24,20 @@ interface GameResultWithId extends GameResult {
 export const Dice: React.FC = () => {
   const { actor } = useDiceActor();
   const { isAuthenticated } = useAuth();
-  const [greeting, setGreeting] = useState<string>('');
-  const [error, setError] = useState<string>('');
-  const [testingConnection, setTestingConnection] = useState(false);
-  const actorLoading = !actor;
 
   // Game state
   const [betAmount, setBetAmount] = useState(1);
   const [targetNumber, setTargetNumber] = useState(50);
   const [direction, setDirection] = useState<'Over' | 'Under'>('Over');
-  const [winChance, setWinChance] = useState(0);
-  const [multiplier, setMultiplier] = useState(0);
   const [isRolling, setIsRolling] = useState(false);
   const [lastResult, setLastResult] = useState<GameResult | null>(null);
   const [gameHistory, setGameHistory] = useState<GameResultWithId[]>([]);
   const [gameError, setGameError] = useState('');
+  const [animatingResult, setAnimatingResult] = useState<number | null>(null);
 
   // Mode toggle: 'practice' or 'real'
   const [mode, setMode] = useState<'practice' | 'real'>('practice');
   const isPracticeMode = mode === 'practice' || !isAuthenticated;
-
-  // Test backend connection when actor is ready
-  useEffect(() => {
-    const testConnection = async () => {
-      if (!actor) return;
-
-      setTestingConnection(true);
-      setError('');
-
-      try {
-        const result = await actor.greet('Player');
-        setGreeting(result);
-        setError(''); // Clear error on success
-      } catch (err) {
-        console.error('Failed to connect to Dice backend:', err);
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setTestingConnection(false);
-      }
-    };
-
-    testConnection();
-  }, [actor]);
-
-  // Calculate odds when target or direction changes
-  useEffect(() => {
-    let cancelled = false;
-    const currentActor = actor;
-
-    const updateOdds = async () => {
-      if (!currentActor) return;
-
-      try {
-        const directionVariant = direction === 'Over' ? { Over: null } : { Under: null };
-        const result = await currentActor.calculate_payout_info(targetNumber, directionVariant);
-
-        if (!cancelled && 'Ok' in result) {
-          const [chance, mult] = result.Ok;
-          setWinChance(chance * 100);
-          setMultiplier(mult);
-        } else if (!cancelled && 'Err' in result) {
-          setGameError(result.Err);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          console.error('Failed to calculate odds:', err);
-        }
-      }
-    };
-
-    updateOdds();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [targetNumber, direction, actor]);
 
   // Load game history on mount
   useEffect(() => {
@@ -106,7 +46,7 @@ export const Dice: React.FC = () => {
 
       try {
         const history = await actor.get_recent_games(10);
-        const historyWithIds = history.map(game => ({
+        const historyWithIds = history.map((game: GameResult) => ({
           ...game,
           clientId: crypto.randomUUID()
         }));
@@ -132,6 +72,7 @@ export const Dice: React.FC = () => {
     setIsRolling(true);
     setGameError('');
     setLastResult(null);
+    setAnimatingResult(null); // Reset animation
 
     try {
       const betAmountE8s = BigInt(Math.floor(betAmount * 100_000_000));
@@ -141,15 +82,21 @@ export const Dice: React.FC = () => {
       const result = await actor.play_dice(betAmountE8s, targetNumber, directionVariant);
 
       if ('Ok' in result) {
-        setLastResult(result.Ok);
-        setGameHistory(prev => [{...result.Ok, clientId: crypto.randomUUID()}, ...prev.slice(0, 9)]);
+        // Trigger animation with the result
+        setAnimatingResult(result.Ok.rolled_number);
+
+        // Set result after brief delay for animation
+        setTimeout(() => {
+          setLastResult(result.Ok);
+          setGameHistory(prev => [{...result.Ok, clientId: crypto.randomUUID()}, ...prev.slice(0, 9)]);
+        }, 2200);
       } else {
         setGameError(result.Err);
+        setIsRolling(false);
       }
     } catch (err) {
       console.error('Failed to roll dice:', err);
       setGameError(err instanceof Error ? err.message : 'Failed to roll dice');
-    } finally {
       setIsRolling(false);
     }
   };
@@ -168,233 +115,88 @@ export const Dice: React.FC = () => {
     <div className="space-y-6">
       {/* Game Header */}
       <div className="text-center">
-        <div className="text-6xl mb-4">🎲</div>
-        <div className="flex items-center justify-center gap-3 mb-2">
-          <h1 className="text-4xl font-bold">Dice Game</h1>
-          {isPracticeMode && (
-            <span className="bg-yellow-900/30 border border-yellow-500/50 text-yellow-400 text-sm font-bold px-3 py-1 rounded-full">
-              PRACTICE MODE
-            </span>
-          )}
-        </div>
-        <p className="text-gray-400">Roll over or under your target number!</p>
+        <h1 className="text-3xl font-bold mb-4">🎲 Dice</h1>
 
-        {/* Mode Toggle */}
-        <div className="mt-4 flex items-center justify-center gap-3">
+        {/* Simplified mode toggle - just icons */}
+        <div className="flex items-center justify-center gap-2">
           <button
             onClick={() => handleModeToggle('practice')}
-            className={`px-6 py-2 rounded-lg font-bold transition ${
-              mode === 'practice'
-                ? 'bg-yellow-600 text-white'
-                : 'bg-casino-primary text-gray-400 hover:bg-casino-accent'
+            className={`px-4 py-2 rounded-lg transition ${
+              mode === 'practice' ? 'bg-yellow-600' : 'bg-gray-700'
             }`}
+            title="Practice Mode"
           >
-            🎮 Practice Mode
+            🎮
           </button>
           <button
             onClick={() => handleModeToggle('real')}
             disabled={!isAuthenticated}
-            className={`px-6 py-2 rounded-lg font-bold transition ${
-              mode === 'real' && isAuthenticated
-                ? 'bg-green-600 text-white'
-                : !isAuthenticated
-                ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                : 'bg-casino-primary text-gray-400 hover:bg-casino-accent'
+            className={`px-4 py-2 rounded-lg transition ${
+              mode === 'real' && isAuthenticated ? 'bg-green-600' : 'bg-gray-700'
             }`}
-            title={!isAuthenticated ? 'Login required for Real Mode' : ''}
+            title={!isAuthenticated ? 'Login for Real Mode' : 'Real Mode'}
           >
-            💰 Real Mode {!isAuthenticated && '🔒'}
+            💰
           </button>
         </div>
-
-        {isPracticeMode && (
-          <p className="text-yellow-400 text-sm mt-2">
-            🎮 Playing with virtual ICP • {!isAuthenticated ? 'Login to bet real ICP' : 'Switch to Real Mode to bet real ICP'}
-          </p>
-        )}
       </div>
-
-      {/* Connection Status */}
-      <div className="card max-w-2xl mx-auto">
-        <h3 className="font-bold mb-4">Backend Connection Status</h3>
-
-        {actorLoading && (
-          <div className="flex items-center gap-3 text-yellow-400">
-            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-yellow-400"></div>
-            <span>Initializing actor...</span>
-          </div>
-        )}
-
-        {!actorLoading && actor && !testingConnection && !error && greeting && (
-          <div className="space-y-3">
-            <div className="flex items-center gap-3 text-green-400">
-              <span className="text-2xl">✅</span>
-              <span className="font-semibold">Connected to Dice Backend</span>
-            </div>
-            <div className="bg-casino-primary rounded p-3 text-sm">
-              <div className="text-gray-400 mb-1">Backend Response:</div>
-              <div className="font-mono">{greeting}</div>
-            </div>
-            <div className="text-sm text-gray-400">
-              Canister ID: <span className="font-mono">whchi-hyaaa-aaaao-a4ruq-cai</span>
-            </div>
-          </div>
-        )}
-
-        {testingConnection && (
-          <div className="flex items-center gap-3 text-blue-400">
-            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-400"></div>
-            <span>Testing backend connection...</span>
-          </div>
-        )}
-
-        {error && (
-          <div className="space-y-3">
-            <div className="flex items-center gap-3 text-red-400">
-              <span className="text-2xl">❌</span>
-              <span className="font-semibold">Connection Failed</span>
-            </div>
-            <div className="bg-red-900/20 border border-red-500/50 rounded p-3 text-sm">
-              <div className="text-red-400 mb-1">Error:</div>
-              <div className="font-mono text-xs">{error}</div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Practice Mode Info */}
-      {isPracticeMode && (
-        <div className="card max-w-2xl mx-auto bg-yellow-900/10 border-2 border-yellow-500/30">
-          <div className="flex items-start gap-3">
-            <span className="text-2xl">🎮</span>
-            <div>
-              <h3 className="font-bold mb-1 text-yellow-400">Practice Mode Active</h3>
-              <p className="text-sm text-gray-300 mb-2">
-                You're playing with <strong>virtual ICP</strong> to test the game. Your bets and winnings
-                are simulated and won't affect real balances.
-              </p>
-              <p className="text-sm text-gray-400">
-                {!isAuthenticated ? (
-                  <>Ready to play for real? Click <strong>"Login to Play"</strong> in the header to authenticate
-                  with Internet Identity and start betting real ICP.</>
-                ) : (
-                  <>Ready to play for real? Click the <strong>"💰 Real Mode"</strong> button above to start betting real ICP.</>
-                )}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* BETTING CONTROLS */}
-      <div className="card max-w-4xl mx-auto">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-bold">Place Your Bet</h3>
-          {isPracticeMode && (
-            <span className="bg-yellow-900/30 border border-yellow-500/50 text-yellow-400 text-xs font-bold px-2 py-1 rounded">
-              VIRTUAL ICP
-            </span>
-          )}
+      <div className="card max-w-2xl mx-auto">
+        {/* Bet Amount */}
+        <div className="mb-4">
+          <label className="block text-sm text-gray-400 mb-2">
+            Bet {isPracticeMode ? '(Practice)' : ''}
+          </label>
+          <input
+            type="number"
+            min="0.1"
+            max="100"
+            step="0.1"
+            value={betAmount}
+            onChange={(e) => setBetAmount(parseFloat(e.target.value) || 0)}
+            className="w-full bg-casino-primary border border-casino-accent rounded px-4 py-3 text-lg"
+            disabled={isRolling}
+          />
         </div>
 
-        <div className="grid md:grid-cols-2 gap-6">
-          {/* Left column: Bet controls */}
-          <div className="space-y-4">
-            {/* Bet Amount Input */}
-            <div>
-              <label className="block text-sm text-gray-400 mb-2">
-                Bet Amount ({isPracticeMode ? 'Virtual ' : ''}ICP)
-              </label>
-              <input
-                type="number"
-                min="0.1"
-                max="100"
-                step="0.1"
-                value={betAmount}
-                onChange={(e) => setBetAmount(parseFloat(e.target.value) || 0)}
-                className="w-full bg-casino-primary border border-casino-accent rounded px-4 py-2"
-                disabled={isRolling}
-              />
-            </div>
+        {/* Target Number */}
+        <div className="mb-4">
+          <label className="block text-sm text-gray-400 mb-2">
+            Target: {targetNumber}
+          </label>
+          <input
+            type="range"
+            min="1"
+            max="99"
+            value={targetNumber}
+            onChange={(e) => setTargetNumber(parseInt(e.target.value))}
+            className="w-full"
+            disabled={isRolling}
+          />
+        </div>
 
-            {/* Target Number Slider */}
-            <div>
-              <label className="block text-sm text-gray-400 mb-2">
-                Target Number: <span className="text-white font-bold">{targetNumber}</span>
-              </label>
-              <input
-                type="range"
-                min="1"
-                max="99"
-                value={targetNumber}
-                onChange={(e) => setTargetNumber(parseInt(e.target.value))}
-                className="w-full"
-                disabled={isRolling}
-              />
-              <div className="flex justify-between text-xs text-gray-500">
-                <span>1</span>
-                <span>50</span>
-                <span>99</span>
-              </div>
-            </div>
-
-            {/* Direction Toggle */}
-            <div>
-              <label className="block text-sm text-gray-400 mb-2">
-                Direction
-              </label>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setDirection('Over')}
-                  disabled={isRolling}
-                  className={`flex-1 py-3 px-4 rounded font-bold transition ${
-                    direction === 'Over'
-                      ? 'bg-green-600 text-white'
-                      : 'bg-casino-primary text-gray-400 hover:bg-casino-accent'
-                  }`}
-                >
-                  OVER {targetNumber}
-                </button>
-                <button
-                  onClick={() => setDirection('Under')}
-                  disabled={isRolling}
-                  className={`flex-1 py-3 px-4 rounded font-bold transition ${
-                    direction === 'Under'
-                      ? 'bg-red-600 text-white'
-                      : 'bg-casino-primary text-gray-400 hover:bg-casino-accent'
-                  }`}
-                >
-                  UNDER {targetNumber}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Right column: Odds display */}
-          <div className="space-y-4">
-            {/* Win Chance */}
-            <div className="bg-casino-primary rounded p-4">
-              <div className="text-sm text-gray-400 mb-1">Win Chance</div>
-              <div className="text-3xl font-bold text-casino-highlight">
-                {(winChance || 0).toFixed(2)}%
-              </div>
-            </div>
-
-            {/* Multiplier */}
-            <div className="bg-casino-primary rounded p-4">
-              <div className="text-sm text-gray-400 mb-1">Multiplier</div>
-              <div className="text-3xl font-bold text-green-400">
-                {(multiplier || 0).toFixed(2)}x
-              </div>
-            </div>
-
-            {/* Potential Payout */}
-            <div className="bg-casino-primary rounded p-4">
-              <div className="text-sm text-gray-400 mb-1">Potential Win</div>
-              <div className="text-2xl font-bold">
-                {((betAmount || 0) * (multiplier || 0)).toFixed(2)} {isPracticeMode ? 'Virtual ' : ''}ICP
-              </div>
-            </div>
+        {/* Direction - Over/Under */}
+        <div className="mb-6">
+          <div className="flex gap-2">
+            <button
+              onClick={() => setDirection('Over')}
+              disabled={isRolling}
+              className={`flex-1 py-3 rounded font-bold transition ${
+                direction === 'Over' ? 'bg-green-600' : 'bg-gray-700'
+              }`}
+            >
+              OVER {targetNumber}
+            </button>
+            <button
+              onClick={() => setDirection('Under')}
+              disabled={isRolling}
+              className={`flex-1 py-3 rounded font-bold transition ${
+                direction === 'Under' ? 'bg-red-600' : 'bg-gray-700'
+              }`}
+            >
+              UNDER {targetNumber}
+            </button>
           </div>
         </div>
 
@@ -402,139 +204,64 @@ export const Dice: React.FC = () => {
         <button
           onClick={rollDice}
           disabled={isRolling || !actor}
-          className="w-full mt-6 bg-casino-highlight hover:bg-casino-highlight/80 disabled:bg-gray-700 disabled:text-gray-500 text-white font-bold py-4 px-6 rounded-lg text-xl transition"
+          className="w-full bg-casino-highlight hover:bg-casino-highlight/80 disabled:bg-gray-700 text-white font-bold py-4 rounded-lg text-xl"
         >
-          {isRolling ? (
-            <span className="flex items-center justify-center gap-2">
-              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
-              Rolling...
-            </span>
-          ) : (
-            <span className="flex items-center justify-center gap-2">
-              🎲 ROLL DICE
-              {isPracticeMode && <span className="text-sm font-normal opacity-80">(Practice)</span>}
-            </span>
-          )}
+          {isRolling ? '🎲 Rolling...' : '🎲 ROLL'}
         </button>
 
-        {/* Error Display */}
         {gameError && (
-          <div className="mt-4 bg-red-900/20 border border-red-500/50 rounded p-3 text-red-400">
+          <div className="mt-4 text-red-400 text-sm text-center">
             {gameError}
           </div>
         )}
       </div>
 
-      {/* RESULT DISPLAY */}
-      {lastResult && (
-        <div className="card max-w-4xl mx-auto">
-          <h3 className="font-bold mb-4">Result</h3>
+      {/* Dice Animation - Always visible, shows rolling state */}
+      <div className="card max-w-2xl mx-auto">
+        <DiceAnimation
+          targetNumber={animatingResult}
+          isRolling={isRolling}
+          onAnimationComplete={() => setIsRolling(false)}
+        />
 
-          <div className={`rounded-lg p-8 text-center ${
-            lastResult.is_win ? 'bg-green-900/20 border-2 border-green-500' : 'bg-red-900/20 border-2 border-red-500'
+        {/* Show win/loss message below dice after animation */}
+        {lastResult && !isRolling && (
+          <div className={`text-center mt-6 ${
+            lastResult.is_win ? 'text-green-400' : 'text-red-400'
           }`}>
-            {/* Rolled Number Display */}
-            <div className="text-8xl font-bold mb-4">
-              {lastResult.rolled_number}
+            <div className="text-3xl font-bold mb-2">
+              {lastResult.is_win ? '🎉 WIN!' : '😢 LOSE'}
             </div>
-
-            {/* Win/Loss Message */}
-            <div className={`text-3xl font-bold mb-4 ${lastResult.is_win ? 'text-green-400' : 'text-red-400'}`}>
-              {lastResult.is_win ? '🎉 YOU WIN!' : '😢 YOU LOSE'}
-            </div>
-
-            {/* Details */}
-            <div className="text-gray-300 space-y-1">
-              <div>
-                Target: {lastResult.target_number} ({Object.keys(lastResult.direction)[0]})
+            {lastResult.is_win && (
+              <div className="text-xl">
+                +{(Number(lastResult.payout) / 100_000_000).toFixed(2)} ICP
               </div>
-              <div>
-                Win Chance: {(lastResult.win_chance * 100).toFixed(2)}%
-              </div>
-              {lastResult.is_win && (
-                <div className="text-2xl text-green-400 font-bold mt-2">
-                  +{(Number(lastResult.payout) / 100_000_000).toFixed(2)} {isPracticeMode ? 'Virtual ' : ''}ICP
-                </div>
-              )}
-            </div>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* GAME HISTORY */}
       {gameHistory.length > 0 && (
-        <div className="card max-w-4xl mx-auto">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-bold">Recent Games</h3>
-            {isPracticeMode && (
-              <span className="bg-yellow-900/30 border border-yellow-500/50 text-yellow-400 text-xs font-bold px-2 py-1 rounded">
-                PRACTICE ROLLS
-              </span>
-            )}
-          </div>
+        <div className="card max-w-2xl mx-auto">
+          <h3 className="text-sm font-bold mb-3 text-gray-400">Recent Rolls</h3>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="border-b border-casino-accent">
-                <tr className="text-gray-400">
-                  <th className="text-left py-2">Target</th>
-                  <th className="text-left py-2">Direction</th>
-                  <th className="text-left py-2">Roll</th>
-                  <th className="text-left py-2">Result</th>
-                  <th className="text-right py-2">Payout</th>
-                </tr>
-              </thead>
-              <tbody>
-                {gameHistory.map((game) => (
-                  <tr key={game.clientId} className="border-b border-casino-primary/50">
-                    <td className="py-2">{game.target_number}</td>
-                    <td className="py-2">
-                      <span className={Object.keys(game.direction)[0] === 'Over' ? 'text-green-400' : 'text-red-400'}>
-                        {Object.keys(game.direction)[0]}
-                      </span>
-                    </td>
-                    <td className="py-2 font-bold">{game.rolled_number}</td>
-                    <td className="py-2">
-                      <span className={game.is_win ? 'text-green-400' : 'text-red-400'}>
-                        {game.is_win ? 'Win' : 'Loss'}
-                      </span>
-                    </td>
-                    <td className="py-2 text-right">
-                      {game.is_win ? `+${(Number(game.payout) / 100_000_000).toFixed(2)}` : '0.00'} {isPracticeMode ? 'Virtual ' : ''}ICP
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-1">
+            {gameHistory.slice(0, 5).map((game) => (
+              <div key={game.clientId} className="flex items-center justify-between text-sm py-2 border-b border-gray-800">
+                <span className="font-mono">{game.rolled_number}</span>
+                <span className={game.is_win ? 'text-green-400' : 'text-red-400'}>
+                  {game.is_win ? '✓' : '✗'}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       )}
 
-      {/* Game Info */}
-      <div className="card max-w-2xl mx-auto">
-        <h3 className="font-bold mb-4">Game Information</h3>
-        <div className="space-y-2 text-sm">
-          <div className="flex justify-between">
-            <span className="text-gray-400">Min Bet:</span>
-            <span className="font-semibold">1 ICP</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">Max Win:</span>
-            <span className="font-semibold text-casino-highlight">100x</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">House Edge:</span>
-            <span className="font-semibold">3%</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">Roll Range:</span>
-            <span className="font-semibold">0-100</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">Win Chance:</span>
-            <span className="font-semibold">1% to 98%</span>
-          </div>
-        </div>
+      {/* Game Info - Minimal */}
+      <div className="text-center text-xs text-gray-500 mt-6">
+        Min: 1 ICP • Max Win: 100x • House Edge: 3%
       </div>
     </div>
   );
