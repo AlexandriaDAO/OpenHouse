@@ -13,7 +13,6 @@ type Memory = VirtualMemory<DefaultMemoryImpl>;
 // Mines game constants
 const MIN_BET: u64 = 100_000_000; // 1 ICP
 const MAX_BET: u64 = 10_000_000_000; // 100 ICP
-const HOUSE_EDGE: f64 = 0.03; // 3% house edge
 const GRID_SIZE: usize = 25; // 5x5 grid
 
 #[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
@@ -79,24 +78,6 @@ fn pre_upgrade() {
 #[post_upgrade]
 fn post_upgrade() {
     // State is restored from stable memory
-}
-
-// Calculate multiplier based on number of safe tiles revealed and mines
-fn calculate_multiplier(safe_tiles_revealed: usize, num_mines: u8) -> f64 {
-    let total_tiles = GRID_SIZE as f64;
-    let mines = num_mines as f64;
-    let safe_tiles = total_tiles - mines;
-
-    // Probability of each successful reveal
-    let mut multiplier = 1.0;
-    for i in 0..safe_tiles_revealed {
-        let remaining_safe = safe_tiles - i as f64;
-        let remaining_total = total_tiles - i as f64;
-        let prob = remaining_safe / remaining_total;
-        multiplier *= (1.0 - HOUSE_EDGE) / prob;
-    }
-
-    multiplier
 }
 
 // Start a new mines game
