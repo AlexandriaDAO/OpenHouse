@@ -31,11 +31,14 @@ export const Dice: React.FC = () => {
   const [betAmount, setBetAmount] = useState(1);
   const [targetNumber, setTargetNumber] = useState(50);
   const [direction, setDirection] = useState<'Over' | 'Under'>('Over');
+  const [winChance, setWinChance] = useState(0);
+  const [multiplier, setMultiplier] = useState(0);
   const [isRolling, setIsRolling] = useState(false);
   const [lastResult, setLastResult] = useState<GameResult | null>(null);
   const [gameHistory, setGameHistory] = useState<GameResultWithId[]>([]);
   const [gameError, setGameError] = useState('');
   const [animatingResult, setAnimatingResult] = useState<number | null>(null);
+  const [showOdds, setShowOdds] = useState(false);
 
   // Mode toggle: 'practice' or 'real'
   const [mode, setMode] = useState<'practice' | 'real'>('practice');
@@ -45,6 +48,39 @@ export const Dice: React.FC = () => {
   const handleAnimationComplete = useCallback(() => {
     setIsRolling(false);
   }, []);
+
+  // Calculate odds when target or direction changes
+  useEffect(() => {
+    let cancelled = false;
+    const currentActor = actor;
+
+    const updateOdds = async () => {
+      if (!currentActor) return;
+
+      try {
+        const directionVariant = direction === 'Over' ? { Over: null } : { Under: null };
+        const result = await currentActor.calculate_payout_info(targetNumber, directionVariant);
+
+        if (!cancelled && 'Ok' in result) {
+          const [chance, mult] = result.Ok;
+          setWinChance(chance * 100);
+          setMultiplier(mult);
+        } else if (!cancelled && 'Err' in result) {
+          setGameError(result.Err);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error('Failed to calculate odds:', err);
+        }
+      }
+    };
+
+    updateOdds();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [targetNumber, direction, actor]);
 
   // Load game history on mount
   useEffect(() => {
@@ -185,7 +221,7 @@ export const Dice: React.FC = () => {
         </div>
 
         {/* Direction - Over/Under */}
-        <div className="mb-6">
+        <div className="mb-4">
           <div className="flex gap-2">
             <button
               onClick={() => setDirection('Over')}
@@ -206,6 +242,41 @@ export const Dice: React.FC = () => {
               UNDER {targetNumber}
             </button>
           </div>
+        </div>
+
+        {/* Collapsible Odds Display */}
+        <div className="mb-6">
+          <button
+            onClick={() => setShowOdds(!showOdds)}
+            className="text-xs text-gray-400 hover:text-gray-300 transition flex items-center gap-1"
+            type="button"
+          >
+            <span>{showOdds ? '▼' : '▶'}</span>
+            <span>Odds & Payout</span>
+          </button>
+
+          {showOdds && (
+            <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+              <div className="bg-casino-primary rounded p-2 text-center">
+                <div className="text-gray-500 mb-1">Win Chance</div>
+                <div className="font-bold text-casino-highlight">
+                  {(winChance || 0).toFixed(2)}%
+                </div>
+              </div>
+              <div className="bg-casino-primary rounded p-2 text-center">
+                <div className="text-gray-500 mb-1">Multiplier</div>
+                <div className="font-bold text-green-400">
+                  {(multiplier || 0).toFixed(2)}x
+                </div>
+              </div>
+              <div className="bg-casino-primary rounded p-2 text-center">
+                <div className="text-gray-500 mb-1">Win Amount</div>
+                <div className="font-bold">
+                  {((betAmount || 0) * (multiplier || 0)).toFixed(2)}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Roll Button */}
