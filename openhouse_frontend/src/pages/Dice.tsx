@@ -128,7 +128,7 @@ export const Dice: React.FC = () => {
         // Trigger animation with the result and set result immediately
         setAnimatingResult(result.Ok.rolled_number);
         setLastResult(result.Ok);
-        setGameHistory(prev => [{...result.Ok, clientId: crypto.randomUUID()}, ...prev.slice(0, 9)]);
+        setGameHistory(prev => [{...result.Ok, clientId: crypto.randomUUID()}, ...prev.slice(0, MAX_HISTORY_DISPLAY - 1)]);
         // isRolling will be set to false by animation complete callback
       } else {
         setGameError(result.Err);

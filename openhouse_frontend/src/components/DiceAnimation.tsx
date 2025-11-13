@@ -6,7 +6,8 @@ const ANIMATION_CONFIG = {
   ROLL_DURATION: 2000,
   FRAME_INTERVAL: 33,
   RESULT_DELAY: 100,
-  RESULT_DISPLAY_DURATION: 2000
+  RESULT_DISPLAY_DURATION: 2000,
+  MIN_DISPLAY_TIME: 500 // Minimum time to display result even if backend is very fast
 } as const;
 
 interface DiceAnimationProps {
@@ -31,16 +32,17 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
       // Track animation start time for race condition fix
       animationStartTimeRef.current = Date.now();
 
-      // Start rolling animation
+      // Explicitly reset animation state for new roll
       setAnimationPhase('rolling');
+      setDisplayNumber(0);
 
       // Rapidly cycle through random numbers
       let frameCount = 0;
       const maxFrames = Math.floor(ANIMATION_CONFIG.ROLL_DURATION / ANIMATION_CONFIG.FRAME_INTERVAL);
 
       const interval = setInterval(() => {
-        // Generate random number 0-100 for visual effect
-        setDisplayNumber(Math.floor(Math.random() * 101));
+        // Generate random number 0-99 for visual effect (matching dice range)
+        setDisplayNumber(Math.floor(Math.random() * 100));
         frameCount++;
 
         if (frameCount >= maxFrames) {
@@ -63,9 +65,9 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
         ? Date.now() - animationStartTimeRef.current
         : 0;
 
-      // Calculate remaining animation time (minimum 0, to handle fast backend responses)
+      // Calculate remaining animation time with minimum display time to prevent jarring instant results
       const remainingTime = Math.max(
-        0,
+        ANIMATION_CONFIG.MIN_DISPLAY_TIME,
         ANIMATION_CONFIG.ROLL_DURATION + ANIMATION_CONFIG.RESULT_DELAY - elapsed
       );
 
