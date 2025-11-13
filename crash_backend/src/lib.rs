@@ -16,7 +16,6 @@ const MAX_BET: u64 = 10_000_000_000; // 100 ICP
 const HOUSE_EDGE: f64 = 0.03; // 3% house edge
 const MIN_MULTIPLIER: f64 = 1.01;
 const MAX_MULTIPLIER: f64 = 1000.0;
-const ROUND_DELAY_SECONDS: u64 = 10;
 
 #[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
 pub struct GameRound {

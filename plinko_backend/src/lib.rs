@@ -13,12 +13,6 @@ type Memory = VirtualMemory<DefaultMemoryImpl>;
 // Plinko game constants
 const MIN_BET: u64 = 100_000_000; // 1 ICP
 const MAX_BET: u64 = 10_000_000_000; // 100 ICP
-const HOUSE_EDGE: f64 = 0.03; // 3% house edge
-
-// Plinko board configurations
-const ROWS_8: u8 = 8;
-const ROWS_12: u8 = 12;
-const ROWS_16: u8 = 16;
 
 // Risk levels affect multipliers
 #[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
