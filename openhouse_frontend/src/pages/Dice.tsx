@@ -10,7 +10,7 @@ import {
   type GameStat,
 } from '../components/game-ui';
 import { DiceAnimation, DiceControls, type DiceDirection } from '../components/game-specific/dice';
-import { useGameMode, useGameState, useGameHistory } from '../hooks/games';
+import { useGameMode, useGameState } from '../hooks/games';
 import type { Principal } from '@dfinity/principal';
 
 interface DiceGameResult {
@@ -31,7 +31,8 @@ export const Dice: React.FC = () => {
   const { actor } = useDiceActor();
   const gameMode = useGameMode();
   const gameState = useGameState<DiceGameResult>();
-  const { history } = useGameHistory<DiceGameResult>(actor, 'get_recent_games', 10);
+  // Note: Disabled useGameHistory to prevent infinite loop - using gameState.history instead
+  // const { history } = useGameHistory<DiceGameResult>(actor, 'get_recent_games', 10);
 
   // Dice-specific state
   const [targetNumber, setTargetNumber] = useState(50);
@@ -64,12 +65,27 @@ export const Dice: React.FC = () => {
     updateOdds();
   }, [targetNumber, direction, actor]);
 
-  // Initialize history on mount
+  // Load initial game history on mount
   useEffect(() => {
-    if (history.length > 0) {
-      history.forEach(game => gameState.addToHistory(game));
-    }
-  }, [history]);
+    const loadHistory = async () => {
+      if (!actor) return;
+
+      try {
+        const games = await actor.get_recent_games(10);
+        // Add each game to history with a unique ID
+        games.forEach((game: DiceGameResult) => {
+          gameState.addToHistory({
+            ...game,
+            clientId: crypto.randomUUID()
+          });
+        });
+      } catch (err) {
+        console.error('Failed to load game history:', err);
+      }
+    };
+
+    loadHistory();
+  }, [actor]); // Only depend on actor, not gameState to avoid loops
 
   // Handle dice roll
   const rollDice = async () => {
@@ -83,9 +99,12 @@ export const Dice: React.FC = () => {
       const betAmountE8s = BigInt(Math.floor(gameState.betAmount * 100_000_000));
       const directionVariant = direction === 'Over' ? { Over: null } : { Under: null };
 
-      // Note: Client seed parameter was removed from TypeScript declarations
-      // TODO: Update declarations to match backend .did file
-      const result = await actor.play_dice(betAmountE8s, targetNumber, directionVariant);
+      // Generate client seed for provable fairness
+      const randomBytes = new Uint8Array(16);
+      crypto.getRandomValues(randomBytes);
+      const clientSeed = Array.from(randomBytes, byte => byte.toString(16).padStart(2, '0')).join('');
+
+      const result = await actor.play_dice(betAmountE8s, targetNumber, directionVariant, clientSeed);
 
       if ('Ok' in result) {
         setAnimatingResult(result.Ok.rolled_number);
