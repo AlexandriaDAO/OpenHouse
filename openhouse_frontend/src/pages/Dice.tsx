@@ -3,13 +3,9 @@ import useDiceActor from '../hooks/actors/useDiceActor';
 import {
   GameLayout,
   GameModeToggle,
-  BetAmountInput,
-  GameButton,
   GameHistory,
-  GameStats,
-  type GameStat,
 } from '../components/game-ui';
-import { DiceAnimation, DiceControls, DiceAccountingPanel, type DiceDirection } from '../components/game-specific/dice';
+import { DiceAnimation, DiceAccountingPanel, type DiceDirection } from '../components/game-specific/dice';
 import { useGameMode, useGameState } from '../hooks/games';
 import { useGameBalance } from '../providers/GameBalanceProvider';
 import { ConnectionStatus } from '../components/ui/ConnectionStatus';
@@ -160,13 +156,6 @@ export const Dice: React.FC = () => {
     gameState.setIsPlaying(false);
   }, []);
 
-  // Prepare stats for GameStats component
-  const stats: GameStat[] = [
-    { label: 'Win Chance', value: `${winChance.toFixed(2)}%`, highlight: true, color: 'yellow' },
-    { label: 'Multiplier', value: `${multiplier.toFixed(2)}x`, highlight: true, color: 'green' },
-    { label: 'Win Amount', value: `${(gameState.betAmount * multiplier).toFixed(2)} ICP` },
-  ];
-
   // Custom renderer for history items
   const renderHistoryItem = (item: DiceGameResult) => (
     <>
@@ -197,76 +186,152 @@ export const Dice: React.FC = () => {
         onBalanceChange={handleBalanceChange}
       />
 
-      {/* BETTING CONTROLS */}
-      <div className="card max-w-2xl mx-auto">
-        <BetAmountInput
-          value={gameState.betAmount}
-          onChange={gameState.setBetAmount}
-          min={0.01}
-          max={1}
-          disabled={gameState.isPlaying}
-          isPracticeMode={gameMode.isPracticeMode}
-          error={gameState.betError}
-        />
+      {/* UNIFIED COMPACT BETTING PANEL */}
+      <div className="card max-w-4xl mx-auto p-4">
+        <div className="grid grid-cols-2 gap-4">
 
-        <DiceControls
-          targetNumber={targetNumber}
-          onTargetChange={setTargetNumber}
-          direction={direction}
-          onDirectionChange={setDirection}
-          disabled={gameState.isPlaying}
-        />
+          {/* LEFT COLUMN: All Controls */}
+          <div className="space-y-3">
 
-        <GameStats stats={stats} />
-
-        <GameButton
-          onClick={rollDice}
-          disabled={!actor}
-          loading={gameState.isPlaying}
-          label="ROLL"
-          loadingLabel="Rolling..."
-          icon="🎲"
-        />
-
-        {gameState.gameError && (
-          <div className="mt-4 text-red-400 text-sm text-center">
-            {gameState.gameError}
-          </div>
-        )}
-      </div>
-
-      {/* Dice Animation */}
-      <div className="card max-w-2xl mx-auto">
-        <DiceAnimation
-          targetNumber={animatingResult}
-          isRolling={gameState.isPlaying}
-          onAnimationComplete={handleAnimationComplete}
-        />
-
-        {/* Win/Loss message */}
-        {gameState.lastResult && !gameState.isPlaying && (
-          <div className={`text-center mt-6 ${
-            gameState.lastResult.is_win ? 'text-green-400' : 'text-red-400'
-          }`}>
-            <div className="text-3xl font-bold mb-2">
-              {gameState.lastResult.is_win ? '🎉 WIN!' : '😢 LOSE'}
+            {/* BET AMOUNT SLIDER */}
+            <div>
+              <div className="flex justify-between items-center mb-1">
+                <label className="text-xs text-gray-400">Bet Amount</label>
+                <span className="font-mono text-sm">{gameState.betAmount.toFixed(2)} ICP</span>
+              </div>
+              <input
+                type="range"
+                min="0.01"
+                max="1"
+                step="0.01"
+                value={gameState.betAmount}
+                onChange={(e) => gameState.setBetAmount(parseFloat(e.target.value))}
+                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-turquoise"
+                disabled={gameState.isPlaying}
+              />
             </div>
-            {gameState.lastResult.is_win && (
-              <div className="text-xl">
-                +{(Number(gameState.lastResult.payout) / 100_000_000).toFixed(2)} ICP
+
+            {/* TARGET NUMBER SLIDER */}
+            <div>
+              <div className="flex justify-between items-center mb-1">
+                <label className="text-xs text-gray-400">Target Number</label>
+                <span className="font-mono text-sm">{targetNumber}</span>
+              </div>
+              <input
+                type="range"
+                min="1"
+                max="99"
+                value={targetNumber}
+                onChange={(e) => setTargetNumber(parseInt(e.target.value))}
+                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-turquoise"
+                disabled={gameState.isPlaying}
+              />
+            </div>
+
+            {/* DIRECTION TOGGLE - Compact */}
+            <div className="flex gap-1">
+              <button
+                onClick={() => setDirection('Over')}
+                disabled={gameState.isPlaying}
+                className={`flex-1 py-2 text-xs font-mono font-bold border transition rounded ${
+                  direction === 'Over'
+                    ? 'bg-green-600 border-green-600 text-white'
+                    : 'bg-transparent border-gray-600 text-gray-400'
+                }`}
+              >
+                OVER {targetNumber}
+              </button>
+              <button
+                onClick={() => setDirection('Under')}
+                disabled={gameState.isPlaying}
+                className={`flex-1 py-2 text-xs font-mono font-bold border transition rounded ${
+                  direction === 'Under'
+                    ? 'bg-red-600 border-red-600 text-white'
+                    : 'bg-transparent border-gray-600 text-gray-400'
+                }`}
+              >
+                UNDER {targetNumber}
+              </button>
+            </div>
+
+            {/* ROLL BUTTON */}
+            <button
+              onClick={rollDice}
+              disabled={!actor || gameState.isPlaying}
+              className="w-full py-3 bg-dfinity-turquoise hover:bg-dfinity-turquoise/80
+                        text-black font-bold rounded transition disabled:opacity-50"
+            >
+              {gameState.isPlaying ? '🎲 Rolling...' : '🎲 ROLL DICE'}
+            </button>
+          </div>
+
+          {/* RIGHT COLUMN: Live Stats & Animation */}
+          <div className="space-y-3">
+
+            {/* INLINE STATS - Always visible */}
+            <div className="bg-gray-900/50 rounded p-3">
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div>
+                  <div className="text-gray-500 text-xs">Win Chance</div>
+                  <div className="font-mono text-yellow-400">{winChance.toFixed(2)}%</div>
+                </div>
+                <div>
+                  <div className="text-gray-500 text-xs">Multiplier</div>
+                  <div className="font-mono text-green-400">{multiplier.toFixed(2)}x</div>
+                </div>
+                <div>
+                  <div className="text-gray-500 text-xs">Potential Win</div>
+                  <div className="font-mono">{(gameState.betAmount * multiplier).toFixed(2)} ICP</div>
+                </div>
+                <div>
+                  <div className="text-gray-500 text-xs">House Edge</div>
+                  <div className="font-mono text-gray-400">3%</div>
+                </div>
+              </div>
+            </div>
+
+            {/* DICE ANIMATION - Smaller */}
+            <div className="bg-gray-900/50 rounded p-3">
+              <DiceAnimation
+                targetNumber={animatingResult}
+                isRolling={gameState.isPlaying}
+                onAnimationComplete={handleAnimationComplete}
+                size="small"
+              />
+
+              {/* Result message inline */}
+              {gameState.lastResult && !gameState.isPlaying && (
+                <div className={`text-center mt-2 ${
+                  gameState.lastResult.is_win ? 'text-green-400' : 'text-red-400'
+                }`}>
+                  <span className="text-lg font-bold">
+                    {gameState.lastResult.is_win ? '🎉 WIN' : '😢 LOSE'}
+                    {gameState.lastResult.is_win && ` +${(Number(gameState.lastResult.payout) / 100_000_000).toFixed(2)} ICP`}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Error display */}
+            {gameState.gameError && (
+              <div className="text-red-400 text-xs">
+                {gameState.gameError}
               </div>
             )}
           </div>
-        )}
+        </div>
       </div>
 
-      {/* Game History */}
-      <GameHistory<DiceGameResult>
-        items={gameState.history}
-        maxDisplay={5}
-        title="Recent Rolls"
-        renderCustom={renderHistoryItem}
-      />
+      {/* COMPACT HISTORY - Below main panel */}
+      <div className="mt-4 max-w-4xl mx-auto">
+        <GameHistory<DiceGameResult>
+          items={gameState.history}
+          maxDisplay={3}
+          title="Recent Rolls"
+          renderCustom={renderHistoryItem}
+          compact={true}
+        />
+      </div>
     </GameLayout>
   );
 };

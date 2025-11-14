@@ -159,6 +159,81 @@
   }
 }
 
+/* Size variations */
+/* Small size */
+.dice-size-small .dice-container {
+  height: 150px;
+}
+
+.dice-size-small .dice-cube {
+  width: 80px;
+  height: 80px;
+}
+
+.dice-size-small .dice-face {
+  width: 80px;
+  height: 80px;
+  border-width: 1px;
+}
+
+.dice-size-small .dice-face-front  { transform: rotateY(0deg) translateZ(40px); }
+.dice-size-small .dice-face-back   { transform: rotateY(180deg) translateZ(40px); }
+.dice-size-small .dice-face-right  { transform: rotateY(90deg) translateZ(40px); }
+.dice-size-small .dice-face-left   { transform: rotateY(-90deg) translateZ(40px); }
+.dice-size-small .dice-face-top    { transform: rotateX(90deg) translateZ(40px); }
+.dice-size-small .dice-face-bottom { transform: rotateX(-90deg) translateZ(40px); }
+
+.dice-size-small .dice-dot {
+  width: 12px;
+  height: 12px;
+}
+
+.dice-size-small .dice-number-display {
+  font-size: 1.5rem;
+}
+
+.dice-size-small .result-glow-turquoise {
+  width: 120px;
+  height: 120px;
+}
+
+/* Large size */
+.dice-size-large .dice-container {
+  height: 400px;
+}
+
+.dice-size-large .dice-cube {
+  width: 200px;
+  height: 200px;
+}
+
+.dice-size-large .dice-face {
+  width: 200px;
+  height: 200px;
+  border-width: 3px;
+}
+
+.dice-size-large .dice-face-front  { transform: rotateY(0deg) translateZ(100px); }
+.dice-size-large .dice-face-back   { transform: rotateY(180deg) translateZ(100px); }
+.dice-size-large .dice-face-right  { transform: rotateY(90deg) translateZ(100px); }
+.dice-size-large .dice-face-left   { transform: rotateY(-90deg) translateZ(100px); }
+.dice-size-large .dice-face-top    { transform: rotateX(90deg) translateZ(100px); }
+.dice-size-large .dice-face-bottom { transform: rotateX(-90deg) translateZ(100px); }
+
+.dice-size-large .dice-dot {
+  width: 28px;
+  height: 28px;
+}
+
+.dice-size-large .dice-number-display {
+  font-size: 3.5rem;
+}
+
+.dice-size-large .result-glow-turquoise {
+  width: 280px;
+  height: 280px;
+}
+
 /* Accessibility */
 @media (prefers-reduced-motion: reduce) {
   .dice-cube.rolling-animation {

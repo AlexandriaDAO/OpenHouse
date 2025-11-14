@@ -14,6 +14,7 @@ interface DiceAnimationProps {
   targetNumber: number | null;
   isRolling: boolean;
   onAnimationComplete?: () => void;
+  size?: 'small' | 'medium' | 'large';
 }
 
 // Helper component for rendering dice dots
@@ -76,7 +77,8 @@ const DiceDots: React.FC<{ number: number }> = ({ number }) => {
 export const DiceAnimation: React.FC<DiceAnimationProps> = ({
   targetNumber,
   isRolling,
-  onAnimationComplete
+  onAnimationComplete,
+  size = 'medium'
 }) => {
   const [displayNumber, setDisplayNumber] = useState(0);
   const [animationPhase, setAnimationPhase] = useState<'idle' | 'rolling' | 'complete'>('idle');
@@ -162,8 +164,11 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
 
   const adjacentFaces = getAdjacentFaces(displayNumber);
 
+  // Determine size class
+  const sizeClass = `dice-size-${size}`;
+
   return (
-    <div className="dice-container">
+    <div className={`dice-container ${sizeClass}`}>
       {/* 3D dice cube with 6 faces */}
       <div className={`dice-cube ${animationPhase === 'rolling' ? 'rolling-animation' : ''}`}>
         {/* Front face (showing current number) */}
