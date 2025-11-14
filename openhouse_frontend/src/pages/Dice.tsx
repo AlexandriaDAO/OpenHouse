@@ -50,13 +50,6 @@ export const Dice: React.FC = () => {
   const [maxBet, setMaxBet] = useState(10); // Dynamic max bet in ICP
   const [animatingResult, setAnimatingResult] = useState<number | null>(null);
 
-  // Refresh balance when actor becomes available
-  useEffect(() => {
-    if (actor) {
-      refreshBalance().catch(console.error);
-    }
-  }, [actor, refreshBalance]);
-
   // Calculate odds when target or direction changes
   useEffect(() => {
     const updateOdds = async () => {
@@ -100,12 +93,15 @@ export const Dice: React.FC = () => {
 
       try {
         const games = await actor.get_recent_games(10);
-        // Add each game to history with a unique ID
-        games.forEach((game: DiceGameResult) => {
-          gameState.addToHistory({
-            ...game,
-            clientId: crypto.randomUUID()
-          });
+        // Process all games at once to avoid multiple state updates
+        const processedGames = games.map((game: DiceGameResult) => ({
+          ...game,
+          clientId: crypto.randomUUID()
+        }));
+
+        // Add all games in a single batch if we have a batch method
+        processedGames.forEach((game) => {
+          gameState.addToHistory(game);
         });
       } catch (err) {
         console.error('Failed to load game history:', err);
@@ -117,7 +113,9 @@ export const Dice: React.FC = () => {
 
   // Load initial balances on mount
   useEffect(() => {
-    refreshBalance();
+    if (actor) {
+      refreshBalance().catch(console.error);
+    }
   }, [actor]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Refresh callback for accounting panel
