@@ -38,7 +38,6 @@ export const Dice: React.FC = () => {
   const balance = gameBalanceContext.balance;
   const refreshBalance = gameBalanceContext.refresh;
   const optimisticUpdate = gameBalanceContext.optimisticUpdate;
-  const verifyAndSync = gameBalanceContext.verifyAndSync;
   // Note: Disabled useGameHistory to prevent infinite loop - using gameState.history instead
   // const { history } = useGameHistory<DiceGameResult>(actor, 'get_recent_games', 10);
 
@@ -145,10 +144,7 @@ export const Dice: React.FC = () => {
           });
         }
 
-        // Schedule background verification after 2 seconds
-        setTimeout(() => {
-          verifyAndSync();
-        }, 2000);
+        // Note: Background verification is handled automatically by GameBalanceProvider
       } else {
         gameState.setGameError(result.Err);
         gameState.setIsPlaying(false);

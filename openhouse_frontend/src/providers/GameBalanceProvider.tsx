@@ -84,16 +84,10 @@ export const GameBalanceProvider: React.FC<GameBalanceProviderProps> = ({ childr
 
   // Fetch balances for a specific game
   const fetchBalances = useCallback(async (game: GameType): Promise<BalanceFetchResult> => {
-    if (!ledgerActor || !principal) {
-      throw new Error(`Cannot fetch balances: missing dependencies for ${game}`);
-    }
-
     try {
-      // Convert principal string to Principal object
-      const principalObj = Principal.fromText(principal);
-
       let gameBalance: bigint;
       let houseBalance: bigint;
+      let walletBalance: bigint = BigInt(0);
 
       // Handle each game type separately with proper typing
       switch (game) {
@@ -129,11 +123,19 @@ export const GameBalanceProvider: React.FC<GameBalanceProviderProps> = ({ childr
           throw new Error(`Unknown game type: ${game}`);
       }
 
-      // Fetch wallet balance
-      const walletBalance = await ledgerActor.icrc1_balance_of({
-        owner: principalObj,
-        subaccount: [],
-      });
+      // Try to fetch wallet balance (optional - may not be available if not authenticated)
+      if (ledgerActor && principal) {
+        try {
+          const principalObj = Principal.fromText(principal);
+          walletBalance = await ledgerActor.icrc1_balance_of({
+            owner: principalObj,
+            subaccount: [],
+          });
+        } catch (walletError) {
+          console.warn('Failed to fetch wallet balance:', walletError);
+          // Continue with default walletBalance of 0
+        }
+      }
 
       return {
         wallet: walletBalance,
@@ -211,7 +213,14 @@ export const GameBalanceProvider: React.FC<GameBalanceProviderProps> = ({ childr
           newValue = currentBalance[update.field] + update.amount;
           break;
         case 'subtract':
-          newValue = currentBalance[update.field] - update.amount;
+          // Prevent negative balances (critical for mainnet safety)
+          const result = currentBalance[update.field] - update.amount;
+          if (result < BigInt(0)) {
+            console.error(`Attempted negative balance for ${game}.${update.field}: ${currentBalance[update.field]} - ${update.amount}`);
+            newValue = BigInt(0); // Clamp to zero
+          } else {
+            newValue = result;
+          }
           break;
         case 'set':
           newValue = update.amount;
@@ -245,27 +254,45 @@ export const GameBalanceProvider: React.FC<GameBalanceProviderProps> = ({ childr
 
   // Verify and sync with backend
   const verifyAndSync = useCallback(async (game: GameType): Promise<boolean> => {
-    setState(prev => ({
-      ...prev,
-      status: {
-        ...prev.status,
-        [game]: { ...prev.status[game], syncing: true },
-      },
-    }));
+    // Check if the required actor is available
+    const actorAvailable =
+      (game === 'dice' && diceActor) ||
+      (game === 'crash' && crashActor) ||
+      (game === 'plinko' && plinkoActor) ||
+      (game === 'mines' && minesActor);
+
+    if (!actorAvailable) {
+      console.warn(`Actor not available for ${game}, skipping verification`);
+      return false;
+    }
+
+    // Capture optimistic balance at the time of starting sync
+    let capturedOptimisticBalance: GameBalance | null = null;
+
+    setState(prev => {
+      capturedOptimisticBalance = prev.optimisticBalances[game] || null;
+      return {
+        ...prev,
+        status: {
+          ...prev.status,
+          [game]: { ...prev.status[game], syncing: true },
+        },
+      };
+    });
 
     try {
       const result = await fetchBalances(game);
-      const optimisticBalance = state.optimisticBalances[game];
 
-      // Check if there's a mismatch
-      if (optimisticBalance) {
-        const gameBalanceMismatch = optimisticBalance.game !== result.game;
-        const houseBalanceMismatch = optimisticBalance.house !== result.house;
+      // Check if there's a mismatch with the captured optimistic balance
+      if (capturedOptimisticBalance !== null) {
+        const optimBalance = capturedOptimisticBalance as GameBalance;
+        const gameBalanceMismatch = optimBalance.game !== result.game;
+        const houseBalanceMismatch = optimBalance.house !== result.house;
 
         if (gameBalanceMismatch || houseBalanceMismatch) {
           // Log the mismatch but sync to actual values
           console.warn(`Balance mismatch detected for ${game}:`, {
-            optimistic: { game: optimisticBalance.game, house: optimisticBalance.house },
+            optimistic: { game: optimBalance.game, house: optimBalance.house },
             actual: { game: result.game, house: result.house },
           });
 
@@ -325,7 +352,7 @@ export const GameBalanceProvider: React.FC<GameBalanceProviderProps> = ({ childr
       }));
       return false; // Sync failed
     }
-  }, [fetchBalances, state.optimisticBalances]);
+  }, [fetchBalances, diceActor, crashActor, plinkoActor, minesActor]);
 
   // Retry last operation
   const retryLastOperation = useCallback(async (game: GameType) => {
@@ -355,14 +382,13 @@ export const GameBalanceProvider: React.FC<GameBalanceProviderProps> = ({ childr
 
   const getLastUpdated = useCallback((game: GameType) => state.lastUpdated[game], [state.lastUpdated]);
 
-  // Auto-refresh on mount and when principal changes
+  // Auto-refresh on mount and when actors are ready
   useEffect(() => {
-    if (principal) {
-      // Only refresh dice initially as it's the active game
-      // Other games will refresh when their pages are visited
+    // Only refresh dice initially if the actor is available
+    if (diceActor) {
       refreshBalances('dice').catch(console.error);
     }
-  }, [principal]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [diceActor]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cleanup timers on unmount
   useEffect(() => {
