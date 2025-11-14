@@ -13,23 +13,22 @@ interface BetAmountInputProps {
 export const BetAmountInput: React.FC<BetAmountInputProps> = ({
   value,
   onChange,
-  min = 0.1,
-  max = 100,
+  min = 0.01,
+  max = 1,
   disabled = false,
   isPracticeMode = false,
   error,
 }) => {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = parseFloat(e.target.value) || 0;
-    onChange(newValue);
+    // Clamp value between min and max
+    const clampedValue = Math.min(Math.max(newValue, min), max);
+    onChange(clampedValue);
   };
-
-  // Quick bet buttons
-  const quickBets = [1, 5, 10, 25, 50];
 
   return (
     <div className="mb-4">
-      <label className="block text-sm text-gray-400 mb-2">
+      <label className="block text-sm text-pure-white/60 mb-2 font-mono">
         Bet Amount {isPracticeMode ? '(Practice)' : ''} (ICP)
       </label>
 
@@ -37,29 +36,19 @@ export const BetAmountInput: React.FC<BetAmountInputProps> = ({
         type="number"
         min={min}
         max={max}
-        step="0.1"
+        step="0.01"
         value={value}
         onChange={handleChange}
-        className="w-full bg-casino-primary border border-casino-accent rounded px-4 py-3 text-lg"
+        className="w-full bg-transparent border-2 border-pure-white/20 text-pure-white
+                   focus:border-dfinity-turquoise focus:outline-none
+                   font-mono px-4 py-3 text-lg
+                   disabled:opacity-50 disabled:cursor-not-allowed"
         disabled={disabled}
+        placeholder="0.00"
       />
 
-      {/* Quick bet buttons */}
-      <div className="flex gap-2 mt-2">
-        {quickBets.map(amount => (
-          <button
-            key={amount}
-            onClick={() => onChange(amount)}
-            disabled={disabled}
-            className="flex-1 py-1 text-xs bg-casino-secondary hover:bg-casino-accent rounded transition disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {amount}
-          </button>
-        ))}
-      </div>
-
       {error && (
-        <div className="text-red-400 text-sm mt-2">
+        <div className="text-dfinity-red text-sm mt-2 font-mono">
           {error}
         </div>
       )}
