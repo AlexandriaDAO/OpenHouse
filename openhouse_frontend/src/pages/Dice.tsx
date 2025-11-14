@@ -192,6 +192,8 @@ export const Dice: React.FC = () => {
         <BetAmountInput
           value={gameState.betAmount}
           onChange={gameState.setBetAmount}
+          min={0.01}
+          max={1}
           disabled={gameState.isPlaying}
           isPracticeMode={gameMode.isPracticeMode}
           error={gameState.betError}
