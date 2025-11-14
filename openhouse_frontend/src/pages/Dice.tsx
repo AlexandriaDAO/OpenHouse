@@ -69,14 +69,20 @@ export const Dice: React.FC = () => {
           gameState.setGameError(result.Err);
         }
 
-        // Get max bet (NEW)
-        const maxBetE8s = await actor.get_max_bet(targetNumber, directionVariant);
-        const maxBetICP = Number(maxBetE8s) / 100_000_000;
-        setMaxBet(maxBetICP);
+        // Get max bet (NEW) - with error handling
+        try {
+          const maxBetE8s = await actor.get_max_bet(targetNumber, directionVariant);
+          const maxBetICP = Number(maxBetE8s) / 100_000_000;
+          setMaxBet(maxBetICP);
 
-        // Adjust current bet if it exceeds new max (NEW)
-        if (gameState.betAmount > maxBetICP) {
-          gameState.setBetAmount(maxBetICP);
+          // Adjust current bet if it exceeds new max (NEW)
+          if (gameState.betAmount > maxBetICP) {
+            gameState.setBetAmount(maxBetICP);
+          }
+        } catch (maxBetError) {
+          console.error('Failed to get max bet, using default:', maxBetError);
+          // Use a safe default if the call fails
+          setMaxBet(10);
         }
       } catch (err) {
         console.error('Failed to calculate odds:', err);
