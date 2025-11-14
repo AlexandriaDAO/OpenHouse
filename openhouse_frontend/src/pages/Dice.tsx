@@ -32,7 +32,7 @@ interface DiceGameResult {
 export const Dice: React.FC = () => {
   const { actor } = useDiceActor();
   const gameMode = useGameMode();
-  const gameState = useGameState<DiceGameResult>();
+  const gameState = useGameState<DiceGameResult>(0.01, 100);
   // Use global balance state
   const gameBalanceContext = useGameBalance('dice');
   const balance = gameBalanceContext.balance;
@@ -203,10 +203,11 @@ export const Dice: React.FC = () => {
           value={gameState.betAmount}
           onChange={gameState.setBetAmount}
           min={0.01}
-          max={1}
+          max={100}
           disabled={gameState.isPlaying}
           isPracticeMode={gameMode.isPracticeMode}
           error={gameState.betError}
+          variant="slider"
         />
 
         <DiceControls

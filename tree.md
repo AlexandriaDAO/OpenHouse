@@ -1,38 +1,24 @@
 # OpenHouse Casino - Project Structure
 
-Generated on: 2025-11-13T13:00:55.154Z
+Generated on: 2025-11-14T14:13:22.277Z
 
 ```
-├── .claude/
-│   ├── settings.local.json (37 lines)
-│   └── workflows/
-│       └── plan-pursuit-methodology-condensed.md (289 lines)
-├── CLAUDE.md (347 lines)
-├── Cargo.toml (13 lines)
-├── DAOPAD_DEPLOYMENT_ANALYSIS.md (581 lines)
-├── DAOPAD_DEPLOYMENT_EXECUTIVE_SUMMARY.txt (319 lines)
-├── DICE_GAME_IMPLEMENTATION_PLAN.md (633 lines)
-├── INSTANT_DICE_RANDOMNESS_PLAN.md (436 lines)
-├── canister_ids.json (17 lines)
 ├── crash_backend/
 │   ├── Cargo.toml (17 lines)
 │   ├── crash_backend.did (49 lines)
 │   └── src/
-│       └── lib.rs (292 lines)
-├── daopad_deployment_analysis.md (581 lines)
-├── daopad_deployment_summary.txt (317 lines)
-├── deploy.sh (315 lines)
-├── dfx.json (48 lines)
+│       └── lib.rs (291 lines)
 ├── dice_backend/
-│   ├── Cargo.toml (18 lines)
-│   ├── dice_backend.did (44 lines)
+│   ├── Cargo.toml (19 lines)
+│   ├── dice_backend.did (62 lines)
 │   └── src/
-│       └── lib.rs (651 lines)
+│       ├── accounting.rs (380 lines)
+│       └── lib.rs (724 lines)
 ├── mines_backend/
-│   ├── Cargo.toml (17 lines)
-│   ├── mines_backend.did (30 lines)
+│   ├── Cargo.toml (16 lines)
+│   ├── mines_backend.did (49 lines)
 │   └── src/
-│       └── lib.rs (185 lines)
+│       └── lib.rs (630 lines)
 ├── openhouse_frontend/
 │   ├── BALANCE_GUIDE.md (297 lines)
 │   ├── build-auth.js (16 lines)
@@ -40,141 +26,76 @@ Generated on: 2025-11-13T13:00:55.154Z
 │   ├── package.json (33 lines)
 │   ├── postcss.config.js (7 lines)
 │   ├── src/
-│   │   ├── App.tsx (35 lines)
+│   │   ├── App.backup.tsx (35 lines)
+│   │   ├── App.tsx (38 lines)
 │   │   ├── components/
 │   │   │   ├── AuthButton.tsx (120 lines)
+│   │   │   ├── DiceAnimation.css (103 lines)
+│   │   │   ├── DiceAnimation.tsx (123 lines)
 │   │   │   ├── GameCard.tsx (42 lines)
-│   │   │   └── Layout.tsx (64 lines)
-│   │   ├── declarations/
-│   │   │   ├── crash_backend/
-│   │   │   │   ├── crash_backend.did (49 lines)
-│   │   │   │   ├── crash_backend.did.d.ts (51 lines)
-│   │   │   │   ├── crash_backend.did.js (66 lines)
-│   │   │   │   ├── index.d.ts (51 lines)
-│   │   │   │   └── index.js (43 lines)
-│   │   │   ├── crash_frontend/
-│   │   │   │   ├── crash_frontend.did (268 lines)
-│   │   │   │   ├── crash_frontend.did.d.ts (247 lines)
-│   │   │   │   ├── crash_frontend.did.js (299 lines)
-│   │   │   │   ├── index.d.ts (51 lines)
-│   │   │   │   └── index.js (43 lines)
-│   │   │   ├── dice_backend/
-│   │   │   │   ├── dice_backend.did (39 lines)
-│   │   │   │   ├── dice_backend.did.d.ts (43 lines)
-│   │   │   │   ├── dice_backend.did.js (48 lines)
-│   │   │   │   ├── index.d.ts (51 lines)
-│   │   │   │   └── index.js (43 lines)
-│   │   │   ├── mines_backend/
-│   │   │   │   ├── index.d.ts (51 lines)
-│   │   │   │   ├── index.js (43 lines)
-│   │   │   │   ├── mines_backend.did (30 lines)
-│   │   │   │   ├── mines_backend.did.d.ts (34 lines)
-│   │   │   │   └── mines_backend.did.js (31 lines)
-│   │   │   ├── openhouse_frontend/
-│   │   │   │   ├── index.d.ts (51 lines)
-│   │   │   │   ├── index.js (43 lines)
-│   │   │   │   ├── openhouse_frontend.did (268 lines)
-│   │   │   │   ├── openhouse_frontend.did.d.ts (247 lines)
-│   │   │   │   └── openhouse_frontend.did.js (299 lines)
-│   │   │   └── plinko_backend/
-│   │   │       ├── index.d.ts (51 lines)
-│   │   │       ├── index.js (43 lines)
-│   │   │       ├── plinko_backend.did (37 lines)
-│   │   │       ├── plinko_backend.did.d.ts (38 lines)
-│   │   │       └── plinko_backend.did.js (45 lines)
+│   │   │   ├── Layout.tsx (77 lines)
+│   │   │   ├── game-specific/
+│   │   │   │   └── dice/
+│   │   │   │       ├── DiceAccountingPanel.tsx (221 lines)
+│   │   │   │       ├── DiceAnimation.css (171 lines)
+│   │   │   │       ├── DiceAnimation.tsx (207 lines)
+│   │   │   │       ├── DiceControls.tsx (67 lines)
+│   │   │   │       └── index.ts (4 lines)
+│   │   │   ├── game-ui/
+│   │   │   │   ├── AuthNotice.tsx (27 lines)
+│   │   │   │   ├── BetAmountInput.tsx (97 lines)
+│   │   │   │   ├── ConnectionStatus.tsx (61 lines)
+│   │   │   │   ├── GameButton.tsx (67 lines)
+│   │   │   │   ├── GameHistory.tsx (69 lines)
+│   │   │   │   ├── GameLayout.tsx (40 lines)
+│   │   │   │   ├── GameModeToggle.tsx (58 lines)
+│   │   │   │   ├── GameStats.tsx (73 lines)
+│   │   │   │   └── index.ts (9 lines)
+│   │   │   └── ui/
+│   │   │       └── ConnectionStatus.tsx (196 lines)
 │   │   ├── hooks/
-│   │   │   └── actors/
-│   │   │       ├── useCrashActor.ts (14 lines)
-│   │   │       ├── useDiceActor.ts (14 lines)
-│   │   │       ├── useLedgerActor.ts (14 lines)
-│   │   │       ├── useMinesActor.ts (14 lines)
-│   │   │       └── usePlinkoActor.ts (14 lines)
-│   │   ├── index.css (28 lines)
+│   │   │   ├── actors/
+│   │   │   │   ├── useCrashActor.ts (14 lines)
+│   │   │   │   ├── useDiceActor.ts (14 lines)
+│   │   │   │   ├── useLedgerActor.ts (14 lines)
+│   │   │   │   ├── useMinesActor.ts (14 lines)
+│   │   │   │   └── usePlinkoActor.ts (14 lines)
+│   │   │   └── games/
+│   │   │       ├── index.ts (5 lines)
+│   │   │       ├── useBetValidation.ts (70 lines)
+│   │   │       ├── useGameHistory.ts (47 lines)
+│   │   │       ├── useGameMode.ts (30 lines)
+│   │   │       └── useGameState.ts (106 lines)
+│   │   ├── index.css (89 lines)
 │   │   ├── main.tsx (11 lines)
 │   │   ├── pages/
 │   │   │   ├── Crash.tsx (140 lines)
-│   │   │   ├── Dice.tsx (547 lines)
-│   │   │   ├── Home.tsx (103 lines)
+│   │   │   ├── Dice.backup.tsx (225 lines)
+│   │   │   ├── Dice.tsx (273 lines)
+│   │   │   ├── Home.tsx (61 lines)
 │   │   │   ├── Mines.tsx (144 lines)
 │   │   │   └── Plinko.tsx (148 lines)
 │   │   ├── providers/
-│   │   │   ├── ActorProvider.tsx (104 lines)
+│   │   │   ├── ActorProvider.tsx (106 lines)
 │   │   │   ├── AuthProvider.tsx (127 lines)
-│   │   │   └── BalanceProvider.tsx (83 lines)
+│   │   │   ├── BalanceProvider.tsx (85 lines)
+│   │   │   └── GameBalanceProvider.tsx (470 lines)
 │   │   ├── types/
+│   │   │   ├── balance.ts (85 lines)
 │   │   │   └── ledger.ts (35 lines)
 │   │   ├── types.ts (19 lines)
 │   │   └── utils/
 │   │       └── ledgerIdl.ts (24 lines)
-│   ├── tailwind.config.js (21 lines)
+│   ├── tailwind.config.js (32 lines)
 │   ├── tsconfig.json (33 lines)
 │   ├── tsconfig.node.json (11 lines)
 │   └── vite.config.ts (34 lines)
-├── package.json (22 lines)
 ├── plinko_backend/
-│   ├── Cargo.toml (17 lines)
-│   ├── plinko_backend.did (37 lines)
+│   ├── Cargo.toml (15 lines)
+│   ├── plinko_backend.did (26 lines)
 │   └── src/
-│       └── lib.rs (323 lines)
-├── scripts/
-├── src/
-│   ├── crash_backend/
-│   │   ├── Cargo.toml (15 lines)
-│   │   ├── crash_backend.did (4 lines)
-│   │   └── src/
-│   │       └── lib.rs (5 lines)
-│   ├── crash_frontend/
-│   │   ├── index.html (21 lines)
-│   │   ├── package.json (31 lines)
-│   │   ├── public/
-│   │   │   ├── .ic-assets.json5 (54 lines)
-│   │   │   ├── favicon.ico (4 lines)
-│   │   │   └── logo2.svg (38 lines)
-│   │   ├── src/
-│   │   │   ├── App.jsx (32 lines)
-│   │   │   ├── index.scss (42 lines)
-│   │   │   ├── main.jsx (11 lines)
-│   │   │   └── vite-env.d.ts (2 lines)
-│   │   ├── tsconfig.json (22 lines)
-│   │   └── vite.config.js (45 lines)
-│   └── declarations/
-│       ├── crash_backend/
-│       │   ├── crash_backend.did (49 lines)
-│       │   ├── crash_backend.did.d.ts (51 lines)
-│       │   ├── crash_backend.did.js (66 lines)
-│       │   ├── index.d.ts (51 lines)
-│       │   └── index.js (43 lines)
-│       ├── crash_frontend/
-│       │   ├── crash_frontend.did (268 lines)
-│       │   ├── crash_frontend.did.d.ts (247 lines)
-│       │   ├── crash_frontend.did.js (299 lines)
-│       │   ├── index.d.ts (51 lines)
-│       │   └── index.js (43 lines)
-│       ├── dice_backend/
-│       │   ├── dice_backend.did (39 lines)
-│       │   ├── dice_backend.did.d.ts (43 lines)
-│       │   ├── dice_backend.did.js (48 lines)
-│       │   ├── index.d.ts (51 lines)
-│       │   └── index.js (43 lines)
-│       ├── mines_backend/
-│       │   ├── index.d.ts (51 lines)
-│       │   ├── index.js (43 lines)
-│       │   ├── mines_backend.did (30 lines)
-│       │   ├── mines_backend.did.d.ts (34 lines)
-│       │   └── mines_backend.did.js (31 lines)
-│       ├── openhouse_frontend/
-│       │   ├── index.d.ts (51 lines)
-│       │   ├── index.js (43 lines)
-│       │   ├── openhouse_frontend.did (268 lines)
-│       │   ├── openhouse_frontend.did.d.ts (247 lines)
-│       │   └── openhouse_frontend.did.js (299 lines)
-│       └── plinko_backend/
-│           ├── index.d.ts (51 lines)
-│           ├── index.js (43 lines)
-│           ├── plinko_backend.did (37 lines)
-│           ├── plinko_backend.did.d.ts (38 lines)
-│           └── plinko_backend.did.js (45 lines)
-└── tsconfig.json (12 lines)
+│       └── lib.rs (272 lines)
+└── scripts/
 
 ```
 

@@ -127,96 +127,91 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
 
   if (!isAuthenticated) {
     return (
-      <div className="card max-w-2xl mx-auto">
-        <p className="text-center text-gray-400">Please log in to manage funds</p>
+      <div className="card max-w-2xl mx-auto p-3">
+        <p className="text-center text-gray-400 text-sm">Please log in to manage funds</p>
       </div>
     );
   }
 
   return (
-    <div className="card max-w-2xl mx-auto">
-      <h3 className="text-xl font-bold mb-4 text-center">💰 Manage Funds</h3>
-
-      {/* Balance Display */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
-        <div className="bg-purple-900/20 p-4 rounded-lg border border-purple-500/30">
-          <p className="text-sm text-gray-400 mb-1">Wallet Balance</p>
-          <p className="text-2xl font-bold text-purple-400">{formatBalance(walletBalance)} ICP</p>
+    <div className="card max-w-2xl mx-auto p-4">
+      {/* Compact Balance Display */}
+      <div className="grid grid-cols-3 gap-2 mb-3">
+        <div className="bg-purple-900/10 p-2 rounded border border-purple-500/20">
+          <p className="text-xs text-gray-400">Wallet</p>
+          <p className="text-sm font-bold text-purple-400">{formatBalance(walletBalance)}</p>
         </div>
-        <div className="bg-green-900/20 p-4 rounded-lg border border-green-500/30">
-          <div className="flex items-center justify-between mb-1">
-            <p className="text-sm text-gray-400">Dice Balance</p>
+        <div className="bg-green-900/10 p-2 rounded border border-green-500/20">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-gray-400">Dice</p>
             <ConnectionStatusMini game="dice" />
           </div>
-          <p className="text-2xl font-bold text-green-400">{formatBalance(gameBalance)} ICP</p>
+          <p className="text-sm font-bold text-green-400">{formatBalance(gameBalance)}</p>
         </div>
-        <div className="bg-yellow-900/20 p-4 rounded-lg border border-yellow-500/30">
-          <div className="flex items-center justify-between mb-1">
-            <p className="text-sm text-gray-400">House Pot</p>
+        <div className="bg-yellow-900/10 p-2 rounded border border-yellow-500/20">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-gray-400">House</p>
             <ConnectionStatusMini game="dice" />
           </div>
-          <p className="text-2xl font-bold text-yellow-400">{formatBalance(houseBalance)} ICP</p>
+          <p className="text-sm font-bold text-yellow-400">{formatBalance(houseBalance)}</p>
         </div>
       </div>
 
-      {/* Deposit Section */}
-      <div className="mb-6">
-        <label className="block text-sm font-medium mb-2">Deposit to Dice Game</label>
-        <div className="flex gap-2">
+      {/* Compact Deposit/Withdraw Combined */}
+      <div className="flex gap-2 items-end">
+        {/* Deposit */}
+        <div className="flex-1">
           <input
             type="number"
             value={depositAmount}
             onChange={(e) => setDepositAmount(e.target.value)}
-            className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2"
-            placeholder="Amount in ICP"
+            className="w-full bg-gray-800/50 border border-gray-700/50 rounded px-2 py-1 text-sm"
+            placeholder="Deposit"
             min="0.1"
             step="0.01"
             disabled={isDepositing}
           />
-          <button
-            onClick={handleDeposit}
-            disabled={isDepositing}
-            className="px-6 py-2 bg-purple-600 hover:bg-purple-700 rounded font-bold disabled:opacity-50"
-          >
-            {isDepositing ? 'Depositing...' : 'Deposit'}
-          </button>
         </div>
-        <p className="text-xs text-gray-500 mt-1">Minimum: 0.1 ICP</p>
-      </div>
+        <button
+          onClick={handleDeposit}
+          disabled={isDepositing}
+          className="px-3 py-1 bg-purple-600/80 hover:bg-purple-600 rounded text-xs font-bold disabled:opacity-50 transition"
+          title="Deposit ICP to Dice Game"
+        >
+          {isDepositing ? '↓...' : '↓ Deposit'}
+        </button>
 
-      {/* Withdraw Section */}
-      <div className="mb-6">
-        <label className="block text-sm font-medium mb-2">Withdraw from Dice Game</label>
-        <div className="flex gap-2">
+        {/* Withdraw */}
+        <div className="flex-1">
           <input
             type="number"
             value={withdrawAmount}
             onChange={(e) => setWithdrawAmount(e.target.value)}
-            className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2"
-            placeholder="Amount in ICP"
+            className="w-full bg-gray-800/50 border border-gray-700/50 rounded px-2 py-1 text-sm"
+            placeholder="Withdraw"
             min="0.1"
             step="0.01"
             disabled={isWithdrawing}
           />
-          <button
-            onClick={handleWithdraw}
-            disabled={isWithdrawing}
-            className="px-6 py-2 bg-green-600 hover:bg-green-700 rounded font-bold disabled:opacity-50"
-          >
-            {isWithdrawing ? 'Withdrawing...' : 'Withdraw'}
-          </button>
         </div>
-        <p className="text-xs text-gray-500 mt-1">Minimum: 0.1 ICP (fee: 0.0001 ICP)</p>
+        <button
+          onClick={handleWithdraw}
+          disabled={isWithdrawing}
+          className="px-3 py-1 bg-green-600/80 hover:bg-green-600 rounded text-xs font-bold disabled:opacity-50 transition"
+          title="Withdraw ICP from Dice Game"
+        >
+          {isWithdrawing ? '↑...' : '↑ Withdraw'}
+        </button>
       </div>
 
-      {/* Messages */}
+      {/* Compact Messages */}
       {error && (
-        <div className="bg-red-900/20 border border-red-500 text-red-400 px-4 py-3 rounded">
+        <div className="bg-red-900/10 border border-red-500/50 text-red-400 px-2 py-1 rounded mt-2 text-xs">
           {error}
         </div>
       )}
       {success && (
-        <div className="bg-green-900/20 border border-green-500 text-green-400 px-4 py-3 rounded">
+        <div className="bg-green-900/10 border border-green-500/50 text-green-400 px-2 py-1 rounded mt-2 text-xs">
           {success}
         </div>
       )}

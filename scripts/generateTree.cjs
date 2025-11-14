@@ -12,7 +12,8 @@ const ignoreDirs = [
   '.next',
   'build',
   'deps',        // Rust dependencies
-  '.cargo'
+  '.cargo',
+  'declarations' // Auto-generated type declarations
 ];
 
 // File prefixes to ignore
@@ -31,6 +32,16 @@ const ignoreFilePrefixes = [
   '.DS_Store'    // Mac files
 ];
 
+// Only show these directories at the root level
+const rootLevelDirs = [
+  'crash_backend',
+  'plinko_backend',
+  'mines_backend',
+  'dice_backend',
+  'openhouse_frontend',
+  'scripts'
+];
+
 // Function to count lines in a file
 const countLines = (filePath) => {
   try {
@@ -41,7 +52,7 @@ const countLines = (filePath) => {
   }
 };
 
-const createTree = (dir, indent = '') => {
+const createTree = (dir, indent = '', isRoot = false) => {
   let tree = '';
   let files;
 
@@ -52,9 +63,23 @@ const createTree = (dir, indent = '') => {
     return '';
   }
 
-  const filteredFiles = files
+  let filteredFiles = files
     .filter(file => !ignoreDirs.includes(file))
     .filter(file => !ignoreFilePrefixes.some(prefix => file.startsWith(prefix)));
+
+  // At root level, only show specific directories
+  if (isRoot) {
+    filteredFiles = filteredFiles.filter(file => {
+      const fullPath = path.join(dir, file);
+      try {
+        const stats = fs.statSync(fullPath);
+        // Only include directories that are in the rootLevelDirs list
+        return stats.isDirectory() && rootLevelDirs.includes(file);
+      } catch (e) {
+        return false;
+      }
+    });
+  }
 
   filteredFiles.forEach((file, index) => {
     const fullPath = path.join(dir, file);
@@ -71,7 +96,7 @@ const createTree = (dir, indent = '') => {
 
     if (stats.isDirectory()) {
       tree += `${indent}${lineEnd}${file}/\n`;
-      tree += createTree(fullPath, `${indent}${isLastFile ? '    ' : '│   '}`);
+      tree += createTree(fullPath, `${indent}${isLastFile ? '    ' : '│   '}`, false);
     } else {
       // Count lines for files and add the count in parentheses
       const lineCount = countLines(fullPath);
@@ -84,7 +109,7 @@ const createTree = (dir, indent = '') => {
 
 // Generate the tree
 console.log('Generating OpenHouse project tree...');
-const tree = createTree('.', '');
+const tree = createTree('.', '', true);
 
 // Write to tree.md in markdown format
 const markdownContent = `# OpenHouse Casino - Project Structure

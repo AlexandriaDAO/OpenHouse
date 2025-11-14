@@ -8,6 +8,7 @@ interface BetAmountInputProps {
   disabled?: boolean;
   isPracticeMode?: boolean;
   error?: string;
+  variant?: 'input' | 'slider';
 }
 
 export const BetAmountInput: React.FC<BetAmountInputProps> = ({
@@ -18,6 +19,7 @@ export const BetAmountInput: React.FC<BetAmountInputProps> = ({
   disabled = false,
   isPracticeMode = false,
   error,
+  variant = 'input',
 }) => {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = parseFloat(e.target.value) || 0;
@@ -25,6 +27,43 @@ export const BetAmountInput: React.FC<BetAmountInputProps> = ({
     const clampedValue = Math.min(Math.max(newValue, min), max);
     onChange(clampedValue);
   };
+
+  const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = parseFloat(e.target.value);
+    onChange(newValue);
+  };
+
+  if (variant === 'slider') {
+    return (
+      <div className="mb-4">
+        <label className="block text-sm text-pure-white/60 mb-2 font-mono">
+          Bet Amount {isPracticeMode ? '(Practice)' : ''}: {value.toFixed(2)} ICP
+        </label>
+
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step="0.01"
+          value={value}
+          onChange={handleSliderChange}
+          className="w-full slider-turquoise"
+          disabled={disabled}
+        />
+
+        <div className="flex justify-between text-xs text-pure-white/40 font-mono mt-1">
+          <span>{min} ICP</span>
+          <span>{max} ICP</span>
+        </div>
+
+        {error && (
+          <div className="text-dfinity-red text-sm mt-2 font-mono">
+            {error}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="mb-4">
