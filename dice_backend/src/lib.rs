@@ -252,6 +252,12 @@ fn pre_upgrade() {
     // Seed state is already in stable cells - no action needed
     // StableCell and StableBTreeMap handle persistence automatically
 
+    // P0-3 fix: Save heartbeat state to stable storage before upgrade
+    let last_refresh = LAST_HEARTBEAT_REFRESH.with(|lr| *lr.borrow());
+    HEARTBEAT_STATE_CELL.with(|cell| {
+        cell.borrow_mut().set(last_refresh).expect("Failed to save heartbeat state");
+    });
+
     // Preserve accounting state
     accounting::pre_upgrade_accounting();
 }
@@ -902,44 +908,62 @@ thread_local! {
 fn heartbeat() {
     const HEARTBEAT_REFRESH_INTERVAL_NS: u64 = 30_000_000_000; // 30 seconds
 
-    // Check if refresh is already in progress (P1 fix: prevent concurrent refreshes)
-    let is_refreshing = HEARTBEAT_REFRESH_IN_PROGRESS.with(|flag| *flag.borrow());
-    if is_refreshing {
+    // P0-2 fix: Atomically check and set the in-progress flag to prevent race condition
+    let should_refresh = HEARTBEAT_REFRESH_IN_PROGRESS.with(|flag| {
+        let mut flag_ref = flag.borrow_mut();
+        if *flag_ref {
+            // Already refreshing, skip this heartbeat
+            return false;
+        }
+
+        // Get last refresh from stable storage
+        let last_refresh = HEARTBEAT_STATE_CELL.with(|cell| cell.borrow().get().clone());
+        let now = ic_cdk::api::time();
+
+        // Check if it's time to refresh (30 seconds elapsed)
+        if now > last_refresh && (now - last_refresh) >= HEARTBEAT_REFRESH_INTERVAL_NS {
+            // Atomically set the flag before proceeding
+            *flag_ref = true;
+            true
+        } else {
+            false
+        }
+    });
+
+    if !should_refresh {
         return;
     }
 
-    // Get last refresh from stable storage
-    let last_refresh = HEARTBEAT_STATE_CELL.with(|cell| cell.borrow().get().clone());
+    // Now we have exclusive access to perform the refresh
     let now = ic_cdk::api::time();
 
-    // Check if it's time to refresh (30 seconds elapsed)
-    if now > last_refresh && (now - last_refresh) >= HEARTBEAT_REFRESH_INTERVAL_NS {
-        // Mark refresh as in progress
-        HEARTBEAT_REFRESH_IN_PROGRESS.with(|flag| {
-            *flag.borrow_mut() = true;
-        });
+    // Update last refresh timestamp in stable storage (P0 fix: persist across upgrades)
+    HEARTBEAT_STATE_CELL.with(|cell| {
+        cell.borrow_mut().set(now).expect("Failed to update heartbeat state");
+    });
 
-        // Update last refresh timestamp in stable storage (P0 fix: persist across upgrades)
-        HEARTBEAT_STATE_CELL.with(|cell| {
-            cell.borrow_mut().set(now).expect("Failed to update heartbeat state");
-        });
+    // Also update volatile state for quick access
+    LAST_HEARTBEAT_REFRESH.with(|lr| {
+        *lr.borrow_mut() = now;
+    });
 
-        // Also update volatile state for quick access
-        LAST_HEARTBEAT_REFRESH.with(|lr| {
-            *lr.borrow_mut() = now;
-        });
+    // P1 fix: Spawn async task with guaranteed flag cleanup
+    ic_cdk::spawn(async {
+        // Use a struct with Drop to ensure flag is always cleared
+        struct FlagGuard;
+        impl Drop for FlagGuard {
+            fn drop(&mut self) {
+                HEARTBEAT_REFRESH_IN_PROGRESS.with(|flag| {
+                    *flag.borrow_mut() = false;
+                });
+            }
+        }
+        let _guard = FlagGuard;
 
-        // Spawn async task to refresh balance in background
-        ic_cdk::spawn(async {
-            ic_cdk::println!("Heartbeat: refreshing balance cache at {}", ic_cdk::api::time());
-            accounting::refresh_canister_balance().await;
-
-            // Clear the in-progress flag after completion
-            HEARTBEAT_REFRESH_IN_PROGRESS.with(|flag| {
-                *flag.borrow_mut() = false;
-            });
-        });
-    }
+        ic_cdk::println!("Heartbeat: refreshing balance cache at {}", ic_cdk::api::time());
+        accounting::refresh_canister_balance().await;
+        // Flag will be cleared when _guard is dropped, even if there's a panic
+    });
 }
 
 #[cfg(test)]

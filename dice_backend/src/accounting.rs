@@ -111,7 +111,8 @@ pub fn is_balance_cache_stale(max_age_nanos: u64) -> bool {
     let current_time = ic_cdk::api::time();
 
     // If never refreshed or older than max age, it's stale
-    last_refresh == 0 || (current_time > last_refresh && current_time - last_refresh > max_age_nanos)
+    // P1 fix: Use saturating_sub to prevent overflow
+    last_refresh == 0 || current_time.saturating_sub(last_refresh) > max_age_nanos
 }
 
 /// Get the age of the cached balance in nanoseconds
@@ -120,12 +121,8 @@ pub fn get_balance_cache_age() -> u64 {
     if last_refresh == 0 {
         u64::MAX // Never refreshed
     } else {
-        let current_time = ic_cdk::api::time();
-        if current_time > last_refresh {
-            current_time - last_refresh
-        } else {
-            0
-        }
+        // P1 fix: Use saturating_sub to prevent overflow
+        ic_cdk::api::time().saturating_sub(last_refresh)
     }
 }
 
