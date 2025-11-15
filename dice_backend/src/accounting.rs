@@ -3,7 +3,6 @@ use ic_cdk::{query, update};
 use ic_stable_structures::memory_manager::MemoryId;
 use ic_stable_structures::StableBTreeMap;
 use std::cell::RefCell;
-use std::collections::HashMap;
 
 use crate::{MEMORY_MANAGER, Memory};
 
@@ -41,11 +40,8 @@ pub enum TransferErrorIcrc {
     GenericError { error_code: Nat, message: String },
 }
 
-// User balance tracking (in-memory + stable backup)
+// User balance tracking (stable storage only)
 thread_local! {
-    // In-memory for fast access
-    static USER_BALANCES: RefCell<HashMap<Principal, u64>> = RefCell::new(HashMap::new());
-
     // Stable storage for persistence across upgrades
     static USER_BALANCES_STABLE: RefCell<StableBTreeMap<Principal, u64, Memory>> = RefCell::new(
         StableBTreeMap::init(
@@ -162,20 +158,15 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
                 // STEP 3: Credit user with full amount
                 // In ICRC-1: user pays (amount + fee), canister receives amount
                 // So credit the full amount that the canister received
-                let new_balance = USER_BALANCES.with(|balances| {
+                let new_balance = USER_BALANCES_STABLE.with(|balances| {
                     let mut balances = balances.borrow_mut();
-                    let current = balances.get(&caller).unwrap_or(&0);
+                    let current = balances.get(&caller).unwrap_or(0);
                     let new_bal = current + amount;
                     balances.insert(caller, new_bal);
                     new_bal
                 });
 
-                // STEP 4: Persist to stable storage
-                USER_BALANCES_STABLE.with(|stable| {
-                    stable.borrow_mut().insert(caller, new_balance);
-                });
-
-                // STEP 5: Update total deposits
+                // STEP 4: Update total deposits
                 TOTAL_USER_DEPOSITS.with(|total| {
                     *total.borrow_mut() += amount;
                 });
@@ -216,19 +207,14 @@ pub async fn withdraw(amount: u64) -> Result<u64, String> {
     }
 
     // STEP 3: Deduct from user balance FIRST (prevent re-entrancy)
-    let new_balance = USER_BALANCES.with(|balances| {
+    let new_balance = USER_BALANCES_STABLE.with(|balances| {
         let mut balances = balances.borrow_mut();
         let new_bal = user_balance - amount;
         balances.insert(caller, new_bal);
         new_bal
     });
 
-    // STEP 4: Persist to stable storage
-    USER_BALANCES_STABLE.with(|stable| {
-        stable.borrow_mut().insert(caller, new_balance);
-    });
-
-    // STEP 5: Update total deposits
+    // STEP 4: Update total deposits
     TOTAL_USER_DEPOSITS.with(|total| {
         *total.borrow_mut() -= amount;
     });
@@ -261,11 +247,8 @@ pub async fn withdraw(amount: u64) -> Result<u64, String> {
             }
             Err(transfer_error) => {
                 // ROLLBACK on transfer error
-                USER_BALANCES.with(|balances| {
+                USER_BALANCES_STABLE.with(|balances| {
                     balances.borrow_mut().insert(caller, user_balance);
-                });
-                USER_BALANCES_STABLE.with(|stable| {
-                    stable.borrow_mut().insert(caller, user_balance);
                 });
                 TOTAL_USER_DEPOSITS.with(|total| {
                     *total.borrow_mut() += amount;
@@ -275,11 +258,8 @@ pub async fn withdraw(amount: u64) -> Result<u64, String> {
         }
         Err(call_error) => {
             // ROLLBACK on call failure
-            USER_BALANCES.with(|balances| {
+            USER_BALANCES_STABLE.with(|balances| {
                 balances.borrow_mut().insert(caller, user_balance);
-            });
-            USER_BALANCES_STABLE.with(|stable| {
-                stable.borrow_mut().insert(caller, user_balance);
             });
             TOTAL_USER_DEPOSITS.with(|total| {
                 *total.borrow_mut() += amount;
@@ -319,8 +299,8 @@ pub async fn withdraw_all() -> Result<u64, String> {
 
 #[query]
 pub fn get_balance(user: Principal) -> u64 {
-    USER_BALANCES.with(|balances| {
-        *balances.borrow().get(&user).unwrap_or(&0)
+    USER_BALANCES_STABLE.with(|balances| {
+        balances.borrow().get(&user).unwrap_or(0)
     })
 }
 
@@ -346,7 +326,7 @@ pub fn get_house_balance() -> u64 {
 #[query]
 pub fn get_accounting_stats() -> AccountingStats {
     let total_deposits = TOTAL_USER_DEPOSITS.with(|total| *total.borrow());
-    let unique_depositors = USER_BALANCES.with(|balances| balances.borrow().len() as u64);
+    let unique_depositors = USER_BALANCES_STABLE.with(|balances| balances.borrow().iter().count() as u64);
     let canister_balance = CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow());
     let house_balance = if canister_balance > total_deposits {
         canister_balance - total_deposits
@@ -389,12 +369,8 @@ pub fn audit_balances() -> Result<String, String> {
 // =============================================================================
 
 pub fn update_balance(user: Principal, new_balance: u64) -> Result<(), String> {
-    USER_BALANCES.with(|balances| {
+    USER_BALANCES_STABLE.with(|balances| {
         balances.borrow_mut().insert(user, new_balance);
-    });
-
-    USER_BALANCES_STABLE.with(|stable| {
-        stable.borrow_mut().insert(user, new_balance);
     });
 
     Ok(())
@@ -405,27 +381,20 @@ pub fn update_balance(user: Principal, new_balance: u64) -> Result<(), String> {
 // =============================================================================
 
 pub fn pre_upgrade_accounting() {
-    // USER_BALANCES_STABLE already persists data
-    // TOTAL_USER_DEPOSITS needs to be persisted - will be recalculated on post_upgrade
+    // Nothing needed - StableBTreeMap handles persistence automatically
 }
 
 pub fn post_upgrade_accounting() {
-    // Restore in-memory HashMap from stable storage
+    // Recalculate total deposits from stable storage
+    let mut total = 0u64;
+
     USER_BALANCES_STABLE.with(|stable| {
-        USER_BALANCES.with(|memory| {
-            let mut memory = memory.borrow_mut();
-            memory.clear();
+        for (_principal, balance) in stable.borrow().iter() {
+            total += balance;
+        }
+    });
 
-            let mut total = 0u64;
-            for (principal, balance) in stable.borrow().iter() {
-                memory.insert(principal, balance);
-                total += balance;
-            }
-
-            // Restore total deposits
-            TOTAL_USER_DEPOSITS.with(|t| {
-                *t.borrow_mut() = total;
-            });
-        });
+    TOTAL_USER_DEPOSITS.with(|t| {
+        *t.borrow_mut() = total;
     });
 }
