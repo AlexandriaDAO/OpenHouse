@@ -121,7 +121,7 @@ const E8S_PER_ICP: u64 = 100_000_000; // 1 ICP = 100,000,000 e8s
 // Dice game constants
 const MIN_BET: u64 = 1_000_000; // 0.01 ICP
 const MAX_WIN: u64 = 10 * E8S_PER_ICP; // 10 ICP max win
-const HOUSE_EDGE: f64 = 0.03; // 3% house edge
+// House edge is now implicit: exact hit (target number) = house wins (0.99% edge)
 const MAX_NUMBER: u8 = 100; // Dice rolls 0-100
 
 // Direction to predict
@@ -146,6 +146,8 @@ pub struct DiceResult {
     pub payout: u64,
     pub is_win: bool,
     pub timestamp: u64,
+    #[serde(default)]
+    pub is_house_hit: bool,  // True when house wins on exact target hit (0.99% edge)
     // Verification fields for provable fairness
     pub client_seed: String,
     pub nonce: u64,
@@ -333,33 +335,32 @@ fn calculate_multiplier(win_chance: f64) -> f64 {
     if win_chance <= 0.0 {
         return 0.0;
     }
-    ((1.0 - HOUSE_EDGE) / win_chance).min(100.0) // Cap at 100x
+    // Convert win chance back to winning numbers for clean multiplier
+    let winning_numbers = (win_chance * 101.0).round();
+    (100.0 / winning_numbers).min(100.0) // Cap at 100x
+}
+
+// Direct multiplier calculation from target (cleaner, preferred)
+fn calculate_multiplier_direct(target: u8, direction: &RollDirection) -> f64 {
+    let winning_numbers = match direction {
+        RollDirection::Over => (100 - target) as f64,
+        RollDirection::Under => target as f64,
+    };
+    if winning_numbers == 0.0 {
+        return 0.0;
+    }
+    100.0 / winning_numbers  // Clean round numbers!
 }
 
 // Calculate maximum allowed bet based on target number and direction
 fn calculate_max_bet(target_number: u8, direction: &RollDirection) -> u64 {
-    // Calculate win chance for this bet
-    let win_chance = calculate_win_chance(target_number, direction);
+    let multiplier = calculate_multiplier_direct(target_number, direction);
 
-    // Calculate multiplier
-    let multiplier = calculate_multiplier(win_chance);
-
-    // Prevent division by zero and handle edge cases
-    if multiplier <= 0.0 || !multiplier.is_finite() {
-        return MIN_BET; // Return minimum as safe fallback
-    }
-
-    // Max bet = max win / multiplier
-    let max_bet_f64 = (MAX_WIN as f64) / multiplier;
-
-    // Protect against overflow when converting to u64
-    if max_bet_f64.is_infinite() || max_bet_f64 > u64::MAX as f64 {
-        return MAX_WIN; // Cap at max win since multiplier is ~1
-    } else if max_bet_f64 < MIN_BET as f64 {
+    if multiplier <= 0.0 {
         return MIN_BET;
     }
 
-    max_bet_f64.floor() as u64
+    ((MAX_WIN as f64) / multiplier).floor() as u64
 }
 
 // Generate instant random number using seed+nonce+client_seed (0-100)
@@ -462,13 +463,7 @@ async fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection,
 
     // Calculate win chance and multiplier for this specific bet
     let win_chance = calculate_win_chance(target_number, &direction);
-
-    // Ensure win chance is reasonable
-    if win_chance < 0.01 || win_chance > 0.98 {
-        return Err("Invalid target number - win chance must be between 1% and 98%".to_string());
-    }
-
-    let multiplier = calculate_multiplier(win_chance);
+    let multiplier = calculate_multiplier_direct(target_number, &direction);
 
     // Calculate max bet based on house balance using ACTUAL multiplier
     let house_balance = accounting::get_house_balance();
@@ -496,10 +491,17 @@ async fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection,
 
     let (rolled_number, nonce, server_seed_hash) = generate_dice_roll_instant(&client_seed)?;
 
+    // Check for exact hit (house wins on exact target match - 0.99% edge)
+    let is_house_hit = rolled_number == target_number;
+
     // Determine if player won
-    let is_win = match direction {
-        RollDirection::Over => rolled_number > target_number,
-        RollDirection::Under => rolled_number < target_number,
+    let is_win = if is_house_hit {
+        false  // House always wins on exact hit
+    } else {
+        match direction {
+            RollDirection::Over => rolled_number > target_number,
+            RollDirection::Under => rolled_number < target_number,
+        }
     };
 
     let payout = if is_win {
@@ -527,6 +529,7 @@ async fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection,
         payout,
         is_win,
         timestamp: ic_cdk::api::time(),
+        is_house_hit,
         client_seed,
         nonce,
         server_seed_hash,
@@ -695,12 +698,7 @@ fn calculate_payout_info(target_number: u8, direction: RollDirection) -> Result<
     }
 
     let win_chance = calculate_win_chance(target_number, &direction);
-
-    if win_chance < 0.01 || win_chance > 0.98 {
-        return Err("Win chance must be between 1% and 98%".to_string());
-    }
-
-    let multiplier = calculate_multiplier(win_chance);
+    let multiplier = calculate_multiplier_direct(target_number, &direction);
     Ok((win_chance, multiplier))
 }
 
