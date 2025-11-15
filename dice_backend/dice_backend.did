@@ -49,6 +49,7 @@ service : {
   // Accounting methods
   deposit: (nat64) -> (variant { Ok: nat64; Err: text });
   withdraw: (nat64) -> (variant { Ok: nat64; Err: text });
+  withdraw_all: () -> (variant { Ok: nat64; Err: text });
   get_balance: (principal) -> (nat64) query;
   get_my_balance: () -> (nat64) query;
   get_house_balance: () -> (nat64) query;

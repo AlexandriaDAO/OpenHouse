@@ -12,7 +12,6 @@ import {
 import { DiceAnimation, DiceControls, DiceAccountingPanel, type DiceDirection } from '../components/game-specific/dice';
 import { useGameMode, useGameState } from '../hooks/games';
 import { useGameBalance } from '../providers/GameBalanceProvider';
-import { ConnectionStatus } from '../components/ui/ConnectionStatus';
 import type { Principal } from '@dfinity/principal';
 
 // ICP conversion constant
@@ -42,7 +41,6 @@ export const Dice: React.FC = () => {
   const gameBalanceContext = useGameBalance('dice');
   const balance = gameBalanceContext.balance;
   const refreshBalance = gameBalanceContext.refresh;
-  const optimisticUpdate = gameBalanceContext.optimisticUpdate;
   // Note: Disabled useGameHistory to prevent infinite loop - using gameState.history instead
   // const { history } = useGameHistory<DiceGameResult>(actor, 'get_recent_games', 10);
 
@@ -136,6 +134,19 @@ export const Dice: React.FC = () => {
   const rollDice = async () => {
     if (!actor || !gameState.validateBet()) return;
 
+    // Frontend validation: Check if house can afford the potential payout BEFORE starting animation
+    const maxPayout = BigInt(Math.floor(gameState.betAmount * multiplier * E8S_PER_ICP));
+    if (maxPayout > balance.house) {
+      const houseBalanceICP = Number(balance.house) / E8S_PER_ICP;
+      const maxPayoutICP = Number(maxPayout) / E8S_PER_ICP;
+      gameState.setGameError(
+        `Bet too large. House only has ${houseBalanceICP.toFixed(4)} ICP, ` +
+        `but max payout would be ${maxPayoutICP.toFixed(4)} ICP (${multiplier.toFixed(2)}x multiplier). ` +
+        `Please lower your bet or choose different odds.`
+      );
+      return;
+    }
+
     gameState.setIsPlaying(true);
     gameState.clearErrors();
     setAnimatingResult(null);
@@ -164,24 +175,8 @@ export const Dice: React.FC = () => {
         setAnimatingResult(result.Ok.rolled_number);
         gameState.addToHistory(result.Ok);
 
-        // Apply optimistic update immediately
-        if (result.Ok.is_win) {
-          // Win: add payout to game balance
-          optimisticUpdate({
-            field: 'game',
-            amount: result.Ok.payout,
-            operation: 'add'
-          });
-        } else {
-          // Loss: subtract bet from game balance
-          optimisticUpdate({
-            field: 'game',
-            amount: result.Ok.bet_amount,
-            operation: 'subtract'
-          });
-        }
-
-        // Note: Background verification is handled automatically by GameBalanceProvider
+        // Refresh balance after game completes
+        await refreshBalance();
       } else {
         gameState.setGameError(result.Err);
         gameState.setIsPlaying(false);
@@ -225,9 +220,6 @@ export const Dice: React.FC = () => {
       houseEdge={3}
     >
       <GameModeToggle {...gameMode} />
-
-      {/* CONNECTION STATUS */}
-      <ConnectionStatus game="dice" />
 
       {/* ACCOUNTING PANEL */}
       <DiceAccountingPanel

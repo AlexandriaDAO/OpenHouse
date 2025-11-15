@@ -23,7 +23,7 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
   const houseBalance = gameBalanceContext.balance.house;
 
   const [depositAmount, setDepositAmount] = useState('0.1');
-  const [withdrawAmount, setWithdrawAmount] = useState('0.1');
+  const [showDepositModal, setShowDepositModal] = useState(false);
   const [isDepositing, setIsDepositing] = useState(false);
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +60,7 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
         const newBalance = result.Ok;
         setSuccess(`Deposited ${depositAmount} ICP! New balance: ${Number(newBalance) / 100_000_000} ICP`);
         setDepositAmount('0.1');
+        setShowDepositModal(false);
 
         // Refresh all balances
         await refreshBalance(); // Wallet balance
@@ -74,8 +75,8 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
     }
   };
 
-  // Handle withdraw
-  const handleWithdraw = async () => {
+  // Handle withdraw all
+  const handleWithdrawAll = async () => {
     if (!actor || !isAuthenticated) return;
 
     setIsWithdrawing(true);
@@ -83,28 +84,13 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
     setSuccess(null);
 
     try {
-      const amountE8s = BigInt(Math.floor(parseFloat(withdrawAmount) * 100_000_000));
-
-      // Validate amount
-      if (amountE8s < BigInt(10_000_000)) {
-        setError('Minimum withdrawal is 0.1 ICP');
-        setIsWithdrawing(false);
-        return;
-      }
-
-      if (gameBalance && amountE8s > gameBalance) {
-        setError('Insufficient game balance');
-        setIsWithdrawing(false);
-        return;
-      }
-
-      // Call withdraw
-      const result = await actor.withdraw(amountE8s);
+      // Call withdraw_all (no amount parameter needed)
+      const result = await actor.withdraw_all();
 
       if ('Ok' in result) {
         const newBalance = result.Ok;
-        setSuccess(`Withdrew ${withdrawAmount} ICP! New balance: ${Number(newBalance) / 100_000_000} ICP`);
-        setWithdrawAmount('0.1');
+        const withdrawnAmount = (Number(gameBalance) - Number(newBalance)) / 100_000_000;
+        setSuccess(`Withdrew all! (${withdrawnAmount.toFixed(4)} ICP) New balance: ${Number(newBalance) / 100_000_000} ICP`);
 
         // Refresh all balances
         await refreshBalance(); // Wallet balance
@@ -134,87 +120,113 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
   }
 
   return (
-    <div className="card max-w-2xl mx-auto p-4">
-      {/* Compact Balance Display */}
-      <div className="grid grid-cols-3 gap-2 mb-3">
-        <div className="bg-purple-900/10 p-2 rounded border border-purple-500/20">
-          <p className="text-xs text-gray-400">Wallet</p>
-          <p className="text-sm font-bold text-purple-400">{formatBalance(walletBalance)}</p>
-        </div>
-        <div className="bg-green-900/10 p-2 rounded border border-green-500/20">
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-gray-400">Dice</p>
-            <ConnectionStatusMini game="dice" />
+    <>
+      <div className="card max-w-2xl mx-auto p-4">
+        {/* Compact Balance Display */}
+        <div className="grid grid-cols-2 gap-2 mb-3">
+          <div className="bg-green-900/10 p-2 rounded border border-green-500/20">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-gray-400">Dice Betting</p>
+              <ConnectionStatusMini game="dice" />
+            </div>
+            <p className="text-sm font-bold text-green-400">{formatBalance(gameBalance)}</p>
           </div>
-          <p className="text-sm font-bold text-green-400">{formatBalance(gameBalance)}</p>
-        </div>
-        <div className="bg-yellow-900/10 p-2 rounded border border-yellow-500/20">
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-gray-400">House</p>
-            <ConnectionStatusMini game="dice" />
+          <div className="bg-yellow-900/10 p-2 rounded border border-yellow-500/20">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-gray-400">House Money</p>
+              <ConnectionStatusMini game="dice" />
+            </div>
+            <p className="text-sm font-bold text-yellow-400">{formatBalance(houseBalance)}</p>
           </div>
-          <p className="text-sm font-bold text-yellow-400">{formatBalance(houseBalance)}</p>
         </div>
-      </div>
 
-      {/* Compact Deposit/Withdraw Combined */}
-      <div className="flex gap-2 items-end">
-        {/* Deposit */}
-        <div className="flex-1">
-          <input
-            type="number"
-            value={depositAmount}
-            onChange={(e) => setDepositAmount(e.target.value)}
-            className="w-full bg-gray-800/50 border border-gray-700/50 rounded px-2 py-1 text-sm"
-            placeholder="Deposit"
-            min="0.1"
-            step="0.01"
+        {/* Simple Button Row */}
+        <div className="flex gap-2 mb-2">
+          <button
+            onClick={() => setShowDepositModal(true)}
             disabled={isDepositing}
-          />
+            className="flex-1 px-4 py-2 bg-purple-600/80 hover:bg-purple-600 rounded text-sm font-bold disabled:opacity-50 transition"
+            title="Deposit ICP to Dice Game"
+          >
+            {isDepositing ? '↓ Depositing...' : '↓ Deposit'}
+          </button>
+
+          <button
+            onClick={handleWithdrawAll}
+            disabled={isWithdrawing || gameBalance === BigInt(0)}
+            className="flex-1 px-4 py-2 bg-green-600/80 hover:bg-green-600 rounded text-sm font-bold disabled:opacity-50 transition"
+            title="Withdraw all ICP from Dice Game"
+          >
+            {isWithdrawing ? '↑ Withdrawing...' : '↑ Withdraw All'}
+          </button>
         </div>
+
+        {/* Refresh Balances Button */}
         <button
-          onClick={handleDeposit}
-          disabled={isDepositing}
-          className="px-3 py-1 bg-purple-600/80 hover:bg-purple-600 rounded text-xs font-bold disabled:opacity-50 transition"
-          title="Deposit ICP to Dice Game"
+          onClick={async () => {
+            await refreshBalance();
+            onBalanceChange();
+          }}
+          className="w-full px-3 py-1.5 bg-blue-600/80 hover:bg-blue-600 rounded text-xs font-bold transition flex items-center justify-center gap-2"
+          title="Refresh all balances from blockchain"
         >
-          {isDepositing ? '↓...' : '↓ Deposit'}
+          🔄 Refresh Balances
         </button>
 
-        {/* Withdraw */}
-        <div className="flex-1">
-          <input
-            type="number"
-            value={withdrawAmount}
-            onChange={(e) => setWithdrawAmount(e.target.value)}
-            className="w-full bg-gray-800/50 border border-gray-700/50 rounded px-2 py-1 text-sm"
-            placeholder="Withdraw"
-            min="0.1"
-            step="0.01"
-            disabled={isWithdrawing}
-          />
-        </div>
-        <button
-          onClick={handleWithdraw}
-          disabled={isWithdrawing}
-          className="px-3 py-1 bg-green-600/80 hover:bg-green-600 rounded text-xs font-bold disabled:opacity-50 transition"
-          title="Withdraw ICP from Dice Game"
-        >
-          {isWithdrawing ? '↑...' : '↑ Withdraw'}
-        </button>
+        {/* Compact Messages */}
+        {error && (
+          <div className="bg-red-900/10 border border-red-500/50 text-red-400 px-2 py-1 rounded mt-2 text-xs">
+            {error}
+          </div>
+        )}
+        {success && (
+          <div className="bg-green-900/10 border border-green-500/50 text-green-400 px-2 py-1 rounded mt-2 text-xs">
+            {success}
+          </div>
+        )}
       </div>
 
-      {/* Compact Messages */}
-      {error && (
-        <div className="bg-red-900/10 border border-red-500/50 text-red-400 px-2 py-1 rounded mt-2 text-xs">
-          {error}
+      {/* Deposit Modal */}
+      {showDepositModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowDepositModal(false)}>
+          <div className="bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4 border border-gray-700" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-xl font-bold text-white mb-4">Deposit ICP</h3>
+
+            <div className="mb-4">
+              <label className="block text-sm text-gray-400 mb-2">Amount (ICP)</label>
+              <input
+                type="number"
+                value={depositAmount}
+                onChange={(e) => setDepositAmount(e.target.value)}
+                className="w-full bg-gray-900/50 border border-gray-700 rounded px-4 py-2 text-white"
+                placeholder="Enter amount"
+                min="0.1"
+                step="0.01"
+                disabled={isDepositing}
+                autoFocus
+              />
+              <p className="text-xs text-gray-500 mt-1">Minimum: 0.1 ICP</p>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowDepositModal(false)}
+                disabled={isDepositing}
+                className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded font-bold disabled:opacity-50 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeposit}
+                disabled={isDepositing}
+                className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded font-bold disabled:opacity-50 transition"
+              >
+                {isDepositing ? 'Depositing...' : 'Confirm Deposit'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
-      {success && (
-        <div className="bg-green-900/10 border border-green-500/50 text-green-400 px-2 py-1 rounded mt-2 text-xs">
-          {success}
-        </div>
-      )}
-    </div>
+    </>
   );
 };

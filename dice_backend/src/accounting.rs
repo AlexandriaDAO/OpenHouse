@@ -262,6 +262,30 @@ pub async fn withdraw(amount: u64) -> Result<u64, String> {
 }
 
 // =============================================================================
+// WITHDRAW ALL FUNCTION
+// =============================================================================
+
+#[update]
+pub async fn withdraw_all() -> Result<u64, String> {
+    let caller = ic_cdk::caller();
+    let user_balance = get_balance(caller);
+
+    // Check if user has any balance to withdraw
+    if user_balance == 0 {
+        return Err("No balance to withdraw".to_string());
+    }
+
+    // Check if balance meets minimum withdrawal
+    if user_balance < MIN_WITHDRAW {
+        return Err(format!("Balance {} e8s is below minimum withdrawal of {} ICP",
+                          user_balance, MIN_WITHDRAW / 100_000_000));
+    }
+
+    // Call the regular withdraw function with the full balance
+    withdraw(user_balance).await
+}
+
+// =============================================================================
 // BALANCE QUERIES
 // =============================================================================
 
