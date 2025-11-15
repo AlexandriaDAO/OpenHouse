@@ -11,6 +11,7 @@ const ICP_TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP in e8s
 const MIN_DEPOSIT: u64 = 10_000_000; // 0.1 ICP
 const MIN_WITHDRAW: u64 = 10_000_000; // 0.1 ICP
 const USER_BALANCES_MEMORY_ID: u8 = 10; // Memory ID for user balances
+const ICP_LEDGER_CANISTER_ID: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai"; // ICP ledger principal
 
 // ICRC-1 types (since ic-ledger-types doesn't have them all)
 #[derive(CandidType, Deserialize, Clone, Debug)]
@@ -80,7 +81,8 @@ async fn get_canister_balance_from_ledger() -> Result<u64, String> {
         subaccount: None,
     };
 
-    let ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
+    let ledger = Principal::from_text(ICP_LEDGER_CANISTER_ID)
+        .expect("ICP ledger canister ID must be valid");
     let result: Result<(Nat,), _> = ic_cdk::call(ledger, "icrc1_balance_of", (account,)).await;
 
     match result {
@@ -122,7 +124,8 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
         created_at_time: None,
     };
 
-    let ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
+    let ledger = Principal::from_text(ICP_LEDGER_CANISTER_ID)
+        .expect("ICP ledger canister ID must be valid");
     let call_result: Result<(Result<Nat, TransferErrorIcrc>,), _> =
         ic_cdk::call(ledger, "icrc1_transfer", (transfer_args,)).await;
 
@@ -192,7 +195,8 @@ pub async fn withdraw(amount: u64) -> Result<u64, String> {
         created_at_time: None,
     };
 
-    let ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
+    let ledger = Principal::from_text(ICP_LEDGER_CANISTER_ID)
+        .expect("ICP ledger canister ID must be valid");
     let call_result: Result<(Result<Nat, TransferErrorIcrc>,), _> =
         ic_cdk::call(ledger, "icrc1_transfer", (transfer_args,)).await;
 
@@ -352,7 +356,14 @@ pub fn post_upgrade_accounting() {
 
 /// Refresh canister balance (for game.rs compatibility)
 /// Just queries the ledger directly
+/// Note: Returns 0 on error but logs the failure for monitoring
 #[update]
 pub async fn refresh_canister_balance() -> u64 {
-    get_canister_balance_from_ledger().await.unwrap_or(0)
+    match get_canister_balance_from_ledger().await {
+        Ok(balance) => balance,
+        Err(e) => {
+            ic_cdk::println!("⚠️ Failed to refresh canister balance: {}", e);
+            0
+        }
+    }
 }
