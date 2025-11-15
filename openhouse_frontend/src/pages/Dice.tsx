@@ -2,7 +2,6 @@ import React, { useEffect, useState, useCallback } from 'react';
 import useDiceActor from '../hooks/actors/useDiceActor';
 import {
   GameLayout,
-  GameModeToggle,
   BetAmountInput,
   GameButton,
   GameHistory,
@@ -278,8 +277,6 @@ export const Dice: React.FC = () => {
       maxWin={100}
       houseEdge={3}
     >
-      <GameModeToggle {...gameMode} />
-
       {/* ACCOUNTING PANEL */}
       <DiceAccountingPanel
         gameBalance={balance.game}

@@ -30,6 +30,23 @@ type AccountingStats = record {
   unique_depositors: nat64;
 };
 
+type DetailedGameHistory = record {
+  game_id: nat64;
+  player: text;
+  bet_icp: float64;
+  won_icp: float64;
+  target_number: nat8;
+  direction: text;
+  rolled_number: nat8;
+  win_chance: float64;
+  multiplier: float64;
+  is_win: bool;
+  timestamp: nat64;
+  profit_loss: int64;
+  expected_value: float64;
+  house_edge_actual: float64;
+};
+
 service : {
   // Play a game of dice - now with client seed for instant randomness
   play_dice: (nat64, nat8, RollDirection, text) -> (variant { Ok: DiceResult; Err: text });
@@ -40,6 +57,8 @@ service : {
   get_game: (nat64) -> (opt DiceResult) query;
   calculate_payout_info: (nat8, RollDirection) -> (variant { Ok: record { float64; float64 }; Err: text }) query;
   get_max_bet: (nat8, RollDirection) -> (nat64) query;
+  get_detailed_history: (nat32) -> (vec DetailedGameHistory) query;
+  export_history_csv: (nat32) -> (text) query;
 
   // Provable fairness verification methods
   get_current_seed_hash: () -> (text) query;
