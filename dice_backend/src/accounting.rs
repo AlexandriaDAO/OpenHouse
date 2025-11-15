@@ -49,14 +49,21 @@ thread_local! {
         )
     );
 
-    // Track total user deposits for house balance calculation
-    static TOTAL_USER_DEPOSITS: RefCell<u64> = RefCell::new(0);
-
     // Cached canister balance (updated after deposits/withdrawals)
     static CACHED_CANISTER_BALANCE: RefCell<u64> = RefCell::new(0);
 
     // Track when the balance was last refreshed (for cache validation)
     static LAST_BALANCE_REFRESH: RefCell<u64> = RefCell::new(0);
+}
+
+// Helper function to calculate total deposits on-demand
+fn calculate_total_deposits() -> u64 {
+    USER_BALANCES_STABLE.with(|balances| {
+        balances.borrow()
+            .iter()
+            .map(|(_, balance)| balance)
+            .sum()
+    })
 }
 
 #[derive(CandidType, Deserialize, Clone)]
@@ -166,12 +173,7 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
                     new_bal
                 });
 
-                // STEP 4: Update total deposits
-                TOTAL_USER_DEPOSITS.with(|total| {
-                    *total.borrow_mut() += amount;
-                });
-
-                // STEP 6: Refresh cached canister balance
+                // Refresh cached canister balance after deposit
                 refresh_canister_balance().await;
 
                 ic_cdk::println!("Deposit successful: {} deposited {} e8s", caller, amount);
@@ -214,12 +216,7 @@ pub async fn withdraw(amount: u64) -> Result<u64, String> {
         new_bal
     });
 
-    // STEP 4: Update total deposits
-    TOTAL_USER_DEPOSITS.with(|total| {
-        *total.borrow_mut() -= amount;
-    });
-
-    // STEP 6: Transfer ICP from canister to user
+    // Transfer ICP from canister to user
     let transfer_args = TransferArg {
         from_subaccount: None,
         to: Account {
@@ -250,9 +247,6 @@ pub async fn withdraw(amount: u64) -> Result<u64, String> {
                 USER_BALANCES_STABLE.with(|balances| {
                     balances.borrow_mut().insert(caller, user_balance);
                 });
-                TOTAL_USER_DEPOSITS.with(|total| {
-                    *total.borrow_mut() += amount;
-                });
                 Err(format!("Transfer failed: {:?}", transfer_error))
             }
         }
@@ -260,9 +254,6 @@ pub async fn withdraw(amount: u64) -> Result<u64, String> {
             // ROLLBACK on call failure
             USER_BALANCES_STABLE.with(|balances| {
                 balances.borrow_mut().insert(caller, user_balance);
-            });
-            TOTAL_USER_DEPOSITS.with(|total| {
-                *total.borrow_mut() += amount;
             });
             Err(format!("Transfer call failed: {:?}", call_error))
         }
@@ -312,9 +303,9 @@ pub fn get_my_balance() -> u64 {
 #[query]
 pub fn get_house_balance() -> u64 {
     // House balance = Total canister balance - Total user deposits
-    // Uses cached balance (refreshed after deposits/withdrawals)
+    // Uses cached canister balance (fast) and calculates deposits fresh (always accurate)
     let canister_balance = CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow());
-    let total_deposits = TOTAL_USER_DEPOSITS.with(|total| *total.borrow());
+    let total_deposits = calculate_total_deposits();  // Fresh calculation, prevents drift
 
     if canister_balance > total_deposits {
         canister_balance - total_deposits
@@ -325,7 +316,7 @@ pub fn get_house_balance() -> u64 {
 
 #[query]
 pub fn get_accounting_stats() -> AccountingStats {
-    let total_deposits = TOTAL_USER_DEPOSITS.with(|total| *total.borrow());
+    let total_deposits = calculate_total_deposits();  // Fresh calculation
     let unique_depositors = USER_BALANCES_STABLE.with(|balances| balances.borrow().iter().count() as u64);
     let canister_balance = CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow());
     let house_balance = if canister_balance > total_deposits {
@@ -349,9 +340,14 @@ pub fn get_accounting_stats() -> AccountingStats {
 #[query]
 pub fn audit_balances() -> Result<String, String> {
     // Verify: house_balance + sum(user_balances) = canister_balance
-    let total_deposits = TOTAL_USER_DEPOSITS.with(|total| *total.borrow());
-    let house_balance = get_house_balance();
+    let total_deposits = calculate_total_deposits();  // Fresh calculation
     let canister_balance = CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow());
+
+    let house_balance = if canister_balance > total_deposits {
+        canister_balance - total_deposits
+    } else {
+        0
+    };
 
     let calculated_total = house_balance + total_deposits;
 
@@ -385,16 +381,6 @@ pub fn pre_upgrade_accounting() {
 }
 
 pub fn post_upgrade_accounting() {
-    // Recalculate total deposits from stable storage
-    let mut total = 0u64;
-
-    USER_BALANCES_STABLE.with(|stable| {
-        for (_principal, balance) in stable.borrow().iter() {
-            total += balance;
-        }
-    });
-
-    TOTAL_USER_DEPOSITS.with(|t| {
-        *t.borrow_mut() = total;
-    });
+    // Nothing needed - we calculate totals on-demand
+    // StableBTreeMap handles persistence automatically
 }
