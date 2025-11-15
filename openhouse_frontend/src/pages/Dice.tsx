@@ -234,8 +234,8 @@ export const Dice: React.FC = () => {
         const csv = await actor.export_history_csv(100);
         setCsvExport(csv);
 
-        // Refresh balance after game completes
-        await refreshBalance();
+        // P1 fix: Refresh balance after game completes (non-blocking to avoid UI delay)
+        refreshBalance().catch(console.error);
       } else {
         gameState.setGameError(result.Err);
         gameState.setIsPlaying(false);

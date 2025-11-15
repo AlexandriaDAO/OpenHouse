@@ -13,6 +13,7 @@ mod accounting;
 pub use accounting::{
     deposit, withdraw, get_balance, get_my_balance, get_house_balance,
     get_accounting_stats, audit_balances, refresh_canister_balance,
+    is_balance_cache_stale, get_balance_cache_age,  // P0 fix: Export helper functions
     AccountingStats, Account,
 };
 
@@ -172,6 +173,11 @@ thread_local! {
 fn init() {
     ic_cdk::println!("Dice Game Backend Initialized");
     // Seed will be initialized on first game or in post_upgrade
+
+    // P1 fix: Refresh balance cache on initialization to ensure it's current
+    ic_cdk::spawn(async {
+        accounting::refresh_canister_balance().await;
+    });
 }
 
 // Initialize the seed with VRF randomness (with lock to prevent race conditions)
@@ -265,8 +271,19 @@ fn post_upgrade() {
         });
     }
 
+    // Restore heartbeat state from stable storage (P0 fix)
+    let last_heartbeat = HEARTBEAT_STATE_CELL.with(|cell| cell.borrow().get().clone());
+    LAST_HEARTBEAT_REFRESH.with(|lr| {
+        *lr.borrow_mut() = last_heartbeat;
+    });
+
     // Restore accounting state
     accounting::post_upgrade_accounting();
+
+    // P1 fix: Refresh balance cache on upgrade to ensure it's current
+    ic_cdk::spawn(async {
+        accounting::refresh_canister_balance().await;
+    });
 }
 
 // Calculate win chance and multiplier based on target and direction
@@ -870,8 +887,19 @@ fn get_rotation_history(limit: u32) -> Vec<(u64, SeedRotationRecord)> {
 // =============================================================================
 
 thread_local! {
-    // Track last heartbeat refresh to avoid too-frequent updates
+    // Track last heartbeat refresh to avoid too-frequent updates (volatile)
     static LAST_HEARTBEAT_REFRESH: RefCell<u64> = RefCell::new(0);
+
+    // Track if a heartbeat refresh is in progress to prevent concurrent calls
+    static HEARTBEAT_REFRESH_IN_PROGRESS: RefCell<bool> = RefCell::new(false);
+
+    // Stable storage for heartbeat state to persist across upgrades
+    static HEARTBEAT_STATE_CELL: RefCell<StableCell<u64, Memory>> = RefCell::new(
+        StableCell::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(5))),
+            0_u64
+        ).expect("Failed to init heartbeat state cell")
+    );
 }
 
 // Heartbeat function - called automatically by IC every ~second
@@ -880,12 +908,29 @@ thread_local! {
 fn heartbeat() {
     const HEARTBEAT_REFRESH_INTERVAL_NS: u64 = 30_000_000_000; // 30 seconds
 
-    let last_refresh = LAST_HEARTBEAT_REFRESH.with(|lr| *lr.borrow());
+    // Check if refresh is already in progress (P1 fix: prevent concurrent refreshes)
+    let is_refreshing = HEARTBEAT_REFRESH_IN_PROGRESS.with(|flag| *flag.borrow());
+    if is_refreshing {
+        return;
+    }
+
+    // Get last refresh from stable storage
+    let last_refresh = HEARTBEAT_STATE_CELL.with(|cell| cell.borrow().get().clone());
     let now = ic_cdk::api::time();
 
     // Check if it's time to refresh (30 seconds elapsed)
     if now > last_refresh && (now - last_refresh) >= HEARTBEAT_REFRESH_INTERVAL_NS {
-        // Update last refresh timestamp first to prevent multiple concurrent refreshes
+        // Mark refresh as in progress
+        HEARTBEAT_REFRESH_IN_PROGRESS.with(|flag| {
+            *flag.borrow_mut() = true;
+        });
+
+        // Update last refresh timestamp in stable storage (P0 fix: persist across upgrades)
+        HEARTBEAT_STATE_CELL.with(|cell| {
+            cell.borrow_mut().set(now).expect("Failed to update heartbeat state");
+        });
+
+        // Also update volatile state for quick access
         LAST_HEARTBEAT_REFRESH.with(|lr| {
             *lr.borrow_mut() = now;
         });
@@ -894,6 +939,11 @@ fn heartbeat() {
         ic_cdk::spawn(async {
             ic_cdk::println!("Heartbeat: refreshing balance cache at {}", ic_cdk::api::time());
             accounting::refresh_canister_balance().await;
+
+            // Clear the in-progress flag after completion
+            HEARTBEAT_REFRESH_IN_PROGRESS.with(|flag| {
+                *flag.borrow_mut() = false;
+            });
         });
     }
 }
