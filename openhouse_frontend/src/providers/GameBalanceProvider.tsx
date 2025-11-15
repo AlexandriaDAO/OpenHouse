@@ -84,68 +84,84 @@ export const GameBalanceProvider: React.FC<GameBalanceProviderProps> = ({ childr
 
   // Fetch balances for a specific game
   const fetchBalances = useCallback(async (game: GameType): Promise<BalanceFetchResult> => {
-    try {
-      let gameBalance: bigint;
-      let houseBalance: bigint;
-      let walletBalance: bigint = BigInt(0);
+    const maxRetries = 3;
+    let retries = 0;
 
-      // Handle each game type separately with proper typing
-      switch (game) {
-        case 'dice':
-          if (!diceActor) throw new Error('Dice actor not available');
-          [gameBalance, houseBalance] = await Promise.all([
-            (diceActor as any).get_my_balance(),
-            (diceActor as any).get_house_balance(),
-          ]);
-          break;
-        case 'crash':
-          if (!crashActor) throw new Error('Crash actor not available');
-          [gameBalance, houseBalance] = await Promise.all([
-            (crashActor as any).get_my_balance(),
-            (crashActor as any).get_house_balance(),
-          ]);
-          break;
-        case 'plinko':
-          if (!plinkoActor) throw new Error('Plinko actor not available');
-          [gameBalance, houseBalance] = await Promise.all([
-            (plinkoActor as any).get_my_balance(),
-            (plinkoActor as any).get_house_balance(),
-          ]);
-          break;
-        case 'mines':
-          if (!minesActor) throw new Error('Mines actor not available');
-          [gameBalance, houseBalance] = await Promise.all([
-            (minesActor as any).get_my_balance(),
-            (minesActor as any).get_house_balance(),
-          ]);
-          break;
-        default:
-          throw new Error(`Unknown game type: ${game}`);
-      }
+    while (retries < maxRetries) {
+      try {
+        let gameBalance: bigint;
+        let houseBalance: bigint;
+        let walletBalance: bigint = BigInt(0);
 
-      // Try to fetch wallet balance (optional - may not be available if not authenticated)
-      if (ledgerActor && principal) {
-        try {
-          const principalObj = Principal.fromText(principal);
-          walletBalance = await ledgerActor.icrc1_balance_of({
-            owner: principalObj,
-            subaccount: [],
-          });
-        } catch (walletError) {
-          console.warn('Failed to fetch wallet balance:', walletError);
-          // Continue with default walletBalance of 0
+        // Handle each game type separately with proper typing
+        switch (game) {
+          case 'dice':
+            if (!diceActor) throw new Error('Dice actor not available');
+            [gameBalance, houseBalance] = await Promise.all([
+              (diceActor as any).get_my_balance(),
+              (diceActor as any).get_house_balance(),
+            ]);
+            break;
+          case 'crash':
+            if (!crashActor) throw new Error('Crash actor not available');
+            [gameBalance, houseBalance] = await Promise.all([
+              (crashActor as any).get_my_balance(),
+              (crashActor as any).get_house_balance(),
+            ]);
+            break;
+          case 'plinko':
+            if (!plinkoActor) throw new Error('Plinko actor not available');
+            [gameBalance, houseBalance] = await Promise.all([
+              (plinkoActor as any).get_my_balance(),
+              (plinkoActor as any).get_house_balance(),
+            ]);
+            break;
+          case 'mines':
+            if (!minesActor) throw new Error('Mines actor not available');
+            [gameBalance, houseBalance] = await Promise.all([
+              (minesActor as any).get_my_balance(),
+              (minesActor as any).get_house_balance(),
+            ]);
+            break;
+          default:
+            throw new Error(`Unknown game type: ${game}`);
         }
-      }
 
-      return {
-        wallet: walletBalance,
-        game: gameBalance,
-        house: houseBalance,
-        timestamp: Date.now(),
-      };
-    } catch (error) {
-      throw new BalanceFetchError(game, error as Error);
+        // Try to fetch wallet balance (optional - may not be available if not authenticated)
+        if (ledgerActor && principal) {
+          try {
+            const principalObj = Principal.fromText(principal);
+            walletBalance = await ledgerActor.icrc1_balance_of({
+              owner: principalObj,
+              subaccount: [],
+            });
+          } catch (walletError) {
+            console.warn('Failed to fetch wallet balance:', walletError);
+            // Continue with default walletBalance of 0
+          }
+        }
+
+        // If house balance is 0 and we haven't exhausted retries, retry after delay
+        if (houseBalance === BigInt(0) && retries < maxRetries - 1) {
+          console.log(`House balance is 0 for ${game}, retrying (${retries + 1}/${maxRetries})...`);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          retries++;
+          continue;
+        }
+
+        return {
+          wallet: walletBalance,
+          game: gameBalance,
+          house: houseBalance,
+          timestamp: Date.now(),
+        };
+      } catch (error) {
+        throw new BalanceFetchError(game, error as Error);
+      }
     }
+
+    // This should never be reached due to the return in the loop, but TypeScript needs it
+    throw new Error('Max retries exceeded');
   }, [ledgerActor, principal, diceActor, crashActor, plinkoActor, minesActor]);
 
   // Refresh balances for a game

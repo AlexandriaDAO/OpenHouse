@@ -1,6 +1,9 @@
 // Barrel export for all game UI components
 export { GameLayout } from './GameLayout';
-export { GameModeToggle, type GameMode } from './GameModeToggle';
+
+// Game mode type (practice vs real money)
+export type GameMode = 'practice' | 'real';
+
 export { BetAmountInput } from './BetAmountInput';
 export { GameButton } from './GameButton';
 export { GameHistory, type GameHistoryItem } from './GameHistory';

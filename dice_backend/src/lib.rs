@@ -192,7 +192,11 @@ thread_local! {
 fn init() {
     ic_cdk::println!("Dice Game Backend Initialized");
     // Seed will be initialized on first game or in post_upgrade
-    // Note: Cannot call async functions in init(), balance will be refreshed on first heartbeat
+
+    // Force immediate balance refresh on first heartbeat by resetting last refresh time
+    HEARTBEAT_STATE_CELL.with(|cell| {
+        cell.borrow_mut().set(0).expect("Failed to reset heartbeat state");
+    });
 }
 
 // Initialize the seed with VRF randomness (with lock to prevent race conditions)
@@ -301,7 +305,10 @@ fn post_upgrade() {
     // Restore accounting state
     accounting::post_upgrade_accounting();
 
-    // Note: Cannot call async functions in post_upgrade(), balance will be refreshed on first heartbeat
+    // Force immediate balance refresh on first heartbeat by resetting last refresh time
+    HEARTBEAT_STATE_CELL.with(|cell| {
+        cell.borrow_mut().set(0).expect("Failed to reset heartbeat state");
+    });
 }
 
 // Calculate win chance and multiplier based on target and direction
