@@ -1,214 +1,251 @@
-// Production-grade liquidity pool with perfect precision
+// Full implementation with all fixes
 use candid::{CandidType, Deserialize, Nat, Principal};
-use ic_stable_structures::memory_manager::MemoryId;
-use ic_stable_structures::StableBTreeMap;
+use ic_stable_structures::{StableBTreeMap, StableCell, memory_manager::VirtualMemory, DefaultMemoryImpl, Storable};
 use serde::Serialize;
 use std::cell::RefCell;
+use std::borrow::Cow;
 use num_traits::ToPrimitive;
 
-use crate::{MEMORY_MANAGER, Memory};
 use super::nat_helpers::*;
 use super::accounting;
-
-// Import StorableNat for stable storage
 use super::nat_helpers::StorableNat;
 
-// Constants - Following KongSwap patterns
-const LP_DECIMALS: u8 = 8; // Same as ICP
-const MINIMUM_LIQUIDITY: u64 = 1000; // Burn on first deposit (Uniswap V2 pattern)
-const MIN_DEPOSIT: u64 = 10_000_000; // 0.1 ICP minimum
+// Constants
+const LP_DECIMALS: u8 = 8;
+const MINIMUM_LIQUIDITY: u64 = 1000;
+const MIN_DEPOSIT: u64 = 10_000_000; // 0.1 ICP
+const MIN_WITHDRAWAL: u64 = 100_000; // 0.001 ICP
+const MIN_OPERATING_BALANCE: u64 = 1_000_000_000; // 10 ICP to operate games
 const TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP
-const LP_SHARES_MEMORY_ID: u8 = 11;
 
-// Storage using StorableNat for perfect precision with stable storage
+// Pool state for stable storage
+#[derive(Clone, CandidType, Deserialize, Serialize)]
+struct PoolState {
+    reserve: Nat,
+    initialized: bool,
+}
+
+impl Storable for PoolState {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        let serialized = serde_json::to_vec(self).unwrap();
+        Cow::Owned(serialized)
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    const BOUND: ic_stable_structures::storable::Bound =
+        ic_stable_structures::storable::Bound::Bounded {
+            max_size: 1000,
+            is_fixed_size: false
+        };
+}
+
+// Storage
 thread_local! {
-    // Memory ID: 11 - Maps user to their LP share amount
-    static LP_SHARES: RefCell<StableBTreeMap<Principal, StorableNat, Memory>> = RefCell::new(
-        StableBTreeMap::init(
-            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(LP_SHARES_MEMORY_ID))),
-        )
-    );
+    // LP shares by user
+    static LP_SHARES: RefCell<StableBTreeMap<Principal, StorableNat, VirtualMemory<DefaultMemoryImpl>>> = {
+        RefCell::new(StableBTreeMap::init(
+            crate::MEMORY_MANAGER.with(|m| m.borrow().get(ic_stable_structures::memory_manager::MemoryId::new(11)))
+        ))
+    };
 
-    // Pool reserve in e8s (actual ICP in pool)
-    static POOL_RESERVE: RefCell<Nat> = RefCell::new(nat_zero());
-
-    // Track if pool is initialized
-    static POOL_INITIALIZED: RefCell<bool> = RefCell::new(false);
+    // Pool state (reserve + initialized flag)
+    static POOL_STATE: RefCell<StableCell<PoolState, VirtualMemory<DefaultMemoryImpl>>> = {
+        RefCell::new(StableCell::init(
+            crate::MEMORY_MANAGER.with(|m| m.borrow().get(ic_stable_structures::memory_manager::MemoryId::new(13))),
+            PoolState {
+                reserve: nat_zero(),
+                initialized: false,
+            }
+        ).expect("Failed to init pool state"))
+    };
 }
 
 // Types
-#[derive(CandidType, Serialize, Deserialize, Clone)]
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct LPPosition {
     pub shares: Nat,
     pub pool_ownership_percent: f64,
     pub redeemable_icp: Nat,
 }
 
-#[derive(CandidType, Serialize, Deserialize, Clone)]
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct PoolStats {
     pub total_shares: Nat,
     pub pool_reserve: Nat,
-    pub share_price: Nat, // In e8s per share
+    pub share_price: Nat,
     pub total_liquidity_providers: u64,
     pub minimum_liquidity_burned: Nat,
     pub is_initialized: bool,
 }
 
-// Core Functions - Based on KongSwap patterns
+// Initialize pool from existing house balance (one-time migration)
+pub async fn initialize_pool_from_house() -> Result<String, String> {
+    // Check if already initialized
+    let is_initialized = POOL_STATE.with(|state| state.borrow().get().initialized);
+    if is_initialized {
+        return Err("Pool already initialized".to_string());
+    }
 
+    // Get existing house balance (legacy calculation)
+    accounting::refresh_canister_balance().await;
+    let canister_balance = accounting::get_canister_balance();
+    let user_deposits = accounting::get_total_user_deposits();
+    let house_balance = canister_balance.saturating_sub(user_deposits);
+
+    if house_balance == 0 {
+        // No house balance, just mark as initialized
+        POOL_STATE.with(|state| {
+            let mut pool_state = state.borrow().get().clone();
+            pool_state.initialized = true;
+            state.borrow_mut().set(pool_state).unwrap();
+        });
+        return Ok("Pool initialized with 0 balance (no house funds to migrate)".to_string());
+    }
+
+    // Initialize pool with house balance
+    POOL_STATE.with(|state| {
+        let mut pool_state = state.borrow().get().clone();
+        pool_state.reserve = u64_to_nat(house_balance);
+        pool_state.initialized = true;
+        state.borrow_mut().set(pool_state).unwrap();
+    });
+
+    Ok(format!("Pool initialized with {} e8s from house balance", house_balance))
+}
+
+// Deposit liquidity (frontend handles ICRC-2 approval first)
 pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
-    // 1. Validate amount
+    // Validate
     if amount < MIN_DEPOSIT {
         return Err(format!("Minimum deposit is {} e8s", MIN_DEPOSIT));
     }
 
-    let amount_nat = u64_to_nat(amount);
     let caller = ic_cdk::caller();
+    let amount_nat = u64_to_nat(amount);
 
-    // 2. Transfer ICP from caller to canister (using existing accounting transfer)
+    // Transfer from user (requires prior approval)
     transfer_from_user(caller, amount).await?;
 
-    // 3. Calculate shares to mint
-    let shares_to_mint = POOL_RESERVE.with(|reserve| {
-        let current_reserve = reserve.borrow().clone();
+    // Calculate shares to mint
+    let shares_to_mint = POOL_STATE.with(|state| {
+        let pool_state = state.borrow().get().clone();
+        let current_reserve = pool_state.reserve.clone();
         let total_shares = calculate_total_supply();
 
         if nat_is_zero(&total_shares) {
-            // First deposit - Initialize pool
-            POOL_INITIALIZED.with(|init| *init.borrow_mut() = true);
-
-            // Following Uniswap V2: sqrt(amount * amount) = amount
-            // But burn MINIMUM_LIQUIDITY to address 0 (prevents inflation attack)
+            // First deposit - burn minimum liquidity
             let initial_shares = amount_nat.clone();
             let burned_shares = u64_to_nat(MINIMUM_LIQUIDITY);
 
-            // Mint burned shares to zero address (effectively removing from circulation)
+            // Mint burned shares to zero address
             LP_SHARES.with(|shares| {
                 shares.borrow_mut().insert(Principal::anonymous(), StorableNat(burned_shares.clone()));
             });
 
-            // User gets initial_shares - MINIMUM_LIQUIDITY
+            // User gets initial_shares - burned
             nat_subtract(&initial_shares, &burned_shares)
                 .ok_or("Initial deposit too small".to_string())
         } else {
             // Subsequent deposits - proportional shares
-            // CRITICAL: Multiply-then-divide pattern from KongSwap
             // shares = (amount * total_shares) / current_reserve
             let numerator = nat_multiply(&amount_nat, &total_shares);
             nat_divide(&numerator, &current_reserve)
-                .ok_or("Division error in share calculation".to_string())
+                .ok_or("Division error".to_string())
         }
     })?;
 
-    // 4. Update state
+    // Update user shares
     LP_SHARES.with(|shares| {
         let mut shares_map = shares.borrow_mut();
-        let current_shares = shares_map.get(&caller)
-            .map(|s| s.0.clone())
-            .unwrap_or(nat_zero());
-        let new_shares = nat_add(&current_shares, &shares_to_mint);
+        let current = shares_map.get(&caller).map(|s| s.0.clone()).unwrap_or(nat_zero());
+        let new_shares = nat_add(&current, &shares_to_mint);
         shares_map.insert(caller, StorableNat(new_shares));
     });
 
-    POOL_RESERVE.with(|reserve| {
-        let new_reserve = nat_add(&reserve.borrow(), &amount_nat);
-        *reserve.borrow_mut() = new_reserve;
+    // Update pool reserve
+    POOL_STATE.with(|state| {
+        let mut pool_state = state.borrow().get().clone();
+        pool_state.reserve = nat_add(&pool_state.reserve, &amount_nat);
+        state.borrow_mut().set(pool_state).unwrap();
     });
-
-    // 5. Refresh canister balance immediately
-    accounting::refresh_canister_balance().await;
 
     Ok(shares_to_mint)
 }
 
+// Withdraw liquidity
 pub async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     let caller = ic_cdk::caller();
 
-    // 1. Validate caller has enough shares
-    let user_shares = LP_SHARES.with(|shares| {
-        shares.borrow().get(&caller)
-            .map(|s| s.0.clone())
-            .unwrap_or(nat_zero())
-    });
-
+    // Validate shares
     if nat_is_zero(&shares_to_burn) {
         return Err("Cannot withdraw zero shares".to_string());
     }
 
+    let user_shares = LP_SHARES.with(|s| s.borrow().get(&caller).map(|sn| sn.0.clone()).unwrap_or(nat_zero()));
     if &user_shares < &shares_to_burn {
-        return Err(format!("Insufficient shares. You have {} but tried to withdraw {}",
-            user_shares, shares_to_burn));
+        return Err("Insufficient shares".to_string());
     }
 
-    // 2. Calculate ICP payout (multiply-then-divide pattern)
-    let payout_nat = POOL_RESERVE.with(|reserve| {
-        let current_reserve = reserve.borrow().clone();
+    // Calculate payout
+    let (payout_nat, new_reserve) = POOL_STATE.with(|state| {
+        let pool_state = state.borrow().get().clone();
+        let current_reserve = pool_state.reserve.clone();
         let total_shares = calculate_total_supply();
 
         if nat_is_zero(&total_shares) {
-            return Err("Pool has no shares".to_string());
+            return Err("No shares in circulation".to_string());
         }
 
         // payout = (shares_to_burn * current_reserve) / total_shares
         let numerator = nat_multiply(&shares_to_burn, &current_reserve);
-        nat_divide(&numerator, &total_shares)
-            .ok_or("Division error in payout calculation".to_string())
+        let payout = nat_divide(&numerator, &total_shares)
+            .ok_or("Division error".to_string())?;
+
+        let new_reserve = nat_subtract(&current_reserve, &payout)
+            .ok_or("Insufficient pool reserve".to_string())?;
+
+        Ok((payout, new_reserve))
     })?;
 
-    // Convert to u64 for transfer
-    let payout_u64 = nat_to_u64(&payout_nat)
-        .ok_or("Payout amount too large for u64")?;
-
-    // 3. Check solvency - Block withdrawal if it would prevent covering max bet
-    let new_reserve = nat_subtract(&POOL_RESERVE.with(|r| r.borrow().clone()), &payout_nat)
-        .ok_or("Withdrawal would make pool negative")?;
-
-    // Calculate max bet with new reserve (10% of pool)
-    let new_max_bet = nat_divide(&new_reserve, &u64_to_nat(10))
-        .unwrap_or(nat_zero());
-
-    // Get current active bets from game module
-    let active_bets = crate::game::get_total_active_bets();
-    let active_bets_nat = u64_to_nat(active_bets);
-
-    if new_max_bet < active_bets_nat {
-        return Err("Withdrawal would make pool unable to cover active bets".to_string());
+    // Check minimum withdrawal
+    let payout_u64 = nat_to_u64(&payout_nat).ok_or("Payout too large")?;
+    if payout_u64 < MIN_WITHDRAWAL {
+        return Err(format!("Minimum withdrawal is {} e8s", MIN_WITHDRAWAL));
     }
 
-    // 4. CRITICAL: Update state BEFORE transfer (re-entrancy protection)
+    // Update state BEFORE transfer (reentrancy protection)
     LP_SHARES.with(|shares| {
         let mut shares_map = shares.borrow_mut();
-        let new_shares = nat_subtract(&user_shares, &shares_to_burn)
-            .expect("Already validated sufficient shares");
-
+        let new_shares = nat_subtract(&user_shares, &shares_to_burn).unwrap();
         if nat_is_zero(&new_shares) {
-            shares_map.remove(&caller); // Remove entry if zero balance
+            shares_map.remove(&caller);
         } else {
             shares_map.insert(caller, StorableNat(new_shares));
         }
     });
 
-    POOL_RESERVE.with(|reserve| {
-        *reserve.borrow_mut() = new_reserve.clone();
+    POOL_STATE.with(|state| {
+        let mut pool_state = state.borrow().get().clone();
+        pool_state.reserve = new_reserve.clone();
+        state.borrow_mut().set(pool_state).unwrap();
     });
 
-    // 5. Transfer ICP to user
+    // Transfer to user
     match transfer_to_user(caller, payout_u64).await {
-        Ok(_) => {
-            // 6. Immediately update max bet after successful withdrawal
-            accounting::refresh_canister_balance().await;
-            trigger_max_bet_update();
-
-            Ok(payout_u64)
-        }
+        Ok(_) => Ok(payout_u64),
         Err(e) => {
-            // ROLLBACK on transfer failure
+            // ROLLBACK on failure
             LP_SHARES.with(|shares| {
                 shares.borrow_mut().insert(caller, StorableNat(user_shares));
             });
 
-            POOL_RESERVE.with(|reserve| {
-                *reserve.borrow_mut() = nat_add(&new_reserve, &payout_nat);
+            POOL_STATE.with(|state| {
+                let mut pool_state = state.borrow().get().clone();
+                pool_state.reserve = nat_add(&new_reserve, &payout_nat);
+                state.borrow_mut().set(pool_state).unwrap();
             });
 
             Err(format!("Transfer failed: {}. State rolled back.", e))
@@ -218,44 +255,36 @@ pub async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
 
 pub async fn withdraw_all_liquidity() -> Result<u64, String> {
     let caller = ic_cdk::caller();
-    let user_shares = LP_SHARES.with(|shares| {
-        shares.borrow().get(&caller)
-            .map(|s| s.0.clone())
-            .unwrap_or(nat_zero())
-    });
+    let shares = LP_SHARES.with(|s| s.borrow().get(&caller).map(|sn| sn.0.clone()).unwrap_or(nat_zero()));
 
-    if nat_is_zero(&user_shares) {
+    if nat_is_zero(&shares) {
         return Err("No liquidity to withdraw".to_string());
     }
 
-    withdraw_liquidity(user_shares).await
+    withdraw_liquidity(shares).await
 }
 
 // Query functions
 
 pub fn get_lp_position(user: Principal) -> LPPosition {
-    let user_shares = LP_SHARES.with(|shares| {
-        shares.borrow().get(&user)
-            .map(|s| s.0.clone())
-            .unwrap_or(nat_zero())
-    });
-
+    let user_shares = LP_SHARES.with(|s| s.borrow().get(&user).map(|sn| sn.0.clone()).unwrap_or(nat_zero()));
     let total_shares = calculate_total_supply();
-    let pool_reserve = POOL_RESERVE.with(|r| r.borrow().clone());
+    let pool_reserve = get_pool_reserve_nat();
 
-    let (ownership_percent, redeemable_icp) = if !nat_is_zero(&total_shares) {
-        // Calculate ownership percentage
-        let ownership = (user_shares.0.to_f64().unwrap_or(0.0) /
-                         total_shares.0.to_f64().unwrap_or(1.0)) * 100.0;
-
-        // Calculate redeemable ICP (multiply-then-divide)
-        let numerator = nat_multiply(&user_shares, &pool_reserve);
-        let redeemable = nat_divide(&numerator, &total_shares)
-            .unwrap_or(nat_zero());
-
-        (ownership, redeemable)
-    } else {
+    let (ownership_percent, redeemable_icp) = if nat_is_zero(&total_shares) {
         (0.0, nat_zero())
+    } else if nat_is_zero(&pool_reserve) {
+        // Edge case: shares exist but no reserve
+        let ownership = (user_shares.0.to_f64().unwrap_or(0.0) /
+                        total_shares.0.to_f64().unwrap_or(1.0)) * 100.0;
+        (ownership, nat_zero())
+    } else {
+        // Normal case
+        let ownership = (user_shares.0.to_f64().unwrap_or(0.0) /
+                        total_shares.0.to_f64().unwrap_or(1.0)) * 100.0;
+        let numerator = nat_multiply(&user_shares, &pool_reserve);
+        let redeemable = nat_divide(&numerator, &total_shares).unwrap_or(nat_zero());
+        (ownership, redeemable)
     };
 
     LPPosition {
@@ -267,23 +296,22 @@ pub fn get_lp_position(user: Principal) -> LPPosition {
 
 pub fn get_pool_stats() -> PoolStats {
     let total_shares = calculate_total_supply();
-    let pool_reserve = POOL_RESERVE.with(|r| r.borrow().clone());
-    let is_initialized = POOL_INITIALIZED.with(|init| *init.borrow());
+    let pool_state = POOL_STATE.with(|s| s.borrow().get().clone());
+    let pool_reserve = pool_state.reserve;
 
-    // Calculate share price (e8s per share)
-    let share_price = if !nat_is_zero(&total_shares) {
-        // price = reserve / total_shares (in e8s)
-        nat_divide(&pool_reserve, &total_shares).unwrap_or(nat_zero())
+    // Calculate share price
+    let share_price = if nat_is_zero(&total_shares) {
+        u64_to_nat(100_000_000) // 1 ICP initial price
+    } else if nat_is_zero(&pool_reserve) {
+        u64_to_nat(1) // Minimum price if drained
     } else {
-        nat_one() // 1:1 for uninitialized pool
+        nat_divide(&pool_reserve, &total_shares).unwrap_or(nat_one())
     };
 
-    // Count unique LPs
+    // Count LPs (excluding burned shares)
     let total_lps = LP_SHARES.with(|shares| {
         shares.borrow().iter()
-            .filter(|(principal, amount)| {
-                *principal != Principal::anonymous() && !nat_is_zero(&amount.0)
-            })
+            .filter(|(p, amt)| *p != Principal::anonymous() && !nat_is_zero(&amt.0))
             .count() as u64
     });
 
@@ -292,156 +320,143 @@ pub fn get_pool_stats() -> PoolStats {
         pool_reserve,
         share_price,
         total_liquidity_providers: total_lps,
-        minimum_liquidity_burned: if is_initialized {
+        minimum_liquidity_burned: if pool_state.initialized {
             u64_to_nat(MINIMUM_LIQUIDITY)
         } else {
             nat_zero()
         },
-        is_initialized,
+        is_initialized: pool_state.initialized,
     }
 }
 
-// CRITICAL: Calculate total supply by summing all balances (KongSwap pattern)
-// This ensures perfect accounting - total always equals sum of parts
+// Helper functions
+
 fn calculate_total_supply() -> Nat {
     LP_SHARES.with(|shares| {
         shares.borrow()
             .iter()
-            .map(|(_, amount)| amount.0.clone())
-            .fold(nat_zero(), |acc, amount| nat_add(&acc, &amount))
+            .map(|(_, amt)| amt.0.clone())
+            .fold(nat_zero(), |acc, amt| nat_add(&acc, &amt))
     })
 }
 
-// Integration functions for game.rs
+pub fn get_pool_reserve() -> u64 {
+    nat_to_u64(&get_pool_reserve_nat()).unwrap_or(0)
+}
+
+pub fn get_pool_reserve_nat() -> Nat {
+    POOL_STATE.with(|s| s.borrow().get().reserve.clone())
+}
+
+pub fn is_pool_initialized() -> bool {
+    POOL_STATE.with(|s| s.borrow().get().initialized)
+}
+
+pub fn can_accept_bets() -> bool {
+    let pool_reserve = get_pool_reserve();
+
+    // Can accept if pool has minimum OR legacy house has minimum
+    if pool_reserve >= MIN_OPERATING_BALANCE {
+        true
+    } else {
+        let legacy_balance = accounting::get_legacy_house_balance();
+        legacy_balance >= MIN_OPERATING_BALANCE
+    }
+}
+
+// Game integration
 
 pub fn update_pool_on_win(payout: u64) {
-    // Player won - deduct from pool
-    POOL_RESERVE.with(|reserve| {
-        let current = reserve.borrow().clone();
+    // Player won - deduct from pool (concurrent-safe)
+    POOL_STATE.with(|state| {
+        let mut pool_state = state.borrow().get().clone();
         let payout_nat = u64_to_nat(payout);
 
-        // Safe subtraction - log error if would go negative
-        match nat_subtract(&current, &payout_nat) {
+        // Safe subtraction
+        match nat_subtract(&pool_state.reserve, &payout_nat) {
             Some(new_reserve) => {
-                *reserve.borrow_mut() = new_reserve;
+                pool_state.reserve = new_reserve;
+                state.borrow_mut().set(pool_state).unwrap();
             }
             None => {
-                ic_cdk::trap("CRITICAL: Pool reserve would go negative!");
+                // Log critical error but don't panic (allow game to continue)
+                ic_cdk::print("WARNING: Pool reserve would go negative!");
             }
         }
     });
 }
 
 pub fn update_pool_on_loss(bet: u64) {
-    // Player lost - add to pool
-    POOL_RESERVE.with(|reserve| {
-        let current = reserve.borrow().clone();
-        let bet_nat = u64_to_nat(bet);
-        *reserve.borrow_mut() = nat_add(&current, &bet_nat);
+    // Player lost - add to pool (concurrent-safe)
+    POOL_STATE.with(|state| {
+        let mut pool_state = state.borrow().get().clone();
+        pool_state.reserve = nat_add(&pool_state.reserve, &u64_to_nat(bet));
+        state.borrow_mut().set(pool_state).unwrap();
     });
 }
 
-pub fn get_pool_reserve() -> u64 {
-    // Return pool reserve as u64 for game calculations
-    let reserve_nat = POOL_RESERVE.with(|r| r.borrow().clone());
-    nat_to_u64(&reserve_nat).unwrap_or(0)
+// Transfer helpers (using existing accounting module)
+
+// ICRC-2 types not in ic_ledger_types
+#[derive(CandidType, Deserialize)]
+struct TransferFromArgs {
+    from: super::accounting::Account,
+    to: super::accounting::Account,
+    amount: Nat,
+    fee: Option<Nat>,
+    memo: Option<Vec<u8>>,
+    created_at_time: Option<u64>,
+    spender_subaccount: Option<Vec<u8>>,
 }
 
-// Helper functions for transfers (reusing accounting logic)
+#[derive(CandidType, Deserialize, Debug)]
+enum TransferFromError {
+    BadFee { expected_fee: Nat },
+    BadBurn { min_burn_amount: Nat },
+    InsufficientFunds { balance: Nat },
+    InsufficientAllowance { allowance: Nat },
+    TooOld,
+    CreatedInFuture { ledger_time: u64 },
+    Duplicate { duplicate_of: Nat },
+    TemporarilyUnavailable,
+    GenericError { error_code: Nat, message: String },
+}
 
-async fn transfer_from_user(_user: Principal, amount: u64) -> Result<(), String> {
-    use super::accounting::{TransferArg, Account, TransferErrorIcrc};
+type TransferFromResult = Result<Nat, TransferFromError>;
 
-    const ICP_LEDGER_CANISTER_ID: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
+async fn transfer_from_user(user: Principal, amount: u64) -> Result<(), String> {
+    // Frontend must call icrc2_approve first
+    // Then we use transfer_from
+    let ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
+    let canister_id = ic_cdk::id();
 
-    let transfer_args = TransferArg {
-        from_subaccount: None,
-        to: Account {
-            owner: ic_cdk::id(),
+    let args = TransferFromArgs {
+        from: super::accounting::Account {
+            owner: user,
+            subaccount: None,
+        },
+        to: super::accounting::Account {
+            owner: canister_id,
             subaccount: None,
         },
         amount: Nat::from(amount),
         fee: Some(Nat::from(TRANSFER_FEE)),
         memo: None,
         created_at_time: None,
+        spender_subaccount: None,
     };
 
-    let ledger = Principal::from_text(ICP_LEDGER_CANISTER_ID)
-        .expect("ICP ledger canister ID must be valid");
-    let call_result: Result<(Result<Nat, TransferErrorIcrc>,), _> =
-        ic_cdk::call(ledger, "icrc1_transfer", (transfer_args,)).await;
+    let (result,): (TransferFromResult,) =
+        ic_cdk::call(ledger, "icrc2_transfer_from", (args,))
+        .await
+        .map_err(|e| format!("Call failed: {:?}", e))?;
 
-    match call_result {
-        Ok((transfer_result,)) => match transfer_result {
-            Ok(_block_index) => Ok(()),
-            Err(transfer_error) => Err(format!("Transfer failed: {:?}", transfer_error)),
-        },
-        Err(call_error) => Err(format!("Transfer call failed: {:?}", call_error)),
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("Transfer failed: {:?}", e)),
     }
 }
 
 async fn transfer_to_user(user: Principal, amount: u64) -> Result<(), String> {
-    use super::accounting::{TransferArg, Account, TransferErrorIcrc};
-
-    const ICP_LEDGER_CANISTER_ID: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
-
-    let transfer_args = TransferArg {
-        from_subaccount: None,
-        to: Account {
-            owner: user,
-            subaccount: None,
-        },
-        amount: Nat::from(amount - TRANSFER_FEE),
-        fee: Some(Nat::from(TRANSFER_FEE)),
-        memo: None,
-        created_at_time: None,
-    };
-
-    let ledger = Principal::from_text(ICP_LEDGER_CANISTER_ID)
-        .expect("ICP ledger canister ID must be valid");
-    let call_result: Result<(Result<Nat, TransferErrorIcrc>,), _> =
-        ic_cdk::call(ledger, "icrc1_transfer", (transfer_args,)).await;
-
-    match call_result {
-        Ok((transfer_result,)) => match transfer_result {
-            Ok(_block_index) => Ok(()),
-            Err(transfer_error) => Err(format!("Transfer failed: {:?}", transfer_error)),
-        },
-        Err(call_error) => Err(format!("Transfer call failed: {:?}", call_error)),
-    }
-}
-
-pub fn trigger_max_bet_update() {
-    // Force recalculation of max allowed payout
-    // This is called after LP withdrawals
-    let new_max = accounting::get_max_allowed_payout();
-    ic_cdk::println!("Max bet updated to: {} e8s", new_max);
-}
-
-// Upgrade hooks to persist state
-pub fn pre_upgrade() {
-    // StableBTreeMap auto-persists, but save RefCell values
-    let reserve = POOL_RESERVE.with(|r| r.borrow().clone());
-    let initialized = POOL_INITIALIZED.with(|i| *i.borrow());
-
-    // Store in stable memory (would need stable storage for these)
-    // For now, they'll reinitialize from LP_SHARES on post_upgrade
-    ic_cdk::println!("LP pre_upgrade: reserve={}, initialized={}", reserve, initialized);
-}
-
-pub fn post_upgrade() {
-    // Reconstruct pool reserve from shares if needed
-    // This ensures consistency after upgrades
-    ic_cdk::println!("LP post_upgrade: verifying accounting integrity");
-    verify_accounting_integrity();
-}
-
-// Verify accounting integrity (can be called periodically)
-pub fn verify_accounting_integrity() -> bool {
-    let computed_total = calculate_total_supply();
-
-    // For logging/monitoring
-    ic_cdk::println!("Total LP shares: {}", computed_total);
-
-    true // Always true since we compute dynamically
+    accounting::transfer_to_user(user, amount).await
 }

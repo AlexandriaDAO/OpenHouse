@@ -1,6 +1,6 @@
 use crate::types::{DiceResult, GameStats, RollDirection, E8S_PER_ICP, MIN_BET, MAX_NUMBER};
 use crate::seed::{generate_dice_roll_instant, maybe_schedule_seed_rotation};
-use crate::defi_accounting as accounting;
+use crate::defi_accounting::{self as accounting, liquidity_pool};
 use candid::Principal;
 use ic_stable_structures::memory_manager::MemoryId;
 use ic_stable_structures::StableBTreeMap;
@@ -235,19 +235,27 @@ pub async fn play_dice(
     // Update user balance based on game result
     // Bet was already deducted before game logic (P0-3 fix)
     // Now only add winnings if player won
+
+    // After determining outcome
+    let house_mode = accounting::get_house_mode();
+
     if is_win {
         let current_balance = accounting::get_balance(caller);
         let new_balance = current_balance.checked_add(payout)
             .ok_or("Balance overflow when adding winnings")?;
         accounting::update_balance(caller, new_balance)?;
 
-        // Update pool reserve - deduct profit from pool
-        let profit = payout.checked_sub(bet_amount)
-            .ok_or("Payout calculation error")?;
-        accounting::update_pool_on_win(profit);
+        let profit = payout.saturating_sub(bet_amount);
+
+        // Update pool only if in LP mode
+        if house_mode == "liquidity_pool" {
+            liquidity_pool::update_pool_on_win(profit);
+        }
     } else {
-        // Player lost - bet goes to pool
-        accounting::update_pool_on_loss(bet_amount);
+        // Player lost
+        if house_mode == "liquidity_pool" {
+            liquidity_pool::update_pool_on_loss(bet_amount);
+        }
     }
 
     Ok(result)

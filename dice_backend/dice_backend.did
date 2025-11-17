@@ -92,14 +92,19 @@ service : {
   audit_balances: () -> (variant { Ok: text; Err: text }) query;
   refresh_canister_balance: () -> (nat64);
 
+  // Pool initialization
+  initialize_pool_from_house : () -> (variant { Ok: text; Err: text });
+
   // Liquidity Pool Management
-  deposit_liquidity_endpoint: (nat64) -> (variant { Ok: nat; Err: text });
-  withdraw_liquidity_endpoint: (nat) -> (variant { Ok: nat64; Err: text });
-  withdraw_all_liquidity_endpoint: () -> (variant { Ok: nat64; Err: text });
+  deposit_liquidity : (nat64) -> (variant { Ok: nat; Err: text });
+  withdraw_liquidity : (nat) -> (variant { Ok: nat64; Err: text });
+  withdraw_all_liquidity : () -> (variant { Ok: nat64; Err: text });
 
   // LP Queries
-  get_lp_position_endpoint: (principal) -> (LPPosition) query;
-  get_pool_stats_endpoint: () -> (PoolStats) query;
+  get_lp_position : (principal) -> (LPPosition) query;
+  get_pool_stats : () -> (PoolStats) query;
+  get_house_mode : () -> (text) query;
+  can_accept_bets : () -> (bool) query;
 
   // Test function
   greet: (text) -> (text) query;
