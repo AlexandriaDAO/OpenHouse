@@ -17,6 +17,7 @@ const MIN_DEPOSIT: u64 = 10_000_000; // 0.1 ICP
 const MIN_WITHDRAWAL: u64 = 100_000; // 0.001 ICP
 const MIN_OPERATING_BALANCE: u64 = 1_000_000_000; // 10 ICP to operate games
 const TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP
+const POOL_ADMIN: &str = "p7336-jmpo5-pkjsf-7dqkd-ea3zu-g2ror-ctcn2-sxtuo-tjve3-ulrx7-wae";
 
 // Pool state for stable storage
 #[derive(Clone, CandidType, Deserialize, Serialize)]
@@ -83,6 +84,19 @@ pub struct PoolStats {
 
 // Initialize pool from existing house balance (one-time migration)
 pub async fn initialize_pool_from_house() -> Result<String, String> {
+    // CRITICAL: Authorization check - only pool admin can initialize
+    let caller = ic_cdk::caller();
+    let admin = Principal::from_text(POOL_ADMIN)
+        .map_err(|_| "Invalid admin principal configured")?;
+
+    if caller != admin {
+        return Err(format!(
+            "Unauthorized: Only pool admin ({}) can initialize. Caller: {}",
+            POOL_ADMIN,
+            caller
+        ));
+    }
+
     // Check if already initialized
     let is_initialized = POOL_STATE.with(|state| state.borrow().get().initialized);
     if is_initialized {
@@ -126,8 +140,23 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
     let caller = ic_cdk::caller();
     let amount_nat = u64_to_nat(amount);
 
-    // Transfer from user (requires prior approval)
-    transfer_from_user(caller, amount).await?;
+    // Transfer from user (requires prior ICRC-2 approval)
+    match transfer_from_user(caller, amount).await {
+        Err(e) if e.contains("InsufficientAllowance") => {
+            return Err(format!(
+                "Your ICP approval has expired or been consumed. Please approve {} e8s again in your wallet.",
+                amount
+            ));
+        }
+        Err(e) if e.contains("InsufficientFunds") => {
+            return Err(format!(
+                "Insufficient ICP balance. You need {} e8s plus transfer fee.",
+                amount
+            ));
+        }
+        Err(e) => return Err(format!("Transfer failed: {}", e)),
+        Ok(_) => {}
+    }
 
     // Calculate shares to mint
     let shares_to_mint = POOL_STATE.with(|state| {
@@ -372,15 +401,19 @@ pub fn update_pool_on_win(payout: u64) {
         let mut pool_state = state.borrow().get().clone();
         let payout_nat = u64_to_nat(payout);
 
-        // Safe subtraction
+        // Safe subtraction with trap on underflow
         match nat_subtract(&pool_state.reserve, &payout_nat) {
             Some(new_reserve) => {
                 pool_state.reserve = new_reserve;
                 state.borrow_mut().set(pool_state).unwrap();
             }
             None => {
-                // Log critical error but don't panic (allow game to continue)
-                ic_cdk::print("WARNING: Pool reserve would go negative!");
+                // CRITICAL: Halt operations to protect LP funds
+                ic_cdk::trap(&format!(
+                    "CRITICAL: Pool insolvent. Attempted payout {} e8s exceeds reserve {} e8s. Halting to protect LPs.",
+                    payout,
+                    nat_to_u64(&pool_state.reserve).unwrap_or(0)
+                ));
             }
         }
     });
