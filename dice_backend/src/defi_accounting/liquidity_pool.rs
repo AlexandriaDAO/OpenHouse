@@ -17,7 +17,6 @@ const MIN_DEPOSIT: u64 = 10_000_000; // 0.1 ICP
 const MIN_WITHDRAWAL: u64 = 100_000; // 0.001 ICP
 const MIN_OPERATING_BALANCE: u64 = 1_000_000_000; // 10 ICP to operate games
 const TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP
-const POOL_ADMIN: &str = "p7336-jmpo5-pkjsf-7dqkd-ea3zu-g2ror-ctcn2-sxtuo-tjve3-ulrx7-wae";
 
 // Pool state for stable storage
 #[derive(Clone, CandidType, Deserialize, Serialize)]
@@ -62,6 +61,15 @@ thread_local! {
             }
         ).expect("Failed to init pool state"))
     };
+
+    // Upgradeable admin storage
+    static POOL_ADMIN: RefCell<StableCell<Principal, VirtualMemory<DefaultMemoryImpl>>> = {
+        RefCell::new(StableCell::init(
+            crate::MEMORY_MANAGER.with(|m| m.borrow().get(ic_stable_structures::memory_manager::MemoryId::new(14))),
+            Principal::from_text("p7336-jmpo5-pkjsf-7dqkd-ea3zu-g2ror-ctcn2-sxtuo-tjve3-ulrx7-wae")
+                .unwrap()
+        ).expect("Failed to init admin"))
+    };
 }
 
 // Types
@@ -86,13 +94,11 @@ pub struct PoolStats {
 pub async fn initialize_pool_from_house() -> Result<String, String> {
     // CRITICAL: Authorization check - only pool admin can initialize
     let caller = ic_cdk::caller();
-    let admin = Principal::from_text(POOL_ADMIN)
-        .map_err(|_| "Invalid admin principal configured")?;
+    let admin = POOL_ADMIN.with(|a| a.borrow().get().clone());
 
     if caller != admin {
         return Err(format!(
-            "Unauthorized: Only pool admin ({}) can initialize. Caller: {}",
-            POOL_ADMIN,
+            "Unauthorized: Only pool admin can initialize. Caller: {}",
             caller
         ));
     }
@@ -132,9 +138,18 @@ pub async fn initialize_pool_from_house() -> Result<String, String> {
 
 // Deposit liquidity (frontend handles ICRC-2 approval first)
 pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
+    // Guard against concurrent operations
+    let _guard = super::guard::CallerGuard::new()?;
+
     // Validate
     if amount < MIN_DEPOSIT {
         return Err(format!("Minimum deposit is {} e8s", MIN_DEPOSIT));
+    }
+
+    // Protection against share manipulation
+    let total_shares = calculate_total_supply();
+    if nat_is_zero(&total_shares) && amount < 100_000_000 {  // 1 ICP minimum for first deposit
+        return Err("First deposit must be at least 1 ICP to prevent share manipulation".to_string());
     }
 
     let caller = ic_cdk::caller();
@@ -206,6 +221,9 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
 
 // Withdraw liquidity
 pub async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
+    // Guard against concurrent operations
+    let _guard = super::guard::CallerGuard::new()?;
+
     let caller = ic_cdk::caller();
 
     // Validate shares
@@ -492,4 +510,16 @@ async fn transfer_from_user(user: Principal, amount: u64) -> Result<(), String> 
 
 async fn transfer_to_user(user: Principal, amount: u64) -> Result<(), String> {
     accounting::transfer_to_user(user, amount).await
+}
+
+// Admin management functions
+
+pub fn get_pool_admin() -> Principal {
+    POOL_ADMIN.with(|a| a.borrow().get().clone())
+}
+
+pub fn set_pool_admin(new_admin: Principal) {
+    POOL_ADMIN.with(|a| {
+        a.borrow_mut().set(new_admin).expect("Failed to set admin");
+    });
 }

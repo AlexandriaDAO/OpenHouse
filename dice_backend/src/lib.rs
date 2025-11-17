@@ -199,3 +199,28 @@ fn can_accept_bets() -> bool {
     defi_accounting::can_accept_bets()
 }
 
+// Admin management
+
+#[update]
+async fn set_pool_admin(new_admin: Principal) -> Result<String, String> {
+    // Only current admin can update
+    let caller = ic_cdk::caller();
+    let current_admin = defi_accounting::get_pool_admin();
+
+    if caller != current_admin {
+        return Err("Only current admin can transfer admin rights".to_string());
+    }
+
+    if new_admin == Principal::anonymous() {
+        return Err("Cannot set anonymous principal as admin".to_string());
+    }
+
+    defi_accounting::set_pool_admin(new_admin);
+    Ok(format!("Admin updated from {} to {}", current_admin, new_admin))
+}
+
+#[query]
+fn get_pool_admin() -> Principal {
+    defi_accounting::get_pool_admin()
+}
+

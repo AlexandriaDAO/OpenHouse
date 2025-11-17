@@ -3,6 +3,7 @@
 pub mod accounting;
 pub mod nat_helpers;
 pub mod liquidity_pool;
+pub mod guard;
 
 // Re-export main functions
 pub use accounting::{
@@ -36,8 +37,12 @@ pub use liquidity_pool::{
     can_accept_bets,
     update_pool_on_win,
     update_pool_on_loss,
+    get_pool_admin,
+    set_pool_admin,
     LPPosition,
     PoolStats,
 };
+
+pub use guard::CallerGuard;
 
 // REMOVE timer initialization - no longer needed
