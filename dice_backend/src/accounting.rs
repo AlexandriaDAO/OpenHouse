@@ -12,6 +12,7 @@ const MIN_DEPOSIT: u64 = 10_000_000; // 0.1 ICP
 const MIN_WITHDRAW: u64 = 10_000_000; // 0.1 ICP
 const USER_BALANCES_MEMORY_ID: u8 = 10; // Memory ID for user balances
 const ICP_LEDGER_CANISTER_ID: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai"; // ICP ledger principal
+const MAX_PAYOUT_PERCENTAGE: f64 = 0.10; // 10% of house balance
 
 // ICRC-1 types (since ic-ledger-types doesn't have them all)
 #[derive(CandidType, Deserialize, Clone, Debug)]
@@ -258,6 +259,16 @@ pub fn get_balance(user: Principal) -> u64 {
 #[query]
 pub fn get_my_balance() -> u64 {
     get_balance(ic_cdk::caller())
+}
+
+/// Get the maximum allowed payout (10% of house balance)
+#[update]
+pub async fn get_max_allowed_payout() -> Result<u64, String> {
+    let house_balance = get_house_balance().await?;
+    if house_balance == 0 {
+        return Ok(0);
+    }
+    Ok((house_balance as f64 * MAX_PAYOUT_PERCENTAGE) as u64)
 }
 
 #[update]
