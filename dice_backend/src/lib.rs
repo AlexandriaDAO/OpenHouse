@@ -21,7 +21,8 @@ mod heartbeat_impl;
 
 pub use accounting::{
     deposit, withdraw, withdraw_all, get_balance, get_my_balance, get_house_balance,
-    get_max_allowed_payout, get_accounting_stats, audit_balances, refresh_canister_balance,
+    get_max_allowed_payout, get_max_allowed_payout_cached, refresh_max_payout_cache,
+    get_accounting_stats, audit_balances, refresh_canister_balance, init_accounting,
     AccountingStats, Account,
 };
 pub use types::{RollDirection, DiceResult, GameStats, DetailedGameHistory, SeedRotationRecord};
@@ -44,6 +45,7 @@ thread_local! {
 #[init]
 fn init() {
     ic_cdk::println!("Dice Game Backend Initialized");
+    init_accounting();
     heartbeat_impl::init_heartbeat();
 }
 

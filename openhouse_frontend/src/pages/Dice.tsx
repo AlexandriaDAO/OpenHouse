@@ -99,13 +99,16 @@ export const Dice: React.FC = () => {
           gameState.setGameError(result.Err);
         }
 
-        // Get max bet (NEW) - with error handling
+        // Get max bet based on max allowed payout (10% house limit)
         try {
-          const maxBetE8s = await actor.get_max_bet(targetNumber, directionVariant);
-          const maxBetICP = Number(maxBetE8s) / E8S_PER_ICP;
+          const maxPayoutE8s = await actor.get_max_allowed_payout_cached();
+          const maxPayoutICP = Number(maxPayoutE8s) / E8S_PER_ICP;
+
+          // Calculate max bet: max_allowed_payout / multiplier
+          const maxBetICP = mult > 0 ? maxPayoutICP / mult : 0;
           setMaxBet(maxBetICP);
 
-          // Adjust current bet if it exceeds new max (NEW)
+          // Adjust current bet if it exceeds new max
           if (gameState.betAmount > maxBetICP) {
             gameState.setBetAmount(maxBetICP);
           }

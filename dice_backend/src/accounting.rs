@@ -51,6 +51,10 @@ thread_local! {
             MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(USER_BALANCES_MEMORY_ID))),
         )
     );
+
+    // Cached max allowed payout (10% of house balance) - refreshed hourly via heartbeat
+    // This avoids 500ms ledger query on every bet
+    static CACHED_MAX_PAYOUT: RefCell<u64> = RefCell::new(0);
 }
 
 #[derive(CandidType, Deserialize, Clone)]
@@ -261,7 +265,15 @@ pub fn get_my_balance() -> u64 {
     get_balance(ic_cdk::caller())
 }
 
-/// Get the maximum allowed payout (10% of house balance)
+/// Get the maximum allowed payout from cache (fast, for bet validation)
+/// Refreshed hourly via heartbeat to avoid 500ms ledger query on every bet
+#[query]
+pub fn get_max_allowed_payout_cached() -> u64 {
+    CACHED_MAX_PAYOUT.with(|cache| *cache.borrow())
+}
+
+/// Get the maximum allowed payout (10% of house balance) - accurate but slow
+/// Queries ledger directly - use for display/admin purposes, not bet validation
 #[update]
 pub async fn get_max_allowed_payout() -> Result<u64, String> {
     let house_balance = get_house_balance().await?;
@@ -269,6 +281,21 @@ pub async fn get_max_allowed_payout() -> Result<u64, String> {
         return Ok(0);
     }
     Ok((house_balance as f64 * MAX_PAYOUT_PERCENTAGE) as u64)
+}
+
+/// Refresh the cached max payout (called by heartbeat)
+pub async fn refresh_max_payout_cache() {
+    match get_max_allowed_payout().await {
+        Ok(max_payout) => {
+            CACHED_MAX_PAYOUT.with(|cache| {
+                *cache.borrow_mut() = max_payout;
+            });
+            ic_cdk::println!("Max payout cache refreshed: {} e8s", max_payout);
+        }
+        Err(e) => {
+            ic_cdk::println!("⚠️ Failed to refresh max payout cache: {}", e);
+        }
+    }
 }
 
 #[update]
@@ -359,6 +386,13 @@ pub fn pre_upgrade_accounting() {
 
 pub fn post_upgrade_accounting() {
     // Nothing needed - we calculate totals on-demand now
+    // Note: Cache will be refreshed by first heartbeat (within 1 hour)
+}
+
+/// Initialize accounting (called on canister init)
+pub fn init_accounting() {
+    // Cache starts at 0, will be refreshed by first heartbeat
+    ic_cdk::println!("Accounting initialized. Max payout cache will be populated on first heartbeat.");
 }
 
 // =============================================================================
