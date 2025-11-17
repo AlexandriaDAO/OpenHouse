@@ -10,6 +10,9 @@ use crate::{MEMORY_MANAGER, Memory};
 const ICP_TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP in e8s
 const MIN_DEPOSIT: u64 = 10_000_000; // 0.1 ICP
 const MIN_WITHDRAW: u64 = 10_000_000; // 0.1 ICP
+const USER_BALANCES_MEMORY_ID: u8 = 10; // Memory ID for user balances
+const ICP_LEDGER_CANISTER_ID: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai"; // ICP ledger principal
+const MAX_PAYOUT_PERCENTAGE: f64 = 0.10; // 10% of house balance
 
 // ICRC-1 types (since ic-ledger-types doesn't have them all)
 #[derive(CandidType, Deserialize, Clone, Debug)]
@@ -45,25 +48,13 @@ thread_local! {
     // Stable storage for persistence across upgrades
     static USER_BALANCES_STABLE: RefCell<StableBTreeMap<Principal, u64, Memory>> = RefCell::new(
         StableBTreeMap::init(
-            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(10))),
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(USER_BALANCES_MEMORY_ID))),
         )
     );
 
-    // Cached canister balance (updated after deposits/withdrawals)
+    // Cached canister balance (refreshed hourly via heartbeat)
+    // This avoids 500ms ledger query on every balance check
     static CACHED_CANISTER_BALANCE: RefCell<u64> = RefCell::new(0);
-
-    // Track when the balance was last refreshed (for cache validation)
-    static LAST_BALANCE_REFRESH: RefCell<u64> = RefCell::new(0);
-}
-
-// Helper function to calculate total deposits on-demand
-fn calculate_total_deposits() -> u64 {
-    USER_BALANCES_STABLE.with(|balances| {
-        balances.borrow()
-            .iter()
-            .map(|(_, balance)| balance)
-            .sum()
-    })
 }
 
 #[derive(CandidType, Deserialize, Clone)]
@@ -75,58 +66,24 @@ pub struct AccountingStats {
 }
 
 // =============================================================================
-// BALANCE CACHE MANAGEMENT
+// HELPER FUNCTIONS
 // =============================================================================
 
-/// Refresh the cached canister balance from the ledger
-#[update]
-pub async fn refresh_canister_balance() -> u64 {
-    let account = Account {
-        owner: ic_cdk::id(),
-        subaccount: None,
-    };
-
-    let ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
-    let result: Result<(Nat,), _> = ic_cdk::call(ledger, "icrc1_balance_of", (account,)).await;
-
-    match result {
-        Ok((balance,)) => {
-            let balance_u64 = balance.0.try_into().unwrap_or(0);
-            CACHED_CANISTER_BALANCE.with(|cache| {
-                *cache.borrow_mut() = balance_u64;
-            });
-            // Update the timestamp when balance is refreshed
-            LAST_BALANCE_REFRESH.with(|timestamp| {
-                *timestamp.borrow_mut() = ic_cdk::api::time();
-            });
-            balance_u64
-        }
-        Err(e) => {
-            ic_cdk::println!("Failed to refresh canister balance: {:?}", e);
-            0
-        }
-    }
+/// Calculate total user deposits on-demand from stable storage
+fn calculate_total_deposits() -> u64 {
+    USER_BALANCES_STABLE.with(|balances| {
+        balances.borrow()
+            .iter()
+            .map(|(_, balance)| balance)
+            .sum()
+    })
 }
 
-/// Check if the cached balance is stale (older than max_age_nanos)
-pub fn is_balance_cache_stale(max_age_nanos: u64) -> bool {
-    let last_refresh = LAST_BALANCE_REFRESH.with(|timestamp| *timestamp.borrow());
-    let current_time = ic_cdk::api::time();
-
-    // If never refreshed or older than max age, it's stale
-    // P1 fix: Use saturating_sub to prevent overflow
-    last_refresh == 0 || current_time.saturating_sub(last_refresh) > max_age_nanos
-}
-
-/// Get the age of the cached balance in nanoseconds
-pub fn get_balance_cache_age() -> u64 {
-    let last_refresh = LAST_BALANCE_REFRESH.with(|timestamp| *timestamp.borrow());
-    if last_refresh == 0 {
-        u64::MAX // Never refreshed
-    } else {
-        // P1 fix: Use saturating_sub to prevent overflow
-        ic_cdk::api::time().saturating_sub(last_refresh)
-    }
+/// Rollback balance change helper (DRY)
+fn rollback_balance_change(user: Principal, original_balance: u64) {
+    USER_BALANCES_STABLE.with(|balances| {
+        balances.borrow_mut().insert(user, original_balance);
+    });
 }
 
 // =============================================================================
@@ -155,16 +112,16 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
         created_at_time: None,
     };
 
-    let ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
+    let ledger = Principal::from_text(ICP_LEDGER_CANISTER_ID)
+        .expect("ICP ledger canister ID must be valid");
     let call_result: Result<(Result<Nat, TransferErrorIcrc>,), _> =
         ic_cdk::call(ledger, "icrc1_transfer", (transfer_args,)).await;
 
     match call_result {
         Ok((transfer_result,)) => match transfer_result {
             Ok(_block_index) => {
-                // STEP 3: Credit user with full amount
+                // Credit user with full amount
                 // In ICRC-1: user pays (amount + fee), canister receives amount
-                // So credit the full amount that the canister received
                 let new_balance = USER_BALANCES_STABLE.with(|balances| {
                     let mut balances = balances.borrow_mut();
                     let current = balances.get(&caller).unwrap_or(0);
@@ -172,9 +129,6 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
                     balances.insert(caller, new_bal);
                     new_bal
                 });
-
-                // Refresh cached canister balance after deposit
-                refresh_canister_balance().await;
 
                 ic_cdk::println!("Deposit successful: {} deposited {} e8s", caller, amount);
                 Ok(new_balance)
@@ -208,7 +162,7 @@ pub async fn withdraw(amount: u64) -> Result<u64, String> {
         return Err(format!("Insufficient balance. You have {} e8s, trying to withdraw {} e8s", user_balance, amount));
     }
 
-    // STEP 3: Deduct from user balance FIRST (prevent re-entrancy)
+    // Deduct from user balance FIRST (prevent re-entrancy)
     let new_balance = USER_BALANCES_STABLE.with(|balances| {
         let mut balances = balances.borrow_mut();
         let new_bal = user_balance - amount;
@@ -229,32 +183,26 @@ pub async fn withdraw(amount: u64) -> Result<u64, String> {
         created_at_time: None,
     };
 
-    let ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
+    let ledger = Principal::from_text(ICP_LEDGER_CANISTER_ID)
+        .expect("ICP ledger canister ID must be valid");
     let call_result: Result<(Result<Nat, TransferErrorIcrc>,), _> =
         ic_cdk::call(ledger, "icrc1_transfer", (transfer_args,)).await;
 
     match call_result {
         Ok((transfer_result,)) => match transfer_result {
             Ok(_block_index) => {
-                // Refresh cached canister balance after successful withdrawal
-                refresh_canister_balance().await;
-
                 ic_cdk::println!("Withdrawal successful: {} withdrew {} e8s", caller, amount);
                 Ok(new_balance)
             }
             Err(transfer_error) => {
-                // ROLLBACK on transfer error
-                USER_BALANCES_STABLE.with(|balances| {
-                    balances.borrow_mut().insert(caller, user_balance);
-                });
+                // Use helper for rollback
+                rollback_balance_change(caller, user_balance);
                 Err(format!("Transfer failed: {:?}", transfer_error))
             }
         }
         Err(call_error) => {
-            // ROLLBACK on call failure
-            USER_BALANCES_STABLE.with(|balances| {
-                balances.borrow_mut().insert(caller, user_balance);
-            });
+            // Use helper for rollback
+            rollback_balance_change(caller, user_balance);
             Err(format!("Transfer call failed: {:?}", call_error))
         }
     }
@@ -300,12 +248,21 @@ pub fn get_my_balance() -> u64 {
     get_balance(ic_cdk::caller())
 }
 
+/// Get the maximum allowed payout (10% of house balance)
+/// Fast query using cached balance - no ledger call needed
+#[query]
+pub fn get_max_allowed_payout() -> u64 {
+    let house_balance = get_house_balance();
+    (house_balance as f64 * MAX_PAYOUT_PERCENTAGE) as u64
+}
+
+/// Get house balance using cached canister balance
+/// Fast query - no ledger call needed
 #[query]
 pub fn get_house_balance() -> u64 {
-    // House balance = Total canister balance - Total user deposits
-    // Uses cached canister balance (fast) and calculates deposits fresh (always accurate)
+    // Use cached canister balance (refreshed hourly by heartbeat)
     let canister_balance = CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow());
-    let total_deposits = calculate_total_deposits();  // Fresh calculation, prevents drift
+    let total_deposits = calculate_total_deposits();
 
     if canister_balance > total_deposits {
         canister_balance - total_deposits
@@ -316,8 +273,11 @@ pub fn get_house_balance() -> u64 {
 
 #[query]
 pub fn get_accounting_stats() -> AccountingStats {
-    let total_deposits = calculate_total_deposits();  // Fresh calculation
-    let unique_depositors = USER_BALANCES_STABLE.with(|balances| balances.borrow().iter().count() as u64);
+    let total_deposits = calculate_total_deposits();
+    let unique_depositors = USER_BALANCES_STABLE.with(|balances|
+        balances.borrow().iter().count() as u64
+    );
+
     let canister_balance = CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow());
     let house_balance = if canister_balance > total_deposits {
         canister_balance - total_deposits
@@ -339,8 +299,7 @@ pub fn get_accounting_stats() -> AccountingStats {
 
 #[query]
 pub fn audit_balances() -> Result<String, String> {
-    // Verify: house_balance + sum(user_balances) = canister_balance
-    let total_deposits = calculate_total_deposits();  // Fresh calculation
+    let total_deposits = calculate_total_deposits();
     let canister_balance = CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow());
 
     let house_balance = if canister_balance > total_deposits {
@@ -364,6 +323,8 @@ pub fn audit_balances() -> Result<String, String> {
 // BALANCE UPDATE (Internal use only)
 // =============================================================================
 
+/// Update user balance (called by game logic)
+/// Note: Total deposits are calculated on-demand, so no need to track separately
 pub fn update_balance(user: Principal, new_balance: u64) -> Result<(), String> {
     USER_BALANCES_STABLE.with(|balances| {
         balances.borrow_mut().insert(user, new_balance);
@@ -377,10 +338,45 @@ pub fn update_balance(user: Principal, new_balance: u64) -> Result<(), String> {
 // =============================================================================
 
 pub fn pre_upgrade_accounting() {
-    // Nothing needed - StableBTreeMap handles persistence automatically
+    // Nothing needed - StableBTreeMap handles persistence
 }
 
 pub fn post_upgrade_accounting() {
-    // Nothing needed - we calculate totals on-demand
-    // StableBTreeMap handles persistence automatically
+    // Nothing needed - we calculate totals on-demand now
+    // Note: Cache will be refreshed by first heartbeat (within 1 hour)
+}
+
+// =============================================================================
+// COMPATIBILITY FUNCTION
+// =============================================================================
+
+/// Refresh canister balance from ledger and update cache
+/// Called by heartbeat every hour to keep cache fresh
+#[update]
+pub async fn refresh_canister_balance() -> u64 {
+    let account = Account {
+        owner: ic_cdk::id(),
+        subaccount: None,
+    };
+
+    let ledger = Principal::from_text(ICP_LEDGER_CANISTER_ID)
+        .expect("ICP ledger canister ID must be valid");
+    let result: Result<(Nat,), _> = ic_cdk::call(ledger, "icrc1_balance_of", (account,)).await;
+
+    match result {
+        Ok((balance,)) => {
+            let balance_u64 = balance.0.try_into().unwrap_or(0);
+            // Update the cache
+            CACHED_CANISTER_BALANCE.with(|cache| {
+                *cache.borrow_mut() = balance_u64;
+            });
+            ic_cdk::println!("Balance cache refreshed: {} e8s", balance_u64);
+            balance_u64
+        }
+        Err(e) => {
+            // Return cached value on error
+            ic_cdk::println!("⚠️ Failed to refresh balance, using cache: {:?}", e);
+            CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow())
+        }
+    }
 }

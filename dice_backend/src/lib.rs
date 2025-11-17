@@ -20,9 +20,8 @@ mod heartbeat_impl;
 // =============================================================================
 
 pub use accounting::{
-    deposit, withdraw, get_balance, get_my_balance, get_house_balance,
-    get_accounting_stats, audit_balances, refresh_canister_balance,
-    is_balance_cache_stale, get_balance_cache_age,
+    deposit, withdraw, withdraw_all, get_balance, get_my_balance, get_house_balance,
+    get_max_allowed_payout, get_accounting_stats, audit_balances, refresh_canister_balance,
     AccountingStats, Account,
 };
 pub use types::{RollDirection, DiceResult, GameStats, DetailedGameHistory, SeedRotationRecord};
@@ -119,11 +118,6 @@ fn get_rotation_history(limit: u32) -> Vec<(u64, SeedRotationRecord)> {
 #[query]
 fn calculate_payout_info(target_number: u8, direction: RollDirection) -> Result<(f64, f64), String> {
     game::calculate_payout_info(target_number, direction)
-}
-
-#[query]
-fn get_max_bet(target_number: u8, direction: RollDirection) -> u64 {
-    game::calculate_max_bet(target_number, &direction)
 }
 
 #[update]

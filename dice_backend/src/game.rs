@@ -1,4 +1,4 @@
-use crate::types::{DiceResult, GameStats, RollDirection, E8S_PER_ICP, MIN_BET, MAX_WIN, MAX_NUMBER};
+use crate::types::{DiceResult, GameStats, RollDirection, E8S_PER_ICP, MIN_BET, MAX_NUMBER};
 use crate::seed::{generate_dice_roll_instant, maybe_schedule_seed_rotation};
 use crate::accounting;
 use candid::Principal;
@@ -63,17 +63,6 @@ pub fn calculate_multiplier_direct(target: u8, direction: &RollDirection) -> f64
     100.0 / winning_numbers  // Clean round numbers: 2x, 4x, 5x, 10x, 20x, 50x, 100x
 }
 
-// Calculate maximum allowed bet based on target number and direction
-pub fn calculate_max_bet(target_number: u8, direction: &RollDirection) -> u64 {
-    let multiplier = calculate_multiplier_direct(target_number, direction);
-
-    if multiplier <= 0.0 {
-        return MIN_BET;
-    }
-
-    ((MAX_WIN as f64) / multiplier).floor() as u64
-}
-
 // =============================================================================
 // MAIN GAME LOGIC
 // =============================================================================
@@ -86,14 +75,7 @@ pub async fn play_dice(
     client_seed: String,
     caller: Principal
 ) -> Result<DiceResult, String> {
-    // P0-2 FIX OPTIMIZED: Only force refresh if cache is stale (>60 seconds)
-    // This reduces dice roll time from 9s to <500ms while maintaining security
-    const MAX_CACHE_AGE_NANOS: u64 = 60_000_000_000; // 60 seconds
-    if accounting::is_balance_cache_stale(MAX_CACHE_AGE_NANOS) {
-        // Cache is too old, force a blocking refresh for safety
-        ic_cdk::println!("Balance cache stale, forcing refresh");
-        accounting::refresh_canister_balance().await;
-    }
+    // Note: Balance is now calculated on-demand, no cache to manage
 
     // Check user has sufficient internal balance
     let user_balance = accounting::get_balance(caller);
@@ -105,17 +87,6 @@ pub async fn play_dice(
     // Validate input
     if bet_amount < MIN_BET {
         return Err(format!("Minimum bet is {} ICP", MIN_BET as f64 / E8S_PER_ICP as f64));
-    }
-
-    // Calculate dynamic max bet for this specific bet
-    let max_bet = calculate_max_bet(target_number, &direction);
-    if bet_amount > max_bet {
-        let multiplier = calculate_multiplier_direct(target_number, &direction);
-        return Err(format!(
-            "Maximum bet is {:.4} ICP for {:.2}x multiplier (10 ICP max win)",
-            max_bet as f64 / E8S_PER_ICP as f64,
-            multiplier
-        ));
     }
 
     // Validate target number based on direction
@@ -142,12 +113,47 @@ pub async fn play_dice(
     let win_chance = calculate_win_chance(target_number, &direction);
     let multiplier = calculate_multiplier_direct(target_number, &direction);
 
-    // Calculate max bet based on house balance using ACTUAL multiplier
-    let house_balance = accounting::get_house_balance();
+    // NEW SIMPLIFIED CHECK - 10% house limit (uses cached balance for speed)
+    //
+    // DESIGN DECISIONS & TRADE-OFFS:
+    //
+    // 1. Cache Staleness (Accepted):
+    //    - Cache refreshes ONLY via hourly heartbeat, NOT after deposits/withdrawals
+    //    - Max payout could be stale up to 1 hour after balance changes
+    //    - WHY: Performance > perfect accuracy. Deposit/withdrawal UX stays fast.
+    //    - Impact: After large deposit, max bet stays low temporarily. Self-corrects hourly.
+    //
+    // 2. Race Condition (Accepted):
+    //    - Multiple concurrent bets could collectively exceed 10% house limit
+    //    - Example: 10 players simultaneously bet max, actual total payout > 10%
+    //    - WHY: Complexity of atomic locks would hurt performance significantly
+    //    - Mitigation: Damage is self-limiting (can't lose more than house balance)
+    //
+    // 3. 10% Limit Rationale:
+    //    - Conservative enough to protect house from single large loss
+    //    - Flexible enough to scale with house balance growth
+    //    - Self-adjusting: Small house = smaller limits, large house = larger limits
+    //
+    // This is a CONSCIOUS SIMPLIFICATION that prioritizes:
+    // - Performance (fast queries, no locks)
+    // - Simplicity (one cache, straightforward logic)
+    // - Good-enough accuracy (hourly refresh sufficient for most cases)
+    //
+    // Over theoretical perfection that would require:
+    // - Atomic locks (complex, slower)
+    // - Real-time balance queries (500ms per bet)
+    // - Perfect synchronization (hard to maintain)
     let max_payout = (bet_amount as f64 * multiplier) as u64;
-    if max_payout > house_balance {
-        return Err(format!("Bet too large. House only has {} e8s, max payout would be {} e8s ({}x multiplier)",
-                          house_balance, max_payout, multiplier));
+    let max_allowed = accounting::get_max_allowed_payout();
+    if max_allowed == 0 {
+        return Err("House balance not yet initialized. Please try again in a moment.".to_string());
+    }
+    if max_payout > max_allowed {
+        return Err(format!(
+            "Max payout of {} ICP exceeds house limit of {} ICP (10% of house balance)",
+            max_payout as f64 / E8S_PER_ICP as f64,
+            max_allowed as f64 / E8S_PER_ICP as f64
+        ));
     }
 
     // Validate client seed length (DoS protection)

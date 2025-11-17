@@ -9,7 +9,6 @@ use std::borrow::Cow;
 
 pub const E8S_PER_ICP: u64 = 100_000_000; // 1 ICP = 100,000,000 e8s
 pub const MIN_BET: u64 = 1_000_000; // 0.01 ICP
-pub const MAX_WIN: u64 = 10 * E8S_PER_ICP; // 10 ICP max win
 pub const MAX_NUMBER: u8 = 100; // Dice rolls 0-100
 
 // =============================================================================

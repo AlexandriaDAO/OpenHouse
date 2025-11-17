@@ -56,9 +56,9 @@ pub fn restore_heartbeat_state() {
 }
 
 // Heartbeat function - called automatically by IC every ~second
-// We use it to refresh balance cache every 30 seconds in background
+// We use it to refresh balance cache every hour in background
 pub fn heartbeat() {
-    const HEARTBEAT_REFRESH_INTERVAL_NS: u64 = 30_000_000_000; // 30 seconds
+    const HEARTBEAT_REFRESH_INTERVAL_NS: u64 = 3_600_000_000_000; // 1 hour in nanoseconds
 
     // P0-2 fix: Atomically check and set the in-progress flag to prevent race condition
     let should_refresh = HEARTBEAT_REFRESH_IN_PROGRESS.with(|flag| {
@@ -72,7 +72,7 @@ pub fn heartbeat() {
         let last_refresh = HEARTBEAT_STATE_CELL.with(|cell| cell.borrow().get().clone());
         let now = ic_cdk::api::time();
 
-        // Check if it's time to refresh (30 seconds elapsed)
+        // Check if it's time to refresh (1 hour elapsed)
         if now > last_refresh && (now - last_refresh) >= HEARTBEAT_REFRESH_INTERVAL_NS {
             // Atomically set the flag before proceeding
             *flag_ref = true;
