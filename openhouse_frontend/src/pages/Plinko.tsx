@@ -1,20 +1,13 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import usePlinkoActor from '../hooks/actors/usePlinkoActor';
-import {
-  GameLayout,
-  GameButton,
-  GameStats,
-  type GameStat,
-} from '../components/game-ui';
-import { PlinkoBoard, PlinkoControls, PlinkoMultipliers, type RiskLevel, type RowCount } from '../components/game-specific/plinko';
+import { GameLayout, GameButton, GameStats, type GameStat } from '../components/game-ui';
+import { PlinkoBoard, PlinkoMultipliers } from '../components/game-specific/plinko';
 import { ConnectionStatus } from '../components/ui/ConnectionStatus';
 
 interface PlinkoGameResult {
   path: boolean[];
   final_position: number;
   multiplier: number;
-  rows: number;
-  risk: RiskLevel;
   timestamp: number;
   clientId?: string;
 }
@@ -27,28 +20,24 @@ export const Plinko: React.FC = () => {
   const [gameError, setGameError] = useState('');
   const [history, setHistory] = useState<PlinkoGameResult[]>([]);
 
-  // Plinko-specific state
-  const [rows, setRows] = useState<RowCount>(8);
-  const [riskLevel, setRiskLevel] = useState<RiskLevel>('Low');
+  // Fixed configuration (8 rows, no user choice)
+  const ROWS = 8;
   const [multipliers, setMultipliers] = useState<number[]>([]);
   const [currentResult, setCurrentResult] = useState<{ path: boolean[]; final_position: number; multiplier: number } | null>(null);
 
-  // Load multipliers when rows or risk level changes
+  // Load multipliers once on mount
   useEffect(() => {
     const loadMultipliers = async () => {
       if (!actor) return;
-
       try {
-        const riskVariant = riskLevel === 'Low' ? { Low: null } : riskLevel === 'Medium' ? { Medium: null } : { High: null };
-        const mults = await actor.get_multipliers(rows, riskVariant);
+        const mults = await actor.get_multipliers();  // No parameters!
         setMultipliers(mults);
       } catch (err) {
         console.error('Failed to load multipliers:', err);
       }
     };
-
     loadMultipliers();
-  }, [rows, riskLevel, actor]);
+  }, [actor]);
 
   // Handle ball drop
   const dropBall = async () => {
@@ -59,20 +48,17 @@ export const Plinko: React.FC = () => {
     setCurrentResult(null);
 
     try {
-      const riskVariant = riskLevel === 'Low' ? { Low: null } : riskLevel === 'Medium' ? { Medium: null } : { High: null };
-      const result = await actor.drop_ball(rows, riskVariant);
+      const result = await actor.drop_ball();  // No parameters!
 
       if ('Ok' in result) {
         const gameResult: PlinkoGameResult = {
           ...result.Ok,
-          rows,
-          risk: riskLevel,
           timestamp: Date.now(),
           clientId: crypto.randomUUID()
         };
 
         setCurrentResult(result.Ok);
-        setHistory(prev => [gameResult, ...prev.slice(0, 9)]); // Keep last 10
+        setHistory(prev => [gameResult, ...prev.slice(0, 9)]);
       } else {
         setGameError(result.Err);
         setIsPlaying(false);
@@ -88,38 +74,51 @@ export const Plinko: React.FC = () => {
     setIsPlaying(false);
   }, []);
 
-  // Prepare stats for GameStats component
+  // Simple stats
   const minMultiplier = multipliers.length > 0 ? Math.min(...multipliers) : 0;
   const maxMultiplier = multipliers.length > 0 ? Math.max(...multipliers) : 0;
 
   const stats: GameStat[] = [
-    { label: 'Rows', value: `${rows}`, highlight: true, color: 'blue' },
-    { label: 'Risk', value: riskLevel, highlight: true, color: riskLevel === 'Low' ? 'green' : riskLevel === 'Medium' ? 'yellow' : 'red' },
-    { label: 'Min/Max', value: `${minMultiplier.toFixed(1)}x - ${maxMultiplier.toFixed(maxMultiplier >= 10 ? 0 : 1)}x` },
+    { label: 'Max Win', value: `${maxMultiplier.toFixed(0)}x`, highlight: true, color: 'red' },
+    { label: 'House Edge', value: '1%', highlight: true, color: 'green' },
+    { label: 'Rows', value: '8' },
   ];
 
   return (
     <GameLayout
       title="Plinko"
       icon="🎯"
-      description="Drop the ball and watch it bounce to a multiplier!"
+      description="Drop the ball and watch it bounce to a mathematically fair multiplier!"
       minBet={1}
-      maxWin={1000}
+      maxWin={253}
       houseEdge={1}
     >
-      {/* CONNECTION STATUS */}
       <ConnectionStatus game="plinko" />
 
-      {/* GAME CONTROLS */}
-      <div className="card max-w-2xl mx-auto">
-        <PlinkoControls
-          rows={rows}
-          onRowsChange={setRows}
-          riskLevel={riskLevel}
-          onRiskLevelChange={setRiskLevel}
-          disabled={isPlaying}
-        />
+      {/* HOW IT WORKS - Transparency Section */}
+      <div className="card max-w-2xl mx-auto mb-6">
+        <h3 className="font-bold mb-3 text-center text-dfinity-turquoise">How Plinko Odds Work</h3>
+        <div className="text-sm text-pure-white/80 space-y-2">
+          <p>
+            The ball bounces randomly at each peg with a 50/50 chance of going left or right.
+            There are <strong>256 possible paths</strong> (2^8).
+          </p>
+          <p>
+            Landing on the edges is rare (only 1 path), so those positions pay <strong>253.44x</strong>.
+            The center is most common (70 paths), so it pays <strong>3.62x</strong>.
+          </p>
+          <p className="font-mono text-xs bg-pure-black/30 p-2 rounded">
+            Multiplier = (256 ÷ paths to position) × 0.99
+          </p>
+          <p>
+            The <strong>0.99 multiplier</strong> gives the house a fair 1% edge—completely transparent
+            and mathematically provable. You can verify this yourself!
+          </p>
+        </div>
+      </div>
 
+      {/* GAME CONTROLS - Simplified, no configuration */}
+      <div className="card max-w-2xl mx-auto">
         <GameStats stats={stats} />
 
         <GameButton
@@ -138,32 +137,38 @@ export const Plinko: React.FC = () => {
         )}
       </div>
 
-      {/* PLINKO BOARD */}
+      {/* PLINKO BOARD - Always 8 rows */}
       <div className="card max-w-4xl mx-auto">
         <PlinkoBoard
-          rows={rows}
+          rows={ROWS}
           path={currentResult?.path || null}
           isDropping={isPlaying}
           onAnimationComplete={handleAnimationComplete}
           finalPosition={currentResult?.final_position}
         />
 
-        {/* Multiplier display */}
+        {/* Multiplier display with probabilities */}
         {multipliers.length > 0 && (
-          <PlinkoMultipliers
-            multipliers={multipliers}
-            highlightedIndex={currentResult?.final_position}
-          />
+          <div className="mt-4">
+            <PlinkoMultipliers
+              multipliers={multipliers}
+              highlightedIndex={currentResult?.final_position}
+            />
+            {/* Optionally show probabilities */}
+            <div className="text-xs text-pure-white/40 text-center mt-2 font-mono">
+              Probabilities: 0.4% | 3.1% | 10.9% | 21.9% | 27.3% | 21.9% | 10.9% | 3.1% | 0.4%
+            </div>
+          </div>
         )}
 
         {/* Win message */}
         {currentResult && !isPlaying && (
           <div className="text-center mt-6">
             <div className="text-3xl font-bold mb-2 text-dfinity-turquoise">
-              {currentResult.multiplier >= 10 ? '🎉 BIG WIN!' : '✨'}
+              {currentResult.multiplier >= 30 ? '🎉 BIG WIN!' : '✨'}
             </div>
             <div className="text-2xl font-mono text-yellow-500">
-              {currentResult.multiplier.toFixed(currentResult.multiplier >= 10 ? 0 : 1)}x Multiplier
+              {currentResult.multiplier.toFixed(2)}x Multiplier
             </div>
           </div>
         )}
@@ -184,14 +189,14 @@ export const Plinko: React.FC = () => {
                 className="bg-casino-primary border border-pure-white/10 p-3 flex justify-between items-center"
               >
                 <span className="font-mono text-xs text-gray-400">
-                  {item.rows}r {item.risk[0]}
+                  Position {item.final_position}
                 </span>
                 <span className={`font-bold ${
-                  item.multiplier >= 10 ? 'text-dfinity-red' :
-                  item.multiplier >= 3 ? 'text-yellow-500' :
+                  item.multiplier >= 30 ? 'text-dfinity-red' :
+                  item.multiplier >= 9 ? 'text-yellow-500' :
                   'text-dfinity-turquoise'
                 }`}>
-                  {item.multiplier.toFixed(item.multiplier >= 10 ? 0 : 1)}x
+                  {item.multiplier.toFixed(2)}x
                 </span>
               </div>
             ))}

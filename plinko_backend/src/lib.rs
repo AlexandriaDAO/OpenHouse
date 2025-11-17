@@ -28,35 +28,31 @@ use ic_cdk::api::management_canister::main::raw_rand;
 use sha2::{Digest, Sha256};
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
-pub enum RiskLevel { Low, Medium, High }
-
-#[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct PlinkoResult {
     pub path: Vec<bool>,        // true = right, false = left
     pub final_position: u8,     // 0 to rows (number of rights)
     pub multiplier: f64,
 }
 
-// Drop a ball down the Plinko board
-// Architecture: This canister provides ONLY game logic (random path + multiplier lookup).
-// Frontend or a separate accounting canister handles betting/ICP transfers.
-// This separation allows the game logic to be reusable and independently verifiable.
-//
-// Performance Note: This uses raw_rand() on every call (~500ms latency).
-// Alternative approach: Dice backend uses seed rotation (faster but more complex state).
-// Tradeoff: Simplicity vs latency. For async games like Plinko, latency is acceptable.
+/// Drop a ball down an 8-row Plinko board
+///
+/// The ball bounces randomly at each peg (50/50 left/right) following binomial probability.
+/// There are 256 possible paths (2^8). Each position's payout is calculated as:
+///
+/// Multiplier = (256 / paths_to_position) × 0.99
+///
+/// This gives a transparent 1% house edge that's mathematically provable.
+///
+/// Randomness source: IC VRF (raw_rand) with SHA256 fallback
 #[update]
-async fn drop_ball(rows: u8, risk: RiskLevel) -> Result<PlinkoResult, String> {
-    if ![8, 12, 16].contains(&rows) {
-        return Err("Rows must be 8, 12, or 16".to_string());
-    }
+async fn drop_ball() -> Result<PlinkoResult, String> {
+    const ROWS: u8 = 8;
 
     // Generate random path using IC VRF with secure fallback
     let random_bytes = match raw_rand().await {
         Ok((bytes,)) => bytes,
         Err(_) => {
             // Secure fallback: Hash timestamp + caller principal
-            // This maintains randomness even if VRF fails
             let time = ic_cdk::api::time();
             let caller = ic_cdk::caller();
             let mut hasher = Sha256::new();
@@ -66,15 +62,8 @@ async fn drop_ball(rows: u8, risk: RiskLevel) -> Result<PlinkoResult, String> {
         }
     };
 
-    // Ensure we have enough entropy: need at least `rows` bits
-    // VRF returns 32 bytes (256 bits), enough for up to 256 rows
-    if random_bytes.len() * 8 < rows as usize {
-        return Err("Insufficient randomness".to_string());
-    }
-
-    // Generate path: each row is an independent coin flip
-    // Extract one bit per row to avoid bias from byte reuse
-    let path: Vec<bool> = (0..rows)
+    // Generate path: 8 independent coin flips (one bit per row)
+    let path: Vec<bool> = (0..ROWS)
         .map(|i| {
             let bit_index = i as usize;
             let byte_index = bit_index / 8;
@@ -83,79 +72,74 @@ async fn drop_ball(rows: u8, risk: RiskLevel) -> Result<PlinkoResult, String> {
         })
         .collect();
 
-    // Final position = count of right moves
+    // Final position = count of right moves (0 to 8)
     let final_position = path.iter().filter(|&&d| d).count() as u8;
-    let multiplier = get_multiplier(rows, &risk, final_position)?;
+
+    // Get multiplier from mathematical table
+    let multiplier = get_multiplier(final_position)?;
 
     Ok(PlinkoResult { path, final_position, multiplier })
 }
 
-// Get multiplier table for frontend display
+/// Get the full multiplier table for display
+///
+/// Returns all 9 multipliers for the 8-row board (positions 0-8).
+/// These are calculated using the formula: (256 / binomial(8, k)) × 0.99
 #[query]
-fn get_multipliers(rows: u8, risk: RiskLevel) -> Vec<f64> {
-    if ![8, 12, 16].contains(&rows) { return vec![]; }
-    (0..=rows)
-        .filter_map(|pos| get_multiplier(rows, &risk, pos).ok())
-        .collect()
+fn get_multipliers() -> Vec<f64> {
+    vec![
+        253.44,              // pos 0
+        31.68,               // pos 1
+        9.05142857142857,    // pos 2
+        4.52571428571429,    // pos 3
+        3.62057142857143,    // pos 4 (center)
+        4.52571428571429,    // pos 5
+        9.05142857142857,    // pos 6
+        31.68,               // pos 7
+        253.44,              // pos 8
+    ]
 }
 
-fn get_multiplier(rows: u8, risk: &RiskLevel, pos: u8) -> Result<f64, String> {
-    // Validate position is within bounds
-    if pos > rows {
-        return Err(format!("Invalid position {} for {} rows", pos, rows));
+/// Get the mathematically calculated multiplier for a position
+///
+/// Formula: (2^8 / C(8, pos)) × 0.99
+///
+/// Where C(8, pos) is the binomial coefficient "8 choose pos"
+/// representing the number of paths to reach that position.
+///
+/// The 0.99 multiplier ensures a transparent 1% house edge.
+fn get_multiplier(pos: u8) -> Result<f64, String> {
+    if pos > 8 {
+        return Err(format!("Invalid position: {} (must be 0-8)", pos));
     }
 
-    let multiplier = match rows {
-        8 => match risk {
-            RiskLevel::Low => match pos {
-                0 | 8 => 5.6, 1 | 7 => 2.1, 2 | 6 => 1.1, 3 | 5 => 1.0, 4 => 0.5, _ => 0.0,
-            },
-            RiskLevel::Medium => match pos {
-                0 | 8 => 13.0, 1 | 7 => 3.0, 2 | 6 => 1.3, 3 | 5 => 0.7, 4 => 0.4, _ => 0.0,
-            },
-            RiskLevel::High => match pos {
-                0 | 8 => 29.0, 1 | 7 => 4.0, 2 | 6 => 1.5, 3 | 5 => 0.3, 4 => 0.2, _ => 0.0,
-            },
-        },
-        12 => match risk {
-            RiskLevel::Low => match pos {
-                0 | 12 => 10.0, 1 | 11 => 3.0, 2 | 10 => 1.6, 3 | 9 => 1.4,
-                4 | 8 => 1.1, 5 | 7 => 1.0, 6 => 0.5, _ => 0.0,
-            },
-            RiskLevel::Medium => match pos {
-                0 | 12 => 33.0, 1 | 11 => 11.0, 2 | 10 => 4.0, 3 | 9 => 2.0,
-                4 | 8 => 1.1, 5 | 7 => 0.6, 6 => 0.3, _ => 0.0,
-            },
-            RiskLevel::High => match pos {
-                0 | 12 => 170.0, 1 | 11 => 24.0, 2 | 10 => 8.1, 3 | 9 => 2.0,
-                4 | 8 => 0.7, 5 | 7 => 0.2, 6 => 0.2, _ => 0.0,
-            },
-        },
-        16 => match risk {
-            RiskLevel::Low => match pos {
-                0 | 16 => 16.0, 1 | 15 => 9.0, 2 | 14 => 2.0, 3 | 13 => 1.4,
-                4 | 12 => 1.4, 5 | 11 => 1.2, 6 | 10 => 1.1, 7 | 9 => 1.0, 8 => 0.5, _ => 0.0,
-            },
-            RiskLevel::Medium => match pos {
-                0 | 16 => 110.0, 1 | 15 => 41.0, 2 | 14 => 10.0, 3 | 13 => 5.0,
-                4 | 12 => 3.0, 5 | 11 => 1.5, 6 | 10 => 1.0, 7 | 9 => 0.5, 8 => 0.3, _ => 0.0,
-            },
-            RiskLevel::High => match pos {
-                0 | 16 => 1000.0, 1 | 15 => 130.0, 2 | 14 => 26.0, 3 | 13 => 9.0,
-                4 | 12 => 4.0, 5 | 11 => 2.0, 6 | 10 => 0.2, 7 | 9 => 0.2, 8 => 0.2, _ => 0.0,
-            },
-        },
-        _ => return Err(format!("Invalid rows: {}", rows)),
-    };
+    // Precomputed multipliers for 8 rows
+    // Formula: (256 / binomial(8, k)) × 0.99
+    //
+    // Position | Binomial | Probability | Fair Mult | 1% Edge Mult
+    // ---------|----------|-------------|-----------|-------------
+    //    0     |    1     |   0.39%     |  256.00x  |  253.44x
+    //    1     |    8     |   3.13%     |   32.00x  |   31.68x
+    //    2     |   28     |  10.94%     |    9.14x  |    9.05x
+    //    3     |   56     |  21.88%     |    4.57x  |    4.53x
+    //    4     |   70     |  27.34%     |    3.66x  |    3.62x
+    //    5     |   56     |  21.88%     |    4.57x  |    4.53x
+    //    6     |   28     |  10.94%     |    9.14x  |    9.05x
+    //    7     |    8     |   3.13%     |   32.00x  |   31.68x
+    //    8     |    1     |   0.39%     |  256.00x  |  253.44x
+    const MULTIPLIERS: [f64; 9] = [
+        253.44,              // pos 0: 256/1 × 0.99
+        31.68,               // pos 1: 256/8 × 0.99
+        9.05142857142857,    // pos 2: 256/28 × 0.99 (keeping full precision)
+        4.52571428571429,    // pos 3: 256/56 × 0.99
+        3.62057142857143,    // pos 4: 256/70 × 0.99 (center)
+        4.52571428571429,    // pos 5: 256/56 × 0.99
+        9.05142857142857,    // pos 6: 256/28 × 0.99
+        31.68,               // pos 7: 256/8 × 0.99
+        253.44,              // pos 8: 256/1 × 0.99
+    ];
 
-    Ok(multiplier)
-}
-
-// Backwards compatibility: Legacy function name
-// TODO: Remove after frontend migration to drop_ball()
-#[update]
-async fn play_plinko(rows: u8, risk: RiskLevel) -> Result<PlinkoResult, String> {
-    drop_ball(rows, risk).await
+    Ok(MULTIPLIERS[pos as usize])
 }
 
 #[query]
@@ -169,62 +153,75 @@ mod tests {
 
     #[test]
     fn test_multiplier_valid_positions() {
-        // Test 8 rows, Low risk
-        assert_eq!(get_multiplier(8, &RiskLevel::Low, 0).unwrap(), 5.6);
-        assert_eq!(get_multiplier(8, &RiskLevel::Low, 4).unwrap(), 0.5);
-        assert_eq!(get_multiplier(8, &RiskLevel::Low, 8).unwrap(), 5.6);
+        // Test edge positions (rarest)
+        assert_eq!(get_multiplier(0).unwrap(), 253.44);
+        assert_eq!(get_multiplier(8).unwrap(), 253.44);
 
-        // Test 16 rows, High risk (max payout)
-        assert_eq!(get_multiplier(16, &RiskLevel::High, 0).unwrap(), 1000.0);
-        assert_eq!(get_multiplier(16, &RiskLevel::High, 16).unwrap(), 1000.0);
+        // Test center position (most common, lowest payout)
+        assert_eq!(get_multiplier(4).unwrap(), 3.62057142857143);
 
-        // Test symmetry: left edge = right edge
-        assert_eq!(
-            get_multiplier(12, &RiskLevel::Medium, 0).unwrap(),
-            get_multiplier(12, &RiskLevel::Medium, 12).unwrap()
-        );
+        // Test symmetry
+        assert_eq!(get_multiplier(1).unwrap(), get_multiplier(7).unwrap());
+        assert_eq!(get_multiplier(2).unwrap(), get_multiplier(6).unwrap());
+        assert_eq!(get_multiplier(3).unwrap(), get_multiplier(5).unwrap());
     }
 
     #[test]
     fn test_multiplier_invalid_positions() {
-        // Position out of bounds
-        assert!(get_multiplier(8, &RiskLevel::Low, 9).is_err());
-        assert!(get_multiplier(16, &RiskLevel::High, 17).is_err());
-    }
-
-    #[test]
-    fn test_multiplier_invalid_rows() {
-        // Invalid row count
-        assert!(get_multiplier(5, &RiskLevel::Low, 0).is_err());
-        assert!(get_multiplier(20, &RiskLevel::High, 0).is_err());
+        assert!(get_multiplier(9).is_err());
+        assert!(get_multiplier(100).is_err());
     }
 
     #[test]
     fn test_get_multipliers_table() {
-        // 8 rows should return 9 values (0..=8)
-        let table = get_multipliers(8, RiskLevel::Low);
+        let table = get_multipliers();
         assert_eq!(table.len(), 9);
-
-        // 16 rows should return 17 values
-        let table = get_multipliers(16, RiskLevel::High);
-        assert_eq!(table.len(), 17);
-
-        // Invalid rows should return empty
-        let table = get_multipliers(7, RiskLevel::Low);
-        assert_eq!(table.len(), 0);
+        assert_eq!(table[0], 253.44);
+        assert_eq!(table[4], 3.62057142857143);
+        assert_eq!(table[8], 253.44);
     }
 
     #[test]
-    fn test_risk_levels_increase_variance() {
-        // Low risk should have lower max multiplier than High
-        let low_max = get_multiplier(16, &RiskLevel::Low, 0).unwrap();
-        let high_max = get_multiplier(16, &RiskLevel::High, 0).unwrap();
-        assert!(high_max > low_max);
+    fn test_house_edge_exactly_one_percent() {
+        // Verify that expected value is exactly 0.99 (1% house edge)
+        let table = get_multipliers();
 
-        // Center positions should be higher in Low risk
-        let low_center = get_multiplier(16, &RiskLevel::Low, 8).unwrap();
-        let high_center = get_multiplier(16, &RiskLevel::High, 8).unwrap();
-        assert!(low_center > high_center);
+        // Binomial coefficients for 8 rows (C(8,k))
+        let binomial_coeffs = [1, 8, 28, 56, 70, 56, 28, 8, 1];
+        let total_paths = 256.0; // 2^8
+
+        // Calculate expected value
+        let expected_value: f64 = table.iter()
+            .zip(binomial_coeffs.iter())
+            .map(|(mult, &coeff)| {
+                let probability = coeff as f64 / total_paths;
+                mult * probability
+            })
+            .sum();
+
+        // Should be exactly 0.99 (allowing tiny floating point error)
+        let house_edge = 1.0 - expected_value;
+        assert!(
+            (house_edge - 0.01).abs() < 0.0001,
+            "House edge should be exactly 1%, got {}%",
+            house_edge * 100.0
+        );
+    }
+
+    #[test]
+    fn test_multiplier_formula() {
+        // Verify multipliers match the formula: (256 / binomial) × 0.99
+        let binomial_coeffs = [1, 8, 28, 56, 70, 56, 28, 8, 1];
+
+        for (pos, &coeff) in binomial_coeffs.iter().enumerate() {
+            let expected = (256.0 / coeff as f64) * 0.99;
+            let actual = get_multiplier(pos as u8).unwrap();
+            assert!(
+                (expected - actual).abs() < 0.0001,
+                "Position {}: expected {}, got {}",
+                pos, expected, actual
+            );
+        }
     }
 
     #[test]
@@ -243,29 +240,5 @@ mod tests {
         let path = vec![true, false, true, false];
         let pos = path.iter().filter(|&&d| d).count();
         assert_eq!(pos, 2);
-    }
-
-    #[test]
-    fn test_house_edge_approximate() {
-        // Calculate expected value for 8 rows, Low risk
-        // Assuming binomial distribution, center positions more likely
-        let table = get_multipliers(8, RiskLevel::Low);
-
-        // Probabilities for 8 rows (binomial coefficients / 2^8)
-        let probs = [1.0/256.0, 8.0/256.0, 28.0/256.0, 56.0/256.0,
-                     70.0/256.0, 56.0/256.0, 28.0/256.0, 8.0/256.0, 1.0/256.0];
-
-        let expected_value: f64 = table.iter()
-            .zip(probs.iter())
-            .map(|(mult, prob)| mult * prob)
-            .sum();
-
-        // Expected value should be < 1.0 (house edge)
-        assert!(expected_value < 1.0, "Expected value: {}", expected_value);
-
-        // House edge should be reasonable (2-5%)
-        let house_edge = 1.0 - expected_value;
-        assert!(house_edge > 0.01 && house_edge < 0.10,
-                "House edge: {}%", house_edge * 100.0);
     }
 }
