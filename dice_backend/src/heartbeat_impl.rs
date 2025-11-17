@@ -112,9 +112,8 @@ pub fn heartbeat() {
         }
         let _guard = FlagGuard;
 
-        ic_cdk::println!("Heartbeat: refreshing balance and max payout cache at {}", ic_cdk::api::time());
+        ic_cdk::println!("Heartbeat: refreshing balance cache at {}", ic_cdk::api::time());
         accounting::refresh_canister_balance().await;
-        accounting::refresh_max_payout_cache().await;
         // Flag will be cleared when _guard is dropped, even if there's a panic
     });
 }

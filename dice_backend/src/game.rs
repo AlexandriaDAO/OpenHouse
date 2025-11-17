@@ -113,14 +113,14 @@ pub async fn play_dice(
     let win_chance = calculate_win_chance(target_number, &direction);
     let multiplier = calculate_multiplier_direct(target_number, &direction);
 
-    // NEW SIMPLIFIED CHECK - 10% house limit (uses cached value for speed)
+    // NEW SIMPLIFIED CHECK - 10% house limit (uses cached balance for speed)
     // NOTE: Race condition exists - house balance could change between check and execution
     // from concurrent games. This is accepted behavior because:
     // 1. Damage is self-limiting (max loss = current house balance)
     // 2. Cache refreshes hourly to stay reasonably accurate
     // 3. Simplicity and performance outweigh perfect atomicity
     let max_payout = (bet_amount as f64 * multiplier) as u64;
-    let max_allowed = accounting::get_max_allowed_payout_cached();
+    let max_allowed = accounting::get_max_allowed_payout();
     if max_allowed == 0 {
         return Err("House balance not yet initialized. Please try again in a moment.".to_string());
     }

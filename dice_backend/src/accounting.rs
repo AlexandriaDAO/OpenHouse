@@ -52,9 +52,9 @@ thread_local! {
         )
     );
 
-    // Cached max allowed payout (10% of house balance) - refreshed hourly via heartbeat
-    // This avoids 500ms ledger query on every bet
-    static CACHED_MAX_PAYOUT: RefCell<u64> = RefCell::new(0);
+    // Cached canister balance (refreshed hourly via heartbeat)
+    // This avoids 500ms ledger query on every balance check
+    static CACHED_CANISTER_BALANCE: RefCell<u64> = RefCell::new(0);
 }
 
 #[derive(CandidType, Deserialize, Clone)]
@@ -77,23 +77,6 @@ fn calculate_total_deposits() -> u64 {
             .map(|(_, balance)| balance)
             .sum()
     })
-}
-
-/// Query canister balance from ledger directly
-async fn get_canister_balance_from_ledger() -> Result<u64, String> {
-    let account = Account {
-        owner: ic_cdk::id(),
-        subaccount: None,
-    };
-
-    let ledger = Principal::from_text(ICP_LEDGER_CANISTER_ID)
-        .expect("ICP ledger canister ID must be valid");
-    let result: Result<(Nat,), _> = ic_cdk::call(ledger, "icrc1_balance_of", (account,)).await;
-
-    match result {
-        Ok((balance,)) => Ok(balance.0.try_into().unwrap_or(0)),
-        Err(e) => Err(format!("Failed to query ledger balance: {:?}", e))
-    }
 }
 
 /// Rollback balance change helper (DRY)
@@ -265,85 +248,59 @@ pub fn get_my_balance() -> u64 {
     get_balance(ic_cdk::caller())
 }
 
-/// Get the maximum allowed payout from cache (fast, for bet validation)
-/// Refreshed hourly via heartbeat to avoid 500ms ledger query on every bet
+/// Get the maximum allowed payout (10% of house balance)
+/// Fast query using cached balance - no ledger call needed
 #[query]
-pub fn get_max_allowed_payout_cached() -> u64 {
-    CACHED_MAX_PAYOUT.with(|cache| *cache.borrow())
+pub fn get_max_allowed_payout() -> u64 {
+    let house_balance = get_house_balance();
+    (house_balance as f64 * MAX_PAYOUT_PERCENTAGE) as u64
 }
 
-/// Get the maximum allowed payout (10% of house balance) - accurate but slow
-/// Queries ledger directly - use for display/admin purposes, not bet validation
-#[update]
-pub async fn get_max_allowed_payout() -> Result<u64, String> {
-    let house_balance = get_house_balance().await?;
-    if house_balance == 0 {
-        return Ok(0);
-    }
-    Ok((house_balance as f64 * MAX_PAYOUT_PERCENTAGE) as u64)
-}
-
-/// Refresh the cached max payout (called by heartbeat)
-pub async fn refresh_max_payout_cache() {
-    match get_max_allowed_payout().await {
-        Ok(max_payout) => {
-            CACHED_MAX_PAYOUT.with(|cache| {
-                *cache.borrow_mut() = max_payout;
-            });
-            ic_cdk::println!("Max payout cache refreshed: {} e8s", max_payout);
-        }
-        Err(e) => {
-            ic_cdk::println!("⚠️ Failed to refresh max payout cache: {}", e);
-        }
-    }
-}
-
-#[update]
-pub async fn get_house_balance() -> Result<u64, String> {
-    // Get real canister balance from ledger
-    let canister_balance = get_canister_balance_from_ledger().await?;
-
-    // Calculate total user deposits
+/// Get house balance using cached canister balance
+/// Fast query - no ledger call needed
+#[query]
+pub fn get_house_balance() -> u64 {
+    // Use cached canister balance (refreshed hourly by heartbeat)
+    let canister_balance = CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow());
     let total_deposits = calculate_total_deposits();
 
     if canister_balance > total_deposits {
-        Ok(canister_balance - total_deposits)
+        canister_balance - total_deposits
     } else {
-        Ok(0) // Should never happen unless exploited
+        0 // Should never happen unless exploited
     }
 }
 
-#[update]
-pub async fn get_accounting_stats() -> Result<AccountingStats, String> {
+#[query]
+pub fn get_accounting_stats() -> AccountingStats {
     let total_deposits = calculate_total_deposits();
     let unique_depositors = USER_BALANCES_STABLE.with(|balances|
         balances.borrow().iter().count() as u64
     );
 
-    let canister_balance = get_canister_balance_from_ledger().await?;
+    let canister_balance = CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow());
     let house_balance = if canister_balance > total_deposits {
         canister_balance - total_deposits
     } else {
         0
     };
 
-    Ok(AccountingStats {
+    AccountingStats {
         total_user_deposits: total_deposits,
         house_balance,
         canister_balance,
         unique_depositors,
-    })
+    }
 }
 
 // =============================================================================
 // AUDIT FUNCTIONS
 // =============================================================================
 
-#[update]
-pub async fn audit_balances() -> Result<String, String> {
+#[query]
+pub fn audit_balances() -> Result<String, String> {
     let total_deposits = calculate_total_deposits();
-    let canister_balance = get_canister_balance_from_ledger().await
-        .map_err(|e| format!("Failed to get canister balance: {}", e))?;
+    let canister_balance = CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow());
 
     let house_balance = if canister_balance > total_deposits {
         canister_balance - total_deposits
@@ -389,26 +346,37 @@ pub fn post_upgrade_accounting() {
     // Note: Cache will be refreshed by first heartbeat (within 1 hour)
 }
 
-/// Initialize accounting (called on canister init)
-pub fn init_accounting() {
-    // Cache starts at 0, will be refreshed by first heartbeat
-    ic_cdk::println!("Accounting initialized. Max payout cache will be populated on first heartbeat.");
-}
-
 // =============================================================================
 // COMPATIBILITY FUNCTION
 // =============================================================================
 
-/// Refresh canister balance (for game.rs compatibility)
-/// Just queries the ledger directly
-/// Note: Returns 0 on error but logs the failure for monitoring
+/// Refresh canister balance from ledger and update cache
+/// Called by heartbeat every hour to keep cache fresh
 #[update]
 pub async fn refresh_canister_balance() -> u64 {
-    match get_canister_balance_from_ledger().await {
-        Ok(balance) => balance,
+    let account = Account {
+        owner: ic_cdk::id(),
+        subaccount: None,
+    };
+
+    let ledger = Principal::from_text(ICP_LEDGER_CANISTER_ID)
+        .expect("ICP ledger canister ID must be valid");
+    let result: Result<(Nat,), _> = ic_cdk::call(ledger, "icrc1_balance_of", (account,)).await;
+
+    match result {
+        Ok((balance,)) => {
+            let balance_u64 = balance.0.try_into().unwrap_or(0);
+            // Update the cache
+            CACHED_CANISTER_BALANCE.with(|cache| {
+                *cache.borrow_mut() = balance_u64;
+            });
+            ic_cdk::println!("Balance cache refreshed: {} e8s", balance_u64);
+            balance_u64
+        }
         Err(e) => {
-            ic_cdk::println!("⚠️ Failed to refresh canister balance: {}", e);
-            0
+            // Return cached value on error
+            ic_cdk::println!("⚠️ Failed to refresh balance, using cache: {:?}", e);
+            CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow())
         }
     }
 }

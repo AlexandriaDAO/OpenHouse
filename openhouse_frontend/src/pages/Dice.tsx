@@ -101,7 +101,7 @@ export const Dice: React.FC = () => {
 
         // Get max bet based on max allowed payout (10% house limit)
         try {
-          const maxPayoutE8s = await actor.get_max_allowed_payout_cached();
+          const maxPayoutE8s = await actor.get_max_allowed_payout();
           const maxPayoutICP = Number(maxPayoutE8s) / E8S_PER_ICP;
 
           // Calculate max bet: max_allowed_payout / multiplier
