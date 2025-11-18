@@ -1,183 +1,226 @@
 # DeFi Accounting Module for ICP Games
 
-A secure, auditable, and reusable accounting module for Internet Computer Protocol (ICP) based games.
+A secure, auditable, and reusable dual-mode accounting module for Internet Computer Protocol (ICP) based games with Liquidity Pool support.
 
 ## 🎯 Overview
 
-This module provides complete DeFi functionality for any ICP-based game, handling:
-- User deposits and withdrawals
-- Balance tracking with stable storage
-- House balance management
-- Dynamic bet limits (10% of house balance)
-- Cost-efficient hourly cache refresh
+This module provides complete DeFi functionality for ICP-based games with two operating modes:
 
-## 💰 Cost Efficiency
+### Legacy Mode
+- Traditional house balance management
+- Direct player deposits and withdrawals
+- House funds at risk
 
-- **Previous approach**: 30-second refresh = ~$33/month
-- **This module**: Hourly refresh = ~$0.27/month
-- **Savings**: 99% reduction in cycle costs
+### Liquidity Pool Mode (Default)
+- Liquidity providers stake ICP for shares
+- Players win/lose from the pool
+- Distributed risk among LPs
+- Fully decentralized (no admin control)
 
-## 🔒 Security Features
+## 🏗️ Architecture
 
-1. **Stable Storage**: All balances persist across canister upgrades
-2. **Re-entrancy Protection**: Debit-before-transfer pattern
-3. **Self-limiting**: Maximum loss capped at house balance
-4. **Transparent Limits**: Clear 10% house limit
+### Dual-Mode Operation
+
+The system automatically detects which mode to use:
+
+```rust
+pub enum HouseMode {
+    Legacy,        // Traditional house balance
+    LiquidityPool  // LP system with shares
+}
+
+// Automatic detection based on pool state
+pub fn get_house_mode() -> HouseMode {
+    if pool_initialized && pool_reserve > 0 {
+        HouseMode::LiquidityPool
+    } else {
+        HouseMode::Legacy
+    }
+}
+```
+
+### Why No Guards Needed
+
+Unlike protocols with multi-step async operations (e.g., icp_swap), our design follows the Checks-Effects-Interactions pattern:
+
+1. **All validations happen BEFORE transfers**
+2. **State updates are atomic** (no await points between critical updates)
+3. **IC guarantees sequential execution** - no race conditions possible
+
+This eliminates the need for reentrancy guards while maintaining security.
 
 ## 📁 Module Structure
 
 ```
 defi_accounting/
-├── mod.rs           # Public interface, integration guide, timer initialization
-├── accounting.rs    # Core deposit/withdrawal/balance logic
-└── README.md        # This file
+├── mod.rs              # Public interface and exports
+├── accounting.rs       # Core user accounting, HouseMode enum
+├── liquidity_pool.rs   # LP system (deposits, withdrawals, shares)
+├── nat_helpers.rs      # Arbitrary precision math utilities
+├── CLAUDE.md          # AI assistant guide
+└── README.md          # This file
 ```
 
 ## 🚀 Quick Integration
 
-### Step 1: Copy Module
-
-Copy the entire `defi_accounting` folder to your game's `src/` directory.
-
-### Step 2: Update lib.rs
+### For Games Using the Module
 
 ```rust
-// Add module
-mod defi_accounting;
+// Check operating mode
+let mode = defi_accounting::get_house_mode();
 
-// Re-export what you need
-pub use defi_accounting::{
-    deposit, withdraw, get_balance, get_house_balance,
-    get_max_allowed_payout, AccountingStats
-};
-
-// In init()
-#[init]
-fn init() {
-    defi_accounting::init_balance_refresh_timer();
+// Handle game outcomes based on mode
+match mode {
+    HouseMode::LiquidityPool => {
+        if is_win {
+            liquidity_pool::update_pool_on_win(profit);
+        } else {
+            liquidity_pool::update_pool_on_loss(bet_amount);
+        }
+    }
+    HouseMode::Legacy => {
+        // Traditional balance updates
+    }
 }
 
-// In pre_upgrade()
-#[pre_upgrade]
-fn pre_upgrade() {
-    // StableBTreeMap persists automatically
+// Check bet limits (works in both modes)
+let max = defi_accounting::get_max_allowed_payout();
+if potential_payout > max {
+    return Err("Exceeds limit");
 }
-
-// In post_upgrade()
-#[post_upgrade]
-fn post_upgrade() {
-    defi_accounting::init_balance_refresh_timer();
-    // StableBTreeMap restores automatically
-}
-
-// No heartbeat function needed - timers handle refresh automatically
 ```
 
-### Step 3: Use in Game Logic
+### For Liquidity Providers
 
 ```rust
-// Check max bet before accepting
-let max_allowed = defi_accounting::get_max_allowed_payout();
-if potential_payout > max_allowed {
-    return Err("Exceeds house limit");
-}
+// Deposit ICP to receive LP shares (minimum 1 ICP)
+let shares = deposit_liquidity(100_000_000).await?;
 
-// Update balance after game
-if player_won {
-    defi_accounting::update_balance(player, true, payout)?;
-} else {
-    defi_accounting::update_balance(player, false, bet_amount)?;
-}
+// Check position
+let position = get_lp_position(caller);
+// Returns: shares owned, ICP value, % of pool
+
+// Withdraw all (no partial withdrawals)
+let icp_received = withdraw_all_liquidity().await?;
 ```
 
 ## 📊 API Reference
 
-### Core Functions
+### Player Functions
 
 | Function | Type | Description |
 |----------|------|-------------|
-| `deposit(amount: u64)` | Update | Deposit ICP into account |
-| `withdraw(amount: u64)` | Update | Withdraw ICP from account |
-| `withdraw_all()` | Update | Withdraw entire balance |
+| `deposit(amount: u64)` | Update | Deposit ICP into player account |
+| `withdraw(amount: u64)` | Update | Withdraw ICP from player account |
+| `withdraw_all()` | Update | Withdraw entire player balance |
 | `get_balance(user: Principal)` | Query | Get user's balance |
 | `get_my_balance()` | Query | Get caller's balance |
-| `get_house_balance()` | Query | Get house balance |
-| `get_max_allowed_payout()` | Query | Get 10% of house balance |
+
+### Liquidity Pool Functions
+
+| Function | Type | Description |
+|----------|------|-------------|
+| `deposit_liquidity(amount: u64)` | Update | Stake ICP, receive LP shares (min 1 ICP) |
+| `withdraw_all_liquidity()` | Update | Burn all shares, receive proportional ICP |
+| `get_lp_position(user: Principal)` | Query | Get LP shares and value |
+| `get_pool_stats()` | Query | Get pool metrics |
+
+### System Functions
+
+| Function | Type | Description |
+|----------|------|-------------|
+| `get_house_mode()` | Query | Returns current operating mode |
+| `get_house_balance()` | Query | Get house/pool balance |
+| `get_max_allowed_payout()` | Query | Get 10% of house/pool balance |
 | `get_accounting_stats()` | Query | Get comprehensive stats |
-| `audit_balances()` | Query | Verify accounting integrity |
+| `can_accept_bets()` | Query | Check if system can accept bets |
 
-### Internal Functions (for game integration)
+## 🔒 Security Features
 
-| Function | Description |
-|----------|-------------|
-| `update_balance(user, is_win, amount)` | Update balance after game result |
-| `refresh_canister_balance()` | Manually refresh cached balance |
+### Liquidity Pool Security
+- **Minimum 1 ICP deposit** - Prevents share manipulation attacks
+- **Full withdrawal only** - Simplifies accounting, prevents gaming
+- **No admin privileges** - Fully decentralized
+- **CEI Pattern** - State changes before transfers
+- **Minimum liquidity burn** - 1000 shares burned on first deposit
+
+### General Security
+- **Stable Storage** - All balances persist across upgrades
+- **Overflow Protection** - Uses Nat (arbitrary precision) for calculations
+- **Sequential Execution** - IC's model prevents race conditions
+- **Transparent Limits** - Clear 10% house/pool limit
 
 ## 🔧 Configuration
 
-Edit these constants in `mod.rs` to customize:
+Key constants in the module:
 
 ```rust
-/// Maximum percentage of house balance for single bet
-pub const MAX_PAYOUT_PERCENTAGE: f64 = 0.10; // 10%
+// Liquidity Pool
+const MIN_DEPOSIT: u64 = 100_000_000;      // 1 ICP minimum for LP
+const MINIMUM_LIQUIDITY: u64 = 1000;       // Burned on first deposit
 
-/// Minimum deposit amount
-pub const MIN_DEPOSIT: u64 = 10_000_000; // 0.1 ICP
+// Player Accounts
+const MIN_DEPOSIT: u64 = 10_000_000;       // 0.1 ICP for players
+const MIN_WITHDRAW: u64 = 10_000_000;      // 0.1 ICP minimum
 
-/// Minimum withdrawal amount
-pub const MIN_WITHDRAW: u64 = 10_000_000; // 0.1 ICP
-
-/// ICP transfer fee
-pub const ICP_TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP
+// System
+const TRANSFER_FEE: u64 = 10_000;          // 0.0001 ICP
+const MAX_PAYOUT_PERCENTAGE: f64 = 0.10;   // 10% of pool/house
 ```
 
-## 🏗️ Architecture Decisions
+## 💡 Design Decisions
 
-### Why 10% House Limit?
-- **Conservative**: Protects house from variance
-- **Flexible**: Scales with house balance
-- **Simple**: Easy to audit and understand
+### Why Liquidity Pool?
+- **Distributed Risk** - Multiple LPs share wins/losses
+- **Deeper Liquidity** - Larger pool enables bigger bets
+- **Decentralized** - No single point of failure
+- **Transparent** - All shares and reserves on-chain
 
-### Why Hourly Refresh?
-- **Cost-effective**: 99% cheaper than frequent refreshes
-- **Good enough**: Acceptable staleness for most games
-- **Performance**: Fast queries, no gameplay delays
+### Why 1 ICP Minimum?
+- **Prevents Attacks** - Share manipulation requires significant capital
+- **Avoids Precision Loss** - Integer math works well at this scale
+- **Serious LPs Only** - Filters out dust deposits
+
+### Why Full Withdrawal Only?
+- **Simplicity** - No complex partial share calculations
+- **Security** - Prevents gaming the system
+- **UX** - Clear all-or-nothing choice
 
 ### Trade-offs Accepted
-1. **Cache Staleness**: Max payout updates hourly, not on deposits
-2. **Race Conditions**: Multiple concurrent bets could exceed 10%
-3. **Simplicity over Perfection**: No atomic locks or complex synchronization
+1. **No Partial Withdrawals** - Simplicity over flexibility
+2. **No Admin Control** - Decentralization over management
+3. **Sequential Execution** - IC's model over complex guards
 
-## 🔍 Audit Checklist
+## 🔍 Audit Focus Areas
 
-When auditing this module, focus on:
+When reviewing this module:
 
-- [ ] Balance arithmetic (no overflows/underflows)
-- [ ] Re-entrancy protection in withdrawals
-- [ ] Stable storage persistence
-- [ ] Cache refresh mechanism
-- [ ] Max payout calculation
-- [ ] Transfer error handling
-- [ ] Memory management
+- [ ] Share calculation math (no rounding exploits)
+- [ ] Minimum deposit enforcement (before transfers)
+- [ ] State update ordering (CEI pattern)
+- [ ] Nat arithmetic (overflow protection)
+- [ ] Pool solvency checks
+- [ ] First depositor handling
 
 ## 📈 Monitoring
 
 Key metrics to track:
-- Total user deposits
-- House balance
-- Unique depositors
-- Cache refresh frequency
-- Failed transfers
+- Total pool reserve
+- Number of LPs
+- Total shares outstanding
+- Player deposit volume
+- Win/loss ratio
+- Max bet capacity
 
-Use `get_accounting_stats()` for comprehensive monitoring.
+Use `get_pool_stats()` and `get_accounting_stats()` for monitoring.
 
-## 🐛 Known Limitations
+## 🐛 Known Considerations
 
-1. **Hourly Staleness**: After deposits/withdrawals, max payout is stale for up to 1 hour
-2. **Race Condition**: Concurrent bets could collectively exceed 10% limit
-3. **External Transfers**: Direct ICP transfers to canister bypass accounting
+1. **First Depositor** - Gets slightly fewer shares due to minimum liquidity burn
+2. **Integer Division** - Very small deposits may experience rounding
+3. **No Partial Withdrawals** - LPs must withdraw entire position
 
-These are conscious trade-offs for simplicity and performance.
+These are conscious design choices for security and simplicity.
 
 ## 📝 License
 
@@ -186,11 +229,12 @@ This module is open-source and can be freely used in any ICP project.
 ## 🤝 Contributing
 
 To improve this module:
-1. Keep it game-agnostic
-2. Maintain the simple architecture
-3. Document any new trade-offs
+1. Maintain game-agnostic design
+2. Preserve the CEI pattern
+3. Document security implications
 4. Ensure backward compatibility
+5. Remember IC's execution model
 
 ## 📞 Support
 
-For questions or issues with this module, please refer to the OpenHouse repository.
+For questions or issues, refer to the OpenHouse repository on GitHub.
