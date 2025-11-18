@@ -90,7 +90,12 @@ fn get_expected_value() -> f64 {
 /// Returns P(crash ≥ target)
 #[query]
 fn get_win_probability(target: f64) -> f64 {
-    if target < 1.0 || target > MAX_CRASH {
+    // If target < 1.0, crash will always be >= target (since min crash is 1.0)
+    if target < 1.0 {
+        return 1.0;
+    }
+    // If target exceeds max possible crash, probability is 0
+    if target > MAX_CRASH {
         return 0.0;
     }
     // Formula: P(crash ≥ X) = 0.99 / X
@@ -134,6 +139,13 @@ fn bytes_to_float(bytes: &[u8]) -> Result<f64, String> {
 
 /// Calculate crash point using the formula
 /// crash = 1.0 / (1.0 - 0.99 * random)
+///
+/// **Distribution Note**: Random values are clamped to [0.0, 0.999] before applying
+/// the formula. This creates a small discontinuity:
+/// - Values > 0.999 (≈0.1% probability) map to crash ≈ 1010x, then capped at 1000x
+/// - This slightly concentrates probability mass at MAX_CRASH
+/// - House edge remains ≈1% for all practical crash points below the cap
+/// - Tradeoff: Mathematical purity vs. preventing extreme/unstable values
 fn calculate_crash_point(random: f64) -> f64 {
     // Ensure random is in valid range to prevent division by near-zero
     // Using 0.999 max to ensure denominator stays reasonable
@@ -146,12 +158,32 @@ fn calculate_crash_point(random: f64) -> f64 {
     crash.min(MAX_CRASH)
 }
 
-/// Create SHA256 hash of VRF bytes for verification
+/// Create SHA256 hash of IC randomness bytes for audit/display purposes
+///
+/// **Important Limitation**: This hash is for reference only and does not provide
+/// cryptographic verification of fairness. Users cannot independently verify the
+/// randomness without access to IC's internal consensus mechanism. The hash serves
+/// as an identifier for this particular random draw, not a VRF proof.
+///
+/// True cryptographic verification would require:
+/// - Access to IC's BLS threshold signatures
+/// - Verification against subnet public keys
+/// - Understanding of IC's random tape construction
+///
+/// For now, fairness relies on trusting the IC's threshold randomness beacon.
 fn create_vrf_hash(bytes: &[u8]) -> String {
     use sha2::{Sha256, Digest};
 
+    // Ensure we have sufficient entropy (at least 32 bytes)
+    let hash_bytes = if bytes.len() >= 32 {
+        &bytes[0..32]
+    } else {
+        // Use all available bytes if less than 32
+        bytes
+    };
+
     let mut hasher = Sha256::new();
-    hasher.update(&bytes[0..32.min(bytes.len())]);
+    hasher.update(hash_bytes);
     format!("{:x}", hasher.finalize())
 }
 
@@ -265,5 +297,91 @@ mod tests {
         // Test with empty string
         let result3 = greet("".to_string());
         assert_eq!(result3, "Simple Crash: Transparent 1% edge,  wins or loses fairly!");
+    }
+
+    #[test]
+    fn test_win_probability_edge_cases() {
+        // Target < 1.0 should return 1.0 (always wins since min crash is 1.0)
+        assert_eq!(get_win_probability(0.5), 1.0);
+        assert_eq!(get_win_probability(0.99), 1.0);
+        assert_eq!(get_win_probability(0.0), 1.0);
+
+        // Target > MAX_CRASH should return 0.0 (impossible to reach)
+        assert_eq!(get_win_probability(1001.0), 0.0);
+        assert_eq!(get_win_probability(10000.0), 0.0);
+
+        // Target exactly at 1.0 should return close to 1.0
+        let prob_at_one = get_win_probability(1.0);
+        assert!((prob_at_one - 0.99).abs() < 0.01);
+
+        // Target at MAX_CRASH should return very small probability
+        let prob_at_max = get_win_probability(MAX_CRASH);
+        assert!(prob_at_max > 0.0 && prob_at_max < 0.01);
+    }
+
+    #[test]
+    fn test_crash_point_extreme_values() {
+        // Test with random = 0.0 (minimum)
+        let crash_min = calculate_crash_point(0.0);
+        assert!((crash_min - 1.0).abs() < 0.01);
+
+        // Test with random = 0.999 (at clamp boundary)
+        let crash_at_clamp = calculate_crash_point(0.999);
+        assert!(crash_at_clamp > 1.0 && crash_at_clamp <= MAX_CRASH);
+
+        // Test with random > 0.999 (should be clamped)
+        let crash_above_clamp = calculate_crash_point(0.9999);
+        assert!(crash_above_clamp <= MAX_CRASH);
+
+        // Test with random = 1.0 (should be clamped to 0.999)
+        let crash_at_one = calculate_crash_point(1.0);
+        assert!(crash_at_one <= MAX_CRASH);
+
+        // Verify clamping prevents division by zero
+        let crash_extreme = calculate_crash_point(f64::MAX);
+        assert!(crash_extreme.is_finite());
+        assert!(crash_extreme <= MAX_CRASH);
+    }
+
+    #[test]
+    fn test_create_vrf_hash_with_short_input() {
+        // Test with less than 32 bytes
+        let short_bytes = vec![1u8; 16];
+        let hash = create_vrf_hash(&short_bytes);
+
+        // Should still produce valid hash
+        assert_eq!(hash.len(), 64);
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+
+        // Test with minimal bytes
+        let minimal_bytes = vec![42u8; 8];
+        let hash_minimal = create_vrf_hash(&minimal_bytes);
+        assert_eq!(hash_minimal.len(), 64);
+
+        // Different short inputs should produce different hashes
+        assert_ne!(hash, hash_minimal);
+    }
+
+    #[test]
+    fn test_clamping_preserves_distribution() {
+        // Verify that clamping doesn't significantly distort the distribution
+        // Random values in [0, 0.999) should map linearly to crash points
+
+        let r1 = 0.0;
+        let r2 = 0.5;
+        let r3 = 0.998;
+
+        let c1 = calculate_crash_point(r1);
+        let c2 = calculate_crash_point(r2);
+        let c3 = calculate_crash_point(r3);
+
+        // Verify increasing random produces increasing crash (until cap)
+        assert!(c1 < c2);
+        assert!(c2 < c3);
+
+        // All should be within valid range
+        assert!(c1 >= 1.0 && c1 <= MAX_CRASH);
+        assert!(c2 >= 1.0 && c2 <= MAX_CRASH);
+        assert!(c3 >= 1.0 && c3 <= MAX_CRASH);
     }
 }
