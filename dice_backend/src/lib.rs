@@ -214,3 +214,8 @@ fn can_accept_bets() -> bool {
     defi_accounting::can_accept_bets()
 }
 
+#[query]
+fn get_pending_fees_to_parent() -> u64 {
+    defi_accounting::get_pending_fees_to_parent()
+}
+

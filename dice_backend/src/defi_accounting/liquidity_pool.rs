@@ -18,12 +18,16 @@ const MIN_WITHDRAWAL: u64 = 100_000; // 0.001 ICP
 const MIN_OPERATING_BALANCE: u64 = 1_000_000_000; // 10 ICP to operate games
 const TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP
 const PARENT_STAKER_CANISTER: &str = "e454q-riaaa-aaaap-qqcyq-cai";
+const RECONCILIATION_THRESHOLD: u64 = 10_000_000; // 0.1 ICP (lowered from 1 ICP)
+const MAX_RECONCILIATION_PERCENTAGE: f64 = 0.10; // Max 10% of canister balance per sweep
 
 // Pool state for stable storage
 #[derive(Clone, CandidType, Deserialize, Serialize)]
 struct PoolState {
     reserve: Nat,
     initialized: bool,
+    #[serde(default)] // Handle missing field during upgrade from old version
+    pending_fees_to_parent: u64, // Track failed deposit fees awaiting reconciliation
 }
 
 impl Storable for PoolState {
@@ -52,16 +56,23 @@ thread_local! {
         ))
     };
 
-    // Pool state (reserve + initialized flag)
+    // Pool state (reserve + initialized flag + pending fees)
     static POOL_STATE: RefCell<StableCell<PoolState, VirtualMemory<DefaultMemoryImpl>>> = {
         RefCell::new(StableCell::init(
             crate::MEMORY_MANAGER.with(|m| m.borrow().get(ic_stable_structures::memory_manager::MemoryId::new(13))),
             PoolState {
                 reserve: nat_zero(),
                 initialized: false,
+                pending_fees_to_parent: 0,
             }
         ).expect("Failed to init pool state"))
     };
+}
+
+// Helper function to safely get parent staker principal
+fn get_parent_staker_principal() -> Principal {
+    Principal::from_text(PARENT_STAKER_CANISTER)
+        .expect("PARENT_STAKER_CANISTER must be a valid principal")
 }
 
 // Types
@@ -126,17 +137,33 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
         Ok(_) => {}
     }
 
-    // Best effort fee transfer (1% deposit fee)
-    // Note: Failed transfers become floating funds, handled by daily reconciliation
-    let fee = amount / 100;  // 1% fee
-    let _ = accounting::transfer_to_user(
-        Principal::from_text(PARENT_STAKER_CANISTER).unwrap(),
-        fee
-    ).await;  // Ignore result - failures handled by reconciliation
+    // Calculate 1% deposit fee
+    // P0 Fix #2: Account for transfer fees - parent receives (base_fee - TRANSFER_FEE)
+    // This is acceptable as the fee is "best effort" and small variance is expected
+    let base_fee = amount / 100;  // 1% of deposit
 
-    // Continue with deposit using NET amount
-    let deposit_amount = amount - fee;
+    // P0 Fix #1: Calculate net amount BEFORE any transfers (fee already deducted from user)
+    // User deposited `amount`, we keep (amount - base_fee) in pool, try to send base_fee to parent
+    let deposit_amount = amount - base_fee;
     let deposit_nat = u64_to_nat(deposit_amount);
+
+    // Best effort fee transfer to parent staker
+    // P0 Fix #3: Track failed fees explicitly instead of reconciling "floating funds"
+    match accounting::transfer_to_user(get_parent_staker_principal(), base_fee).await {
+        Ok(_) => {
+            ic_cdk::println!("Deposit fee transferred successfully: {} e8s", base_fee);
+        }
+        Err(e) => {
+            ic_cdk::println!("Fee transfer failed ({}), adding to pending: {} e8s", e, base_fee);
+            // Track failed fee for later reconciliation
+            POOL_STATE.with(|state| {
+                let mut pool_state = state.borrow().get().clone();
+                pool_state.pending_fees_to_parent = pool_state.pending_fees_to_parent
+                    .saturating_add(base_fee); // P0 Fix #4: Use saturating_add to prevent overflow
+                state.borrow_mut().set(pool_state).expect("Failed to update pool state");
+            });
+        }
+    }
 
     // Calculate shares to mint
     let shares_to_mint = POOL_STATE.with(|state| {
@@ -380,6 +407,11 @@ pub fn can_accept_bets() -> bool {
     pool_reserve >= MIN_OPERATING_BALANCE
 }
 
+/// Get pending fees awaiting reconciliation (observability)
+pub fn get_pending_fees_to_parent() -> u64 {
+    POOL_STATE.with(|s| s.borrow().get().pending_fees_to_parent)
+}
+
 // Game integration (internal use only - called by game logic)
 
 pub(crate) fn update_pool_on_win(payout: u64) {
@@ -481,35 +513,47 @@ async fn transfer_to_user(user: Principal, amount: u64) -> Result<(), String> {
     accounting::transfer_to_user(user, amount).await
 }
 
-/// Reconcile floating funds (called daily by heartbeat)
-/// Floating funds = canister balance - pool reserve - user deposits
-/// These come from: failed fee transfers, donations, mistaken transfers
+/// Reconcile pending deposit fees (called daily by heartbeat)
+/// P0 Fix #3: Only sweep explicitly tracked pending fees, never touch user/pool funds
+/// This eliminates the risk of accidentally sweeping user gaming deposits
 pub async fn reconcile_floating_funds() -> Result<u64, String> {
-    // Refresh canister balance from ledger
+    let pending_fees = POOL_STATE.with(|state| {
+        state.borrow().get().pending_fees_to_parent
+    });
+
+    // Only sweep if above threshold (0.1 ICP)
+    if pending_fees < RECONCILIATION_THRESHOLD {
+        return Ok(0); // Nothing meaningful to sweep
+    }
+
+    // P0 Fix #5: Sanity check - never sweep more than 10% of canister balance
     let canister_balance = accounting::refresh_canister_balance().await;
+    let max_sweep = (canister_balance as f64 * MAX_RECONCILIATION_PERCENTAGE) as u64;
+    let sweep_amount = pending_fees.min(max_sweep);
 
-    // Calculate what should be in canister
-    let pool_reserve = get_pool_reserve();
-    let user_deposits = accounting::get_total_user_deposits();
-    let expected_balance = pool_reserve + user_deposits;
+    if sweep_amount < RECONCILIATION_THRESHOLD {
+        ic_cdk::println!("Pending fees {} e8s exceeds 10% canister balance limit, will retry with smaller amount", pending_fees);
+        return Ok(0);
+    }
 
-    // Calculate floating amount
-    let floating = canister_balance.saturating_sub(expected_balance);
-
-    // Only sweep if meaningful (> 1 ICP)
-    if floating > 100_000_000 {
-        let parent = Principal::from_text(PARENT_STAKER_CANISTER).unwrap();
-        match accounting::transfer_to_user(parent, floating).await {
-            Ok(_) => {
-                ic_cdk::println!("Reconciled {} e8s floating funds to parent", floating);
-                Ok(floating)
-            }
-            Err(e) => {
-                ic_cdk::println!("Reconciliation transfer failed: {}, will retry tomorrow", e);
-                Ok(0)
-            }
+    // Attempt transfer to parent staker
+    match accounting::transfer_to_user(get_parent_staker_principal(), sweep_amount).await {
+        Ok(_) => {
+            // Success - deduct from pending fees
+            POOL_STATE.with(|state| {
+                let mut pool_state = state.borrow().get().clone();
+                pool_state.pending_fees_to_parent = pool_state.pending_fees_to_parent
+                    .saturating_sub(sweep_amount);
+                state.borrow_mut().set(pool_state).expect("Failed to update pool state");
+            });
+            ic_cdk::println!("Reconciled {} e8s pending fees to parent (remaining: {} e8s)",
+                sweep_amount,
+                pending_fees.saturating_sub(sweep_amount));
+            Ok(sweep_amount)
         }
-    } else {
-        Ok(0)  // Nothing to sweep
+        Err(e) => {
+            ic_cdk::println!("Reconciliation transfer failed: {}, will retry tomorrow", e);
+            Ok(0) // Failed, but not a critical error - will retry tomorrow
+        }
     }
 }
