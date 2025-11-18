@@ -80,6 +80,11 @@ fn calculate_total_deposits() -> u64 {
     })
 }
 
+/// Public function to get total user deposits (used by reconciliation)
+pub fn get_total_user_deposits() -> u64 {
+    calculate_total_deposits()
+}
+
 /// Rollback balance change helper (DRY)
 fn rollback_balance_change(user: Principal, original_balance: u64) {
     USER_BALANCES_STABLE.with(|balances| {

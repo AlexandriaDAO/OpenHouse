@@ -17,6 +17,7 @@ const MIN_DEPOSIT: u64 = 100_000_000; // 1 ICP minimum for all deposits
 const MIN_WITHDRAWAL: u64 = 100_000; // 0.001 ICP
 const MIN_OPERATING_BALANCE: u64 = 1_000_000_000; // 10 ICP to operate games
 const TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP
+const PARENT_STAKER_CANISTER: &str = "e454q-riaaa-aaaap-qqcyq-cai";
 
 // Pool state for stable storage
 #[derive(Clone, CandidType, Deserialize, Serialize)]
@@ -106,7 +107,6 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
     }
 
     let caller = ic_cdk::caller();
-    let amount_nat = u64_to_nat(amount);
 
     // Transfer from user (requires prior ICRC-2 approval)
     match transfer_from_user(caller, amount).await {
@@ -126,6 +126,18 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
         Ok(_) => {}
     }
 
+    // Best effort fee transfer (1% deposit fee)
+    // Note: Failed transfers become floating funds, handled by daily reconciliation
+    let fee = amount / 100;  // 1% fee
+    let _ = accounting::transfer_to_user(
+        Principal::from_text(PARENT_STAKER_CANISTER).unwrap(),
+        fee
+    ).await;  // Ignore result - failures handled by reconciliation
+
+    // Continue with deposit using NET amount
+    let deposit_amount = amount - fee;
+    let deposit_nat = u64_to_nat(deposit_amount);
+
     // Calculate shares to mint
     let shares_to_mint = POOL_STATE.with(|state| {
         let pool_state = state.borrow().get().clone();
@@ -134,7 +146,7 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
 
         if nat_is_zero(&total_shares) {
             // First deposit - burn minimum liquidity
-            let initial_shares = amount_nat.clone();
+            let initial_shares = deposit_nat.clone();
             let burned_shares = u64_to_nat(MINIMUM_LIQUIDITY);
 
             // Mint burned shares to zero address
@@ -147,8 +159,8 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
                 .ok_or("Initial deposit too small".to_string())
         } else {
             // Subsequent deposits - proportional shares
-            // shares = (amount * total_shares) / current_reserve
-            let numerator = nat_multiply(&amount_nat, &total_shares);
+            // shares = (deposit_amount * total_shares) / current_reserve
+            let numerator = nat_multiply(&deposit_nat, &total_shares);
             nat_divide(&numerator, &current_reserve)
                 .ok_or("Division error".to_string())
         }
@@ -165,7 +177,7 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
     // Update pool reserve
     POOL_STATE.with(|state| {
         let mut pool_state = state.borrow().get().clone();
-        pool_state.reserve = nat_add(&pool_state.reserve, &amount_nat);
+        pool_state.reserve = nat_add(&pool_state.reserve, &deposit_nat);
         state.borrow_mut().set(pool_state).unwrap();
     });
 
@@ -467,4 +479,37 @@ async fn transfer_from_user(user: Principal, amount: u64) -> Result<(), String> 
 
 async fn transfer_to_user(user: Principal, amount: u64) -> Result<(), String> {
     accounting::transfer_to_user(user, amount).await
+}
+
+/// Reconcile floating funds (called daily by heartbeat)
+/// Floating funds = canister balance - pool reserve - user deposits
+/// These come from: failed fee transfers, donations, mistaken transfers
+pub async fn reconcile_floating_funds() -> Result<u64, String> {
+    // Refresh canister balance from ledger
+    let canister_balance = accounting::refresh_canister_balance().await;
+
+    // Calculate what should be in canister
+    let pool_reserve = get_pool_reserve();
+    let user_deposits = accounting::get_total_user_deposits();
+    let expected_balance = pool_reserve + user_deposits;
+
+    // Calculate floating amount
+    let floating = canister_balance.saturating_sub(expected_balance);
+
+    // Only sweep if meaningful (> 1 ICP)
+    if floating > 100_000_000 {
+        let parent = Principal::from_text(PARENT_STAKER_CANISTER).unwrap();
+        match accounting::transfer_to_user(parent, floating).await {
+            Ok(_) => {
+                ic_cdk::println!("Reconciled {} e8s floating funds to parent", floating);
+                Ok(floating)
+            }
+            Err(e) => {
+                ic_cdk::println!("Reconciliation transfer failed: {}, will retry tomorrow", e);
+                Ok(0)
+            }
+        }
+    } else {
+        Ok(0)  // Nothing to sweep
+    }
 }

@@ -26,6 +26,7 @@ pub use liquidity_pool::{
     get_lp_position,
     get_pool_stats,
     can_accept_bets,
+    reconcile_floating_funds,
     LPPosition,
     PoolStats,
 };

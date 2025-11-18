@@ -36,6 +36,8 @@ type Memory = VirtualMemory<DefaultMemoryImpl>;
 thread_local! {
     static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
         RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
+
+    static LAST_RECONCILIATION: RefCell<u64> = RefCell::new(0);
 }
 
 // =============================================================================
@@ -62,6 +64,29 @@ fn post_upgrade() {
 
     // NO TIMER INITIALIZATION - removed completely
     // Note: StableBTreeMap restores automatically, no accounting restore needed
+}
+
+// =============================================================================
+// HEARTBEAT - Daily Reconciliation
+// =============================================================================
+
+#[ic_cdk::heartbeat]
+async fn heartbeat() {
+    let now = ic_cdk::api::time();
+    let last = LAST_RECONCILIATION.with(|l| *l.borrow());
+
+    // Run daily (86400 seconds = 24 hours)
+    if now - last > 86_400_000_000_000 {  // 24 hours in nanos
+        LAST_RECONCILIATION.with(|l| *l.borrow_mut() = now);
+
+        // Run reconciliation
+        match defi_accounting::reconcile_floating_funds().await {
+            Ok(amount) if amount > 0 => {
+                ic_cdk::println!("Reconciled {} e8s to parent", amount);
+            }
+            _ => {}
+        }
+    }
 }
 
 // =============================================================================
