@@ -14,11 +14,10 @@ use super::nat_helpers::StorableNat;
 const LP_DECIMALS: u8 = 8;
 const MINIMUM_LIQUIDITY: u64 = 1000;
 const MIN_DEPOSIT: u64 = 100_000_000; // 1 ICP minimum for all deposits
-const MIN_WITHDRAWAL: u64 = 100_000; // 0.001 ICP
+const MIN_WITHDRAWAL: u64 = 1_000_000; // 0.01 ICP (minimum where 1% fee >= transfer fee)
 const MIN_OPERATING_BALANCE: u64 = 1_000_000_000; // 10 ICP to operate games
 const TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP
 const PARENT_STAKER_CANISTER: &str = "e454q-riaaa-aaaap-qqcyq-cai";
-const LP_WITHDRAWAL_FEE_PERCENT: f64 = 0.01; // 1% fee on LP withdrawals
 
 // Pool state for stable storage
 #[derive(Clone, CandidType, Deserialize, Serialize)]
@@ -229,8 +228,8 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         return Err(format!("Minimum withdrawal is {} e8s", MIN_WITHDRAWAL));
     }
 
-    // Calculate fee amounts
-    let withdrawal_fee = (payout_u64 as f64 * LP_WITHDRAWAL_FEE_PERCENT) as u64;
+    // Calculate fee amounts using integer arithmetic (no floating-point precision loss)
+    let withdrawal_fee = payout_u64 / 100; // 1% fee using integer division
     let lp_payout = payout_u64 - withdrawal_fee;
 
     // Ensure fee covers transfer cost
@@ -301,8 +300,9 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
             });
             POOL_STATE.with(|state| {
                 let mut pool_state = state.borrow().get().clone();
-                // Only restore LP's portion, parent's fee was legitimately paid
-                pool_state.reserve = nat_add(&new_reserve, &u64_to_nat(lp_payout));
+                // Restore FULL payout to pool (parent's fee came from canister balance, not pool)
+                // Pool accounting must be restored completely since withdrawal failed
+                pool_state.reserve = nat_add(&new_reserve, &payout_nat);
                 state.borrow_mut().set(pool_state).unwrap();
             });
 
