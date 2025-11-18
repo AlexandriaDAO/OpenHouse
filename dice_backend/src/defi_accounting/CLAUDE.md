@@ -13,7 +13,7 @@ Self-contained, auditable accounting module for ICP-based games using a Liquidit
 ## Architecture Overview
 
 ### Why No Guards Needed
-Unlike multi-step async operations (like icp_swap), our liquidity pool follows the Checks-Effects-Interactions pattern:
+Unlike multi-step async operations, our liquidity pool follows the Checks-Effects-Interactions pattern:
 1. All validations happen BEFORE transfers
 2. State updates are atomic (no await points between critical updates)
 3. IC guarantees sequential execution - no race conditions possible

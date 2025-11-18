@@ -360,17 +360,17 @@ pub async fn refresh_canister_balance() -> u64 {
     }
 }
 
-// Public accessors needed by liquidity_pool
-pub fn get_canister_balance() -> u64 {
+// Internal accessors used by liquidity_pool module
+pub(crate) fn get_canister_balance() -> u64 {
     CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow())
 }
 
-pub fn get_total_user_deposits() -> u64 {
+pub(crate) fn get_total_user_deposits() -> u64 {
     calculate_total_deposits()
 }
 
-// Keep existing transfer_to_user function for withdrawals
-pub async fn transfer_to_user(recipient: Principal, amount: u64) -> Result<(), String> {
+// Internal transfer function for withdrawals (used by liquidity_pool)
+pub(crate) async fn transfer_to_user(recipient: Principal, amount: u64) -> Result<(), String> {
     // Existing ICRC-1 transfer logic
     let ledger_canister_id = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
 
