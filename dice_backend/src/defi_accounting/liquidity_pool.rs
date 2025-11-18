@@ -4,6 +4,7 @@ use ic_stable_structures::{StableBTreeMap, StableCell, memory_manager::VirtualMe
 use serde::Serialize;
 use std::cell::RefCell;
 use std::borrow::Cow;
+use std::sync::LazyLock;
 use num_traits::ToPrimitive;
 
 use super::nat_helpers::*;
@@ -19,6 +20,12 @@ const MIN_OPERATING_BALANCE: u64 = 1_000_000_000; // 10 ICP to operate games
 const TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP
 const PARENT_STAKER_CANISTER: &str = "e454q-riaaa-aaaap-qqcyq-cai";
 const LP_WITHDRAWAL_FEE_BPS: u64 = 100; // 1% in basis points (100/10000)
+
+// Parent staker principal (parsed once at first use)
+static PARENT_PRINCIPAL: LazyLock<Principal> = LazyLock::new(|| {
+    Principal::from_text(PARENT_STAKER_CANISTER)
+        .expect("Invalid parent canister ID - hardcoded constant should be valid")
+});
 
 // Pool state for stable storage
 #[derive(Clone, CandidType, Deserialize, Serialize)]
@@ -202,8 +209,8 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         return Err("Insufficient shares".to_string());
     }
 
-    // Calculate payout
-    let (payout_nat, new_reserve) = POOL_STATE.with(|state| {
+    // Calculate gross payout
+    let payout_nat = POOL_STATE.with(|state| {
         let pool_state = state.borrow().get().clone();
         let current_reserve = pool_state.reserve.clone();
         let total_shares = calculate_total_supply();
@@ -217,10 +224,7 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         let payout = nat_divide(&numerator, &total_shares)
             .ok_or("Division error".to_string())?;
 
-        let new_reserve = nat_subtract(&current_reserve, &payout)
-            .ok_or("Insufficient pool reserve".to_string())?;
-
-        Ok((payout, new_reserve))
+        Ok(payout)
     })?;
 
     // Check minimum withdrawal
@@ -229,7 +233,11 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         return Err(format!("Minimum withdrawal is {} e8s", MIN_WITHDRAWAL));
     }
 
-    // Update state BEFORE transfer (reentrancy protection)
+    // Calculate fee (1% using basis points for precision)
+    let fee_amount = (payout_u64 * LP_WITHDRAWAL_FEE_BPS) / 10_000;
+    let lp_amount = payout_u64 - fee_amount;
+
+    // Update shares BEFORE transfer (reentrancy protection)
     LP_SHARES.with(|shares| {
         let mut shares_map = shares.borrow_mut();
         let new_shares = nat_subtract(&user_shares, &shares_to_burn).unwrap();
@@ -240,51 +248,46 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         }
     });
 
+    // Deduct only LP amount from reserve initially (fee stays in canister until parent transfer)
     POOL_STATE.with(|state| {
         let mut pool_state = state.borrow().get().clone();
-        pool_state.reserve = new_reserve.clone();
+        pool_state.reserve = nat_subtract(&pool_state.reserve, &u64_to_nat(lp_amount))
+            .ok_or("Insufficient pool reserve")?;
         state.borrow_mut().set(pool_state).unwrap();
-    });
-
-    // Calculate fee (1% using basis points for precision)
-    let fee_amount = (payout_u64 * LP_WITHDRAWAL_FEE_BPS) / 10_000;
-    let lp_amount = payout_u64 - fee_amount;
-
-    // Parse parent principal once
-    let parent_principal = Principal::from_text(PARENT_STAKER_CANISTER)
-        .expect("Parent canister ID is a compile-time constant");
+        Ok::<(), String>(())
+    })?;
 
     // CRITICAL: Transfer to LP first (this is the important one)
     match transfer_to_user(caller, lp_amount).await {
         Ok(_) => {
             // LP got paid successfully ✅
 
-            // BEST EFFORT: Try to pay parent (only if fee > transfer cost)
-            if fee_amount > TRANSFER_FEE {
-                match transfer_to_user(parent_principal, fee_amount).await {
+            // BEST EFFORT: Try to pay parent (only if fee is meaningful after transfer cost)
+            // Deduct transfer fee from the fee amount
+            let net_fee = fee_amount.saturating_sub(TRANSFER_FEE);
+
+            if net_fee > 0 {
+                match transfer_to_user(*PARENT_PRINCIPAL, net_fee).await {
                     Ok(_) => {
-                        ic_cdk::println!("LP withdrawal: {} got {} e8s, parent fee {} e8s",
-                                       caller, lp_amount, fee_amount);
-                    }
-                    Err(e) => {
-                        // Parent transfer failed - return fee to pool reserve
+                        // Parent transfer succeeded - deduct fee from reserve
                         POOL_STATE.with(|state| {
                             let mut pool_state = state.borrow().get().clone();
-                            pool_state.reserve = nat_add(&pool_state.reserve, &u64_to_nat(fee_amount));
+                            pool_state.reserve = nat_subtract(&pool_state.reserve, &u64_to_nat(fee_amount))
+                                .unwrap_or(pool_state.reserve);
                             state.borrow_mut().set(pool_state).unwrap();
                         });
-                        ic_cdk::println!("Parent fee transfer failed: {}, {} e8s returned to pool reserve",
+                        ic_cdk::println!("LP withdrawal: {} got {} e8s, parent received {} e8s (fee {} e8s - transfer fee {} e8s)",
+                                       caller, lp_amount, net_fee, fee_amount, TRANSFER_FEE);
+                    }
+                    Err(e) => {
+                        // Parent transfer failed - fee stays in canister (no reserve change needed)
+                        ic_cdk::println!("Parent fee transfer failed: {}, {} e8s remains in canister",
                                        e, fee_amount);
                     }
                 }
             } else {
-                // Fee too small to transfer - return to pool reserve
-                POOL_STATE.with(|state| {
-                    let mut pool_state = state.borrow().get().clone();
-                    pool_state.reserve = nat_add(&pool_state.reserve, &u64_to_nat(fee_amount));
-                    state.borrow_mut().set(pool_state).unwrap();
-                });
-                ic_cdk::println!("LP withdrawal: {} got {} e8s, {} e8s fee returned to pool (too small to transfer)",
+                // Fee too small after transfer cost - stays in canister
+                ic_cdk::println!("LP withdrawal: {} got {} e8s, fee {} e8s too small (< transfer fee), remains in canister",
                                caller, lp_amount, fee_amount);
             }
 
@@ -292,14 +295,14 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
             Ok(lp_amount)
         }
         Err(e) => {
-            // LP transfer failed - rollback everything (existing logic)
+            // LP transfer failed - rollback everything
             LP_SHARES.with(|shares| {
                 shares.borrow_mut().insert(caller, StorableNat(user_shares));
             });
 
             POOL_STATE.with(|state| {
                 let mut pool_state = state.borrow().get().clone();
-                pool_state.reserve = nat_add(&new_reserve, &payout_nat);
+                pool_state.reserve = nat_add(&pool_state.reserve, &u64_to_nat(lp_amount));
                 state.borrow_mut().set(pool_state).unwrap();
             });
 
