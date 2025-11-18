@@ -300,9 +300,9 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
             });
             POOL_STATE.with(|state| {
                 let mut pool_state = state.borrow().get().clone();
-                // Restore FULL payout to pool (parent's fee came from canister balance, not pool)
-                // Pool accounting must be restored completely since withdrawal failed
-                pool_state.reserve = nat_add(&new_reserve, &payout_nat);
+                // Only restore LP's portion - parent's fee was legitimately paid out
+                // Pool accounting: original - withdrawal_fee (matches canister balance)
+                pool_state.reserve = nat_add(&new_reserve, &u64_to_nat(lp_payout));
                 state.borrow_mut().set(pool_state).unwrap();
             });
 
