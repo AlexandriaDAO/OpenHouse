@@ -17,6 +17,8 @@ const MIN_DEPOSIT: u64 = 100_000_000; // 1 ICP minimum for all deposits
 const MIN_WITHDRAWAL: u64 = 100_000; // 0.001 ICP
 const MIN_OPERATING_BALANCE: u64 = 1_000_000_000; // 10 ICP to operate games
 const TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP
+const PARENT_STAKER_CANISTER: &str = "e454q-riaaa-aaaap-qqcyq-cai";
+const LP_WITHDRAWAL_FEE_BPS: u64 = 100; // 1% in basis points (100/10000)
 
 // Pool state for stable storage
 #[derive(Clone, CandidType, Deserialize, Serialize)]
@@ -244,11 +246,38 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         state.borrow_mut().set(pool_state).unwrap();
     });
 
-    // Transfer to user
-    match transfer_to_user(caller, payout_u64).await {
-        Ok(_) => Ok(payout_u64),
+    // Calculate fee (1% using integer division)
+    let fee_amount = payout_u64 / 100; // Exactly 1%
+    let lp_amount = payout_u64 - fee_amount;
+
+    // Parse parent principal once
+    let parent_principal = Principal::from_text(PARENT_STAKER_CANISTER)
+        .expect("Parent canister ID is a compile-time constant");
+
+    // CRITICAL: Transfer to LP first (this is the important one)
+    match transfer_to_user(caller, lp_amount).await {
+        Ok(_) => {
+            // LP got paid successfully ✅
+
+            // BEST EFFORT: Try to pay parent (not critical if this fails)
+            match transfer_to_user(parent_principal, fee_amount).await {
+                Ok(_) => {
+                    ic_cdk::println!("LP withdrawal: {} got {} e8s, parent fee {} e8s",
+                                   caller, lp_amount, fee_amount);
+                }
+                Err(e) => {
+                    // Parent transfer failed - fee stays in canister
+                    // This is OK - can be swept later
+                    ic_cdk::println!("Parent fee transfer failed: {}, {} e8s remains in canister",
+                                   e, fee_amount);
+                }
+            }
+
+            // Return what LP actually received
+            Ok(lp_amount)
+        }
         Err(e) => {
-            // ROLLBACK on failure
+            // LP transfer failed - rollback everything (existing logic)
             LP_SHARES.with(|shares| {
                 shares.borrow_mut().insert(caller, StorableNat(user_shares));
             });
