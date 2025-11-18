@@ -365,14 +365,7 @@ pub fn is_pool_initialized() -> bool {
 
 pub fn can_accept_bets() -> bool {
     let pool_reserve = get_pool_reserve();
-
-    // Can accept if pool has minimum OR legacy house has minimum
-    if pool_reserve >= MIN_OPERATING_BALANCE {
-        true
-    } else {
-        let legacy_balance = accounting::get_legacy_house_balance();
-        legacy_balance >= MIN_OPERATING_BALANCE
-    }
+    pool_reserve >= MIN_OPERATING_BALANCE
 }
 
 // Game integration

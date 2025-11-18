@@ -12,8 +12,6 @@ pub use accounting::{
     get_balance,
     get_my_balance,
     get_house_balance,
-    get_legacy_house_balance,
-    get_house_mode,
     get_max_allowed_payout,
     get_accounting_stats,
     audit_balances,
@@ -24,7 +22,6 @@ pub use accounting::{
     get_total_user_deposits,
     AccountingStats,
     Account,
-    HouseMode,  // Export the HouseMode enum
 };
 
 pub use liquidity_pool::{

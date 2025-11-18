@@ -236,9 +236,6 @@ pub async fn play_dice(
     // Bet was already deducted before game logic (P0-3 fix)
     // Now only add winnings if player won
 
-    // After determining outcome
-    let house_mode = accounting::get_house_mode();
-
     if is_win {
         let current_balance = accounting::get_balance(caller);
         let new_balance = current_balance.checked_add(payout)
@@ -246,26 +243,9 @@ pub async fn play_dice(
         accounting::update_balance(caller, new_balance)?;
 
         let profit = payout.saturating_sub(bet_amount);
-
-        // Update pool only if in LP mode (using type-safe enum)
-        match house_mode {
-            accounting::HouseMode::LiquidityPool => {
-                liquidity_pool::update_pool_on_win(profit);
-            }
-            accounting::HouseMode::Legacy => {
-                // Legacy mode: no pool update needed
-            }
-        }
+        liquidity_pool::update_pool_on_win(profit);
     } else {
-        // Player lost
-        match house_mode {
-            accounting::HouseMode::LiquidityPool => {
-                liquidity_pool::update_pool_on_loss(bet_amount);
-            }
-            accounting::HouseMode::Legacy => {
-                // Legacy mode: no pool update needed
-            }
-        }
+        liquidity_pool::update_pool_on_loss(bet_amount);
     }
 
     Ok(result)
