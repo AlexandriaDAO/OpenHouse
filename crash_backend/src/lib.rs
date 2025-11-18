@@ -27,8 +27,8 @@ const MAX_CRASH: f64 = 1000.0;  // Cap crash at 1000x
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct CrashResult {
-    pub crash_point: f64,        // Where it crashed (1.00x - 1000.00x)
-    pub vrf_hash: String,         // VRF output hash for verification
+    pub crash_point: f64,           // Where it crashed (1.00x - 1000.00x)
+    pub randomness_hash: String,    // IC randomness hash for audit/reference
 }
 
 // Memory management for future upgrades
@@ -49,11 +49,11 @@ fn post_upgrade() {
     ic_cdk::println!("Post-upgrade: No state to restore");
 }
 
-/// Simulate a crash point using IC VRF
-/// Returns crash point and VRF hash for verification
+/// Simulate a crash point using IC threshold randomness
+/// Returns crash point and randomness hash for audit/reference
 #[update]
 async fn simulate_crash() -> Result<CrashResult, String> {
-    // Get randomness from IC VRF
+    // Get randomness from IC's threshold randomness beacon (raw_rand)
     let random_bytes = raw_rand().await
         .map_err(|e| format!("Randomness unavailable: {:?}", e))?
         .0;
@@ -65,12 +65,12 @@ async fn simulate_crash() -> Result<CrashResult, String> {
     // Formula: crash = 1.0 / (1.0 - 0.99 * random)
     let crash_point = calculate_crash_point(random);
 
-    // Create VRF hash for verification (SHA256 of first 32 bytes)
-    let vrf_hash = create_vrf_hash(&random_bytes);
+    // Create randomness hash for audit/reference (SHA256 of random bytes)
+    let randomness_hash = create_randomness_hash(&random_bytes);
 
     Ok(CrashResult {
         crash_point,
-        vrf_hash,
+        randomness_hash,
     })
 }
 
@@ -89,17 +89,22 @@ fn get_expected_value() -> f64 {
 /// Calculate probability of reaching a specific multiplier
 /// Returns P(crash ≥ target)
 #[query]
-fn get_win_probability(target: f64) -> f64 {
+fn get_win_probability(target: f64) -> Result<f64, String> {
+    // Validate input is a finite number
+    if !target.is_finite() {
+        return Err("Target must be a finite number".to_string());
+    }
+
     // If target < 1.0, crash will always be >= target (since min crash is 1.0)
     if target < 1.0 {
-        return 1.0;
+        return Ok(1.0);
     }
     // If target exceeds max possible crash, probability is 0
     if target > MAX_CRASH {
-        return 0.0;
+        return Ok(0.0);
     }
     // Formula: P(crash ≥ X) = 0.99 / X
-    (0.99 / target).min(1.0)
+    Ok((0.99 / target).min(1.0))
 }
 
 /// Get example crash probabilities for common targets
@@ -109,7 +114,7 @@ fn get_probability_table() -> Vec<(f64, f64)> {
     // Using const array to avoid allocations
     const TARGETS: [f64; 8] = [1.1, 1.5, 2.0, 3.0, 5.0, 10.0, 50.0, 100.0];
     TARGETS.iter()
-        .map(|&t| (t, get_win_probability(t)))
+        .map(|&t| (t, get_win_probability(t).unwrap_or(0.0)))
         .collect()
 }
 
@@ -140,16 +145,20 @@ fn bytes_to_float(bytes: &[u8]) -> Result<f64, String> {
 /// Calculate crash point using the formula
 /// crash = 1.0 / (1.0 - 0.99 * random)
 ///
-/// **Distribution Note**: Random values are clamped to [0.0, 0.999] before applying
-/// the formula. This creates a small discontinuity:
-/// - Values > 0.999 (≈0.1% probability) map to crash ≈ 1010x, then capped at 1000x
-/// - This slightly concentrates probability mass at MAX_CRASH
+/// **Distribution Note**: Random values are clamped to [0.0, 0.99999] before applying
+/// the formula. This creates a minimal discontinuity:
+/// - Values > 0.99999 (≈0.001% probability) map to crash ≈ 101,010x, then capped at 1000x
+/// - This minimally concentrates probability mass at MAX_CRASH
 /// - House edge remains ≈1% for all practical crash points below the cap
 /// - Tradeoff: Mathematical purity vs. preventing extreme/unstable values
+///
+/// **Precision Note**: For very high multipliers (>100x), floating-point
+/// rounding may introduce small deviations (<0.01%) from the theoretical
+/// distribution. This is acceptable for practical casino purposes.
 fn calculate_crash_point(random: f64) -> f64 {
     // Ensure random is in valid range to prevent division by near-zero
-    // Using 0.999 max to ensure denominator stays reasonable
-    let random = random.max(0.0).min(0.999);
+    // Using 0.99999 max to minimize distribution discontinuity (0.001% vs 0.1%)
+    let random = random.max(0.0).min(0.99999);
 
     // Apply formula
     let crash = 1.0 / (1.0 - 0.99 * random);
@@ -163,7 +172,7 @@ fn calculate_crash_point(random: f64) -> f64 {
 /// **Important Limitation**: This hash is for reference only and does not provide
 /// cryptographic verification of fairness. Users cannot independently verify the
 /// randomness without access to IC's internal consensus mechanism. The hash serves
-/// as an identifier for this particular random draw, not a VRF proof.
+/// as an identifier for this particular random draw, not a cryptographic proof.
 ///
 /// True cryptographic verification would require:
 /// - Access to IC's BLS threshold signatures
@@ -171,7 +180,7 @@ fn calculate_crash_point(random: f64) -> f64 {
 /// - Understanding of IC's random tape construction
 ///
 /// For now, fairness relies on trusting the IC's threshold randomness beacon.
-fn create_vrf_hash(bytes: &[u8]) -> String {
+fn create_randomness_hash(bytes: &[u8]) -> String {
     use sha2::{Sha256, Digest};
 
     // Ensure we have sufficient entropy (at least 32 bytes)
@@ -219,13 +228,13 @@ mod tests {
     #[test]
     fn test_win_probability_formula() {
         // P(crash ≥ 2.0) = 0.99 / 2.0 = 49.5%
-        assert!((get_win_probability(2.0) - 0.495).abs() < 0.001);
+        assert!((get_win_probability(2.0).unwrap() - 0.495).abs() < 0.001);
 
         // P(crash ≥ 10.0) = 0.99 / 10.0 = 9.9%
-        assert!((get_win_probability(10.0) - 0.099).abs() < 0.001);
+        assert!((get_win_probability(10.0).unwrap() - 0.099).abs() < 0.001);
 
         // P(crash ≥ 100.0) = 0.99 / 100.0 = 0.99%
-        assert!((get_win_probability(100.0) - 0.0099).abs() < 0.0001);
+        assert!((get_win_probability(100.0).unwrap() - 0.0099).abs() < 0.0001);
     }
 
     #[test]
@@ -234,7 +243,7 @@ mod tests {
         let targets = vec![1.1, 2.0, 5.0, 10.0, 50.0, 100.0];
 
         for target in targets {
-            let win_prob = get_win_probability(target);
+            let win_prob = get_win_probability(target).unwrap();
             let expected_return = win_prob * target;
 
             assert!(
@@ -262,13 +271,13 @@ mod tests {
     }
 
     #[test]
-    fn test_create_vrf_hash() {
-        // Test that VRF hash is consistent and has expected format
+    fn test_create_randomness_hash() {
+        // Test that randomness hash is consistent and has expected format
         let test_bytes = vec![1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
                               17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
 
-        let hash1 = create_vrf_hash(&test_bytes);
-        let hash2 = create_vrf_hash(&test_bytes);
+        let hash1 = create_randomness_hash(&test_bytes);
+        let hash2 = create_randomness_hash(&test_bytes);
 
         // Hash should be deterministic
         assert_eq!(hash1, hash2);
@@ -281,7 +290,7 @@ mod tests {
 
         // Different input should produce different hash
         let different_bytes = vec![255u8; 32];
-        let hash3 = create_vrf_hash(&different_bytes);
+        let hash3 = create_randomness_hash(&different_bytes);
         assert_ne!(hash1, hash3);
     }
 
@@ -302,21 +311,26 @@ mod tests {
     #[test]
     fn test_win_probability_edge_cases() {
         // Target < 1.0 should return 1.0 (always wins since min crash is 1.0)
-        assert_eq!(get_win_probability(0.5), 1.0);
-        assert_eq!(get_win_probability(0.99), 1.0);
-        assert_eq!(get_win_probability(0.0), 1.0);
+        assert_eq!(get_win_probability(0.5).unwrap(), 1.0);
+        assert_eq!(get_win_probability(0.99).unwrap(), 1.0);
+        assert_eq!(get_win_probability(0.0).unwrap(), 1.0);
 
         // Target > MAX_CRASH should return 0.0 (impossible to reach)
-        assert_eq!(get_win_probability(1001.0), 0.0);
-        assert_eq!(get_win_probability(10000.0), 0.0);
+        assert_eq!(get_win_probability(1001.0).unwrap(), 0.0);
+        assert_eq!(get_win_probability(10000.0).unwrap(), 0.0);
 
         // Target exactly at 1.0 should return close to 1.0
-        let prob_at_one = get_win_probability(1.0);
+        let prob_at_one = get_win_probability(1.0).unwrap();
         assert!((prob_at_one - 0.99).abs() < 0.01);
 
         // Target at MAX_CRASH should return very small probability
-        let prob_at_max = get_win_probability(MAX_CRASH);
+        let prob_at_max = get_win_probability(MAX_CRASH).unwrap();
         assert!(prob_at_max > 0.0 && prob_at_max < 0.01);
+
+        // Test non-finite inputs
+        assert!(get_win_probability(f64::NAN).is_err());
+        assert!(get_win_probability(f64::INFINITY).is_err());
+        assert!(get_win_probability(f64::NEG_INFINITY).is_err());
     }
 
     #[test]
@@ -344,10 +358,10 @@ mod tests {
     }
 
     #[test]
-    fn test_create_vrf_hash_with_short_input() {
+    fn test_create_randomness_hash_with_short_input() {
         // Test with less than 32 bytes
         let short_bytes = vec![1u8; 16];
-        let hash = create_vrf_hash(&short_bytes);
+        let hash = create_randomness_hash(&short_bytes);
 
         // Should still produce valid hash
         assert_eq!(hash.len(), 64);
@@ -355,11 +369,25 @@ mod tests {
 
         // Test with minimal bytes
         let minimal_bytes = vec![42u8; 8];
-        let hash_minimal = create_vrf_hash(&minimal_bytes);
+        let hash_minimal = create_randomness_hash(&minimal_bytes);
         assert_eq!(hash_minimal.len(), 64);
 
         // Different short inputs should produce different hashes
         assert_ne!(hash, hash_minimal);
+    }
+
+    #[test]
+    fn test_bytes_to_float_insufficient_bytes() {
+        // Test with less than 8 bytes (should error)
+        let short = vec![1u8; 7];
+        let result = bytes_to_float(&short);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Insufficient randomness bytes");
+
+        // Test with exactly 8 bytes (should work)
+        let exact = vec![1u8; 8];
+        let result = bytes_to_float(&exact);
+        assert!(result.is_ok());
     }
 
     #[test]

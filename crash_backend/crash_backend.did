@@ -1,6 +1,6 @@
 type CrashResult = record {
   crash_point: float64;
-  vrf_hash: text;
+  randomness_hash: text;
 };
 
 service : {
@@ -13,8 +13,8 @@ service : {
   // Get expected value (0.99)
   get_expected_value: () -> (float64) query;
 
-  // Get probability of reaching target
-  get_win_probability: (float64) -> (float64) query;
+  // Get probability of reaching target (validates input is finite)
+  get_win_probability: (float64) -> (variant { Ok: float64; Err: text }) query;
 
   // Get probability table for common targets
   get_probability_table: () -> (vec record { float64; float64 }) query;
