@@ -155,7 +155,7 @@ fn bytes_to_float(bytes: &[u8]) -> Result<f64, String> {
 /// **Precision Note**: For very high multipliers (>100x), floating-point
 /// rounding may introduce small deviations (<0.01%) from the theoretical
 /// distribution. This is acceptable for practical casino purposes.
-fn calculate_crash_point(random: f64) -> f64 {
+pub fn calculate_crash_point(random: f64) -> f64 {
     // Ensure random is in valid range to prevent division by near-zero
     // Using 0.99999 max to minimize distribution discontinuity (0.001% vs 0.1%)
     let random = random.max(0.0).min(0.99999);
@@ -411,5 +411,82 @@ mod tests {
         assert!(c1 >= 1.0 && c1 <= MAX_CRASH);
         assert!(c2 >= 1.0 && c2 <= MAX_CRASH);
         assert!(c3 >= 1.0 && c3 <= MAX_CRASH);
+    }
+
+    // ============================================================================
+    // HOUSE EDGE SIMULATION TESTS
+    // ============================================================================
+    // Note: These tests use the `rand` crate which is only available in dev-dependencies
+    // They are kept inline rather than in tests/ folder due to cdylib linking constraints
+
+    #[cfg(test)]
+    mod house_edge_simulation {
+        use super::*;
+
+        /// Simulate N games and calculate average return when cashing out at target multiplier
+        fn simulate_games_at_multiplier(target: f64, num_games: usize, seed: u64) -> f64 {
+            use rand::{Rng, SeedableRng};
+            use rand_chacha::ChaCha8Rng;
+
+            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            let mut total_return = 0.0;
+
+            for _ in 0..num_games {
+                // Generate random value in [0.0, 1.0)
+                let random: f64 = rng.gen();
+
+                // Calculate crash point using actual game formula
+                let crash_point = calculate_crash_point(random);
+
+                // Player cashes out at target multiplier
+                let return_multiplier = if crash_point >= target {
+                    target
+                } else {
+                    0.0
+                };
+
+                total_return += return_multiplier;
+            }
+
+            total_return / num_games as f64
+        }
+
+        #[test]
+        fn test_house_edge_at_various_multipliers() {
+            println!("\n=== Crash Game House Edge Simulation ===\n");
+
+            const NUM_GAMES: usize = 100_000;
+            const SEED: u64 = 12345;
+
+            let targets = vec![1.1, 2.0, 5.0, 10.0];
+            let mut all_returns = Vec::new();
+
+            for target in targets {
+                let avg_return = simulate_games_at_multiplier(target, NUM_GAMES, SEED);
+                all_returns.push(avg_return);
+
+                println!("Target: {:>6.1}x | Avg Return: {:.4}x | House Edge: {:.2}%",
+                         target, avg_return, (1.0 - avg_return) * 100.0);
+
+                // Verify house edge exists (return < 1.0)
+                assert!(avg_return < 1.0, "House should have an edge");
+
+                // Verify it's reasonably close to 0.99x (allowing for variance and clamping)
+                let tolerance = match target {
+                    t if t <= 2.0 => 0.02,
+                    t if t <= 5.0 => 0.05,
+                    _ => 0.15,
+                };
+                assert!(
+                    (avg_return - 0.99).abs() < tolerance,
+                    "Target {}x: expected return ≈ 0.99x, got {:.4}x",
+                    target, avg_return
+                );
+            }
+
+            let overall_avg = all_returns.iter().sum::<f64>() / all_returns.len() as f64;
+            println!("\nOverall Average Return: {:.4}x", overall_avg);
+            println!("Overall House Edge: {:.2}%\n", (1.0 - overall_avg) * 100.0);
+        }
     }
 }
