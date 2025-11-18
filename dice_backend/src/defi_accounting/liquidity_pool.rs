@@ -13,11 +13,10 @@ use super::nat_helpers::StorableNat;
 // Constants
 const LP_DECIMALS: u8 = 8;
 const MINIMUM_LIQUIDITY: u64 = 1000;
-const MIN_DEPOSIT: u64 = 10_000_000; // 0.1 ICP
+const MIN_DEPOSIT: u64 = 100_000_000; // 1 ICP minimum for all deposits
 const MIN_WITHDRAWAL: u64 = 100_000; // 0.001 ICP
 const MIN_OPERATING_BALANCE: u64 = 1_000_000_000; // 10 ICP to operate games
 const TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP
-// Admin constant removed for full decentralization
 
 // Pool state for stable storage
 #[derive(Clone, CandidType, Deserialize, Serialize)]
@@ -82,54 +81,6 @@ pub struct PoolStats {
     pub is_initialized: bool,
 }
 
-// Initialize pool from existing house balance (one-time migration)
-pub async fn initialize_pool_from_house() -> Result<String, String> {
-    // ====================================================================
-    // SECURITY NOTE: No admin authorization needed
-    // ====================================================================
-    // This function is protected by the initialization flag only.
-    // We intentionally removed admin checks for full decentralization.
-    // The function can only run once, making admin control unnecessary.
-    //
-    // Why no race condition protection needed:
-    // - IC guarantees sequential execution of update calls
-    // - Even if called multiple times, only first succeeds
-    // - The initialization flag prevents re-execution
-    // ====================================================================
-
-    // Check if already initialized (this is the ONLY protection needed)
-    let is_initialized = POOL_STATE.with(|state| state.borrow().get().initialized);
-    if is_initialized {
-        return Err("Pool already initialized".to_string());
-    }
-
-    // Get existing house balance (legacy calculation)
-    accounting::refresh_canister_balance().await;
-    let canister_balance = accounting::get_canister_balance();
-    let user_deposits = accounting::get_total_user_deposits();
-    let house_balance = canister_balance.saturating_sub(user_deposits);
-
-    if house_balance == 0 {
-        // No house balance, just mark as initialized
-        POOL_STATE.with(|state| {
-            let mut pool_state = state.borrow().get().clone();
-            pool_state.initialized = true;
-            state.borrow_mut().set(pool_state).unwrap();
-        });
-        return Ok("Pool initialized with 0 balance (no house funds to migrate)".to_string());
-    }
-
-    // Initialize pool with house balance
-    POOL_STATE.with(|state| {
-        let mut pool_state = state.borrow().get().clone();
-        pool_state.reserve = u64_to_nat(house_balance);
-        pool_state.initialized = true;
-        state.borrow_mut().set(pool_state).unwrap();
-    });
-
-    Ok(format!("Pool initialized with {} e8s from house balance", house_balance))
-}
-
 // Deposit liquidity (frontend handles ICRC-2 approval first)
 pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
     // ====================================================================
@@ -182,11 +133,6 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
         let total_shares = calculate_total_supply();
 
         if nat_is_zero(&total_shares) {
-            // Check minimum first deposit to prevent share manipulation attacks
-            if amount < 100_000_000 { // 1 ICP minimum for first deposit
-                return Err("First deposit must be at least 1 ICP to prevent share manipulation attacks".to_string());
-            }
-
             // First deposit - burn minimum liquidity
             let initial_shares = amount_nat.clone();
             let burned_shares = u64_to_nat(MINIMUM_LIQUIDITY);
@@ -226,8 +172,8 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
     Ok(shares_to_mint)
 }
 
-// Withdraw liquidity
-pub async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
+// Internal function for withdrawing liquidity (called by withdraw_all_liquidity)
+async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     // ====================================================================
     // SECURITY: Checks-Effects-Interactions Pattern
     // ====================================================================

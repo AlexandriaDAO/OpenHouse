@@ -155,21 +155,11 @@ fn greet(name: String) -> String {
 
 // Pool initialization
 
-#[update]
-async fn initialize_pool_from_house() -> Result<String, String> {
-    defi_accounting::initialize_pool_from_house().await
-}
-
 // Liquidity Pool Management
 
 #[update]
 async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
     defi_accounting::deposit_liquidity(amount).await
-}
-
-#[update]
-async fn withdraw_liquidity(shares: Nat) -> Result<u64, String> {
-    defi_accounting::withdraw_liquidity(shares).await
 }
 
 #[update]

@@ -28,9 +28,7 @@ pub use accounting::{
 };
 
 pub use liquidity_pool::{
-    initialize_pool_from_house,
     deposit_liquidity,
-    withdraw_liquidity,
     withdraw_all_liquidity,
     get_lp_position,
     get_pool_stats,
