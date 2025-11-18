@@ -246,8 +246,8 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         state.borrow_mut().set(pool_state).unwrap();
     });
 
-    // Calculate fee (1% using integer division)
-    let fee_amount = payout_u64 / 100; // Exactly 1%
+    // Calculate fee (1% using basis points for precision)
+    let fee_amount = (payout_u64 * LP_WITHDRAWAL_FEE_BPS) / 10_000;
     let lp_amount = payout_u64 - fee_amount;
 
     // Parse parent principal once
@@ -259,18 +259,33 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         Ok(_) => {
             // LP got paid successfully ✅
 
-            // BEST EFFORT: Try to pay parent (not critical if this fails)
-            match transfer_to_user(parent_principal, fee_amount).await {
-                Ok(_) => {
-                    ic_cdk::println!("LP withdrawal: {} got {} e8s, parent fee {} e8s",
-                                   caller, lp_amount, fee_amount);
+            // BEST EFFORT: Try to pay parent (only if fee > transfer cost)
+            if fee_amount > TRANSFER_FEE {
+                match transfer_to_user(parent_principal, fee_amount).await {
+                    Ok(_) => {
+                        ic_cdk::println!("LP withdrawal: {} got {} e8s, parent fee {} e8s",
+                                       caller, lp_amount, fee_amount);
+                    }
+                    Err(e) => {
+                        // Parent transfer failed - return fee to pool reserve
+                        POOL_STATE.with(|state| {
+                            let mut pool_state = state.borrow().get().clone();
+                            pool_state.reserve = nat_add(&pool_state.reserve, &u64_to_nat(fee_amount));
+                            state.borrow_mut().set(pool_state).unwrap();
+                        });
+                        ic_cdk::println!("Parent fee transfer failed: {}, {} e8s returned to pool reserve",
+                                       e, fee_amount);
+                    }
                 }
-                Err(e) => {
-                    // Parent transfer failed - fee stays in canister
-                    // This is OK - can be swept later
-                    ic_cdk::println!("Parent fee transfer failed: {}, {} e8s remains in canister",
-                                   e, fee_amount);
-                }
+            } else {
+                // Fee too small to transfer - return to pool reserve
+                POOL_STATE.with(|state| {
+                    let mut pool_state = state.borrow().get().clone();
+                    pool_state.reserve = nat_add(&pool_state.reserve, &u64_to_nat(fee_amount));
+                    state.borrow_mut().set(pool_state).unwrap();
+                });
+                ic_cdk::println!("LP withdrawal: {} got {} e8s, {} e8s fee returned to pool (too small to transfer)",
+                               caller, lp_amount, fee_amount);
             }
 
             // Return what LP actually received
