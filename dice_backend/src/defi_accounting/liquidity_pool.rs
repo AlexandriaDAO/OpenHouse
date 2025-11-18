@@ -17,6 +17,8 @@ const MIN_DEPOSIT: u64 = 100_000_000; // 1 ICP minimum for all deposits
 const MIN_WITHDRAWAL: u64 = 100_000; // 0.001 ICP
 const MIN_OPERATING_BALANCE: u64 = 1_000_000_000; // 10 ICP to operate games
 const TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP
+const PARENT_STAKER_CANISTER: &str = "e454q-riaaa-aaaap-qqcyq-cai";
+const LP_WITHDRAWAL_FEE_PERCENT: f64 = 0.01; // 1% fee on LP withdrawals
 
 // Pool state for stable storage
 #[derive(Clone, CandidType, Deserialize, Serialize)]
@@ -227,7 +229,20 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         return Err(format!("Minimum withdrawal is {} e8s", MIN_WITHDRAWAL));
     }
 
-    // Update state BEFORE transfer (reentrancy protection)
+    // Calculate fee amounts
+    let withdrawal_fee = (payout_u64 as f64 * LP_WITHDRAWAL_FEE_PERCENT) as u64;
+    let lp_payout = payout_u64 - withdrawal_fee;
+
+    // Ensure fee covers transfer cost
+    if withdrawal_fee < TRANSFER_FEE {
+        return Err(format!("Withdrawal amount {} e8s too small for fee", payout_u64));
+    }
+
+    // Parse parent principal
+    let parent_principal = Principal::from_text(PARENT_STAKER_CANISTER)
+        .expect("Parent canister ID must be valid");
+
+    // Update state BEFORE transfers (reentrancy protection)
     LP_SHARES.with(|shares| {
         let mut shares_map = shares.borrow_mut();
         let new_shares = nat_subtract(&user_shares, &shares_to_burn).unwrap();
@@ -244,22 +259,65 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         state.borrow_mut().set(pool_state).unwrap();
     });
 
-    // Transfer to user
-    match transfer_to_user(caller, payout_u64).await {
-        Ok(_) => Ok(payout_u64),
+    // STEP 1: Transfer fee to parent (1%)
+    match transfer_to_user(parent_principal, withdrawal_fee).await {
+        Ok(_) => {
+            // Parent paid successfully, continue to LP transfer
+        }
         Err(e) => {
-            // ROLLBACK on failure
+            // ROLLBACK: Parent transfer failed, restore ALL state
             LP_SHARES.with(|shares| {
                 shares.borrow_mut().insert(caller, StorableNat(user_shares));
             });
-
             POOL_STATE.with(|state| {
                 let mut pool_state = state.borrow().get().clone();
                 pool_state.reserve = nat_add(&new_reserve, &payout_nat);
                 state.borrow_mut().set(pool_state).unwrap();
             });
+            return Err(format!("Parent fee transfer failed: {}. State rolled back.", e));
+        }
+    }
 
-            Err(format!("Transfer failed: {}. State rolled back.", e))
+    // STEP 2: Transfer remaining to LP (99%)
+    match transfer_to_user(caller, lp_payout).await {
+        Ok(_) => {
+            // Both transfers successful
+            ic_cdk::println!(
+                "LP withdrawal: {} received {} e8s, parent fee {} e8s",
+                caller,
+                lp_payout,
+                withdrawal_fee
+            );
+            Ok(lp_payout)
+        }
+        Err(e) => {
+            // CRITICAL: Parent already got paid, LP transfer failed
+            // We CANNOT rollback the parent transfer (already committed on ledger)
+            // Best we can do: restore LP's shares and pool reserve
+            // LP keeps their shares, parent keeps the fee (LP loses fee but keeps position)
+
+            LP_SHARES.with(|shares| {
+                shares.borrow_mut().insert(caller, StorableNat(user_shares));
+            });
+            POOL_STATE.with(|state| {
+                let mut pool_state = state.borrow().get().clone();
+                // Only restore LP's portion, parent's fee was legitimately paid
+                pool_state.reserve = nat_add(&new_reserve, &u64_to_nat(lp_payout));
+                state.borrow_mut().set(pool_state).unwrap();
+            });
+
+            // Log critical error
+            ic_cdk::println!(
+                "⚠️ PARTIAL WITHDRAWAL: Parent received {} e8s fee, but LP transfer failed: {}. LP shares restored.",
+                withdrawal_fee,
+                e
+            );
+
+            Err(format!(
+                "LP transfer failed after parent fee paid: {}. Your shares have been restored, but {} e8s fee was collected.",
+                e,
+                withdrawal_fee
+            ))
         }
     }
 }
