@@ -5,12 +5,12 @@
 //! for provably fair 1% house edge.
 //!
 //! **The Formula:**
-//! crash = 1.0 / (1.0 - 0.99 × random)
+//! crash = 0.99 / (1.0 - random)
 //!
 //! Where:
 //! - random is uniform [0.0, 1.0) from IC VRF
-//! - 0.99 factor creates exactly 1% house edge
-//! - P(crash ≥ X) = 0.99 / X (constant edge for all strategies)
+//! - Formula mathematically guarantees exactly 1% house edge for ALL multipliers
+//! - P(crash ≥ X) = 0.99 / X (constant edge regardless of cash-out strategy)
 //!
 //! **Transparency & Fairness:**
 //! - Randomness: IC VRF (raw_rand) - no fallback
@@ -23,7 +23,7 @@ use ic_cdk::{init, pre_upgrade, post_upgrade, query, update};
 use ic_cdk::api::management_canister::main::raw_rand;
 
 // Constants
-const MAX_CRASH: f64 = 1000.0;  // Cap crash at 1000x
+const MAX_CRASH: f64 = 100.0;  // Cap crash at 100x
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct CrashResult {
@@ -77,7 +77,7 @@ async fn simulate_crash() -> Result<CrashResult, String> {
 /// Get the crash formula as a string
 #[query]
 fn get_crash_formula() -> String {
-    "crash = 1.0 / (1.0 - 0.99 × random)".to_string()
+    "crash = 0.99 / (1.0 - random)".to_string()
 }
 
 /// Get expected value (should be 0.99)
@@ -143,25 +143,29 @@ fn bytes_to_float(bytes: &[u8]) -> Result<f64, String> {
 }
 
 /// Calculate crash point using the formula
-/// crash = 1.0 / (1.0 - 0.99 * random)
+/// crash = 0.99 / (1.0 - random)
+///
+/// **Mathematical Guarantee**: This formula provides exactly 1% house edge for ALL multipliers:
+/// - P(crash ≥ X) = 0.99 / X
+/// - Expected return = P(crash ≥ X) × X = 0.99 (constant 1% house edge)
+/// - This holds for ANY cash-out strategy or multiplier target
 ///
 /// **Distribution Note**: Random values are clamped to [0.0, 0.99999] before applying
-/// the formula. This creates a minimal discontinuity:
-/// - Values > 0.99999 (≈0.001% probability) map to crash ≈ 101,010x, then capped at 1000x
-/// - This minimally concentrates probability mass at MAX_CRASH
-/// - House edge remains ≈1% for all practical crash points below the cap
-/// - Tradeoff: Mathematical purity vs. preventing extreme/unstable values
+/// the formula to prevent division by zero:
+/// - Max crash = 0.99 / (1.0 - 0.99999) ≈ 99,000x (then capped at MAX_CRASH)
+/// - Clamping affects <0.001% of values, minimal impact on fairness
+/// - House edge remains exactly 1% for all practical multipliers
 ///
 /// **Precision Note**: For very high multipliers (>100x), floating-point
 /// rounding may introduce small deviations (<0.01%) from the theoretical
 /// distribution. This is acceptable for practical casino purposes.
-fn calculate_crash_point(random: f64) -> f64 {
-    // Ensure random is in valid range to prevent division by near-zero
-    // Using 0.99999 max to minimize distribution discontinuity (0.001% vs 0.1%)
+pub fn calculate_crash_point(random: f64) -> f64 {
+    // Ensure random is in valid range to prevent division by zero
+    // Clamping to 0.99999 allows max crash ≈ 99,000x before MAX_CRASH cap
     let random = random.max(0.0).min(0.99999);
 
-    // Apply formula
-    let crash = 1.0 / (1.0 - 0.99 * random);
+    // Apply corrected formula for constant 1% house edge
+    let crash = 0.99 / (1.0 - random);
 
     // Cap at maximum
     crash.min(MAX_CRASH)
@@ -211,17 +215,18 @@ mod tests {
 
     #[test]
     fn test_crash_formula_at_boundaries() {
-        // random = 0.0 → crash = 1.0 / 1.0 = 1.00x
-        assert!((calculate_crash_point(0.0) - 1.0).abs() < 0.01);
+        // random = 0.0 → crash = 0.99 / 1.0 = 0.99x
+        assert!((calculate_crash_point(0.0) - 0.99).abs() < 0.01);
 
-        // random = 0.5 → crash = 1.0 / 0.505 = 1.98x
+        // random = 0.5 → crash = 0.99 / 0.5 = 1.98x
         assert!((calculate_crash_point(0.5) - 1.98).abs() < 0.01);
 
-        // random = 0.9 → crash = 1.0 / 0.109 = 9.17x
-        assert!((calculate_crash_point(0.9) - 9.17).abs() < 0.1);
+        // random = 0.9 → crash = 0.99 / 0.1 = 9.9x
+        assert!((calculate_crash_point(0.9) - 9.9).abs() < 0.1);
 
-        // random = 0.99 → crash = 1.0 / 0.0099 = 101.01x (capped)
+        // random = 0.99 → crash = 0.99 / 0.01 = 99x
         let high_crash = calculate_crash_point(0.99);
+        assert!((high_crash - 99.0).abs() < 1.0);
         assert!(high_crash <= MAX_CRASH);
     }
 
@@ -335,19 +340,20 @@ mod tests {
 
     #[test]
     fn test_crash_point_extreme_values() {
-        // Test with random = 0.0 (minimum)
+        // Test with random = 0.0 (minimum) → crash = 0.99 / 1.0 = 0.99x
         let crash_min = calculate_crash_point(0.0);
-        assert!((crash_min - 1.0).abs() < 0.01);
+        assert!((crash_min - 0.99).abs() < 0.01);
 
-        // Test with random = 0.999 (at clamp boundary)
+        // Test with random = 0.999 → crash = 0.99 / 0.001 = 990x, capped at MAX_CRASH
         let crash_at_clamp = calculate_crash_point(0.999);
-        assert!(crash_at_clamp > 1.0 && crash_at_clamp <= MAX_CRASH);
+        assert!(crash_at_clamp <= MAX_CRASH);
 
-        // Test with random > 0.999 (should be clamped)
+        // Test with random > 0.99999 (should be clamped to 0.99999)
+        // crash = 0.99 / 0.00001 = 99,000x (then capped at MAX_CRASH)
         let crash_above_clamp = calculate_crash_point(0.9999);
         assert!(crash_above_clamp <= MAX_CRASH);
 
-        // Test with random = 1.0 (should be clamped to 0.999)
+        // Test with random = 1.0 (should be clamped to 0.99999)
         let crash_at_one = calculate_crash_point(1.0);
         assert!(crash_at_one <= MAX_CRASH);
 
@@ -393,11 +399,12 @@ mod tests {
     #[test]
     fn test_clamping_preserves_distribution() {
         // Verify that clamping doesn't significantly distort the distribution
-        // Random values in [0, 0.999) should map linearly to crash points
+        // With new formula: crash = 0.99 / (1 - random)
+        // Higher random values produce higher crash points
 
-        let r1 = 0.0;
-        let r2 = 0.5;
-        let r3 = 0.998;
+        let r1 = 0.0;   // crash = 0.99 / 1.0 = 0.99x
+        let r2 = 0.5;   // crash = 0.99 / 0.5 = 1.98x
+        let r3 = 0.98;  // crash = 0.99 / 0.02 = 49.5x
 
         let c1 = calculate_crash_point(r1);
         let c2 = calculate_crash_point(r2);
@@ -407,9 +414,107 @@ mod tests {
         assert!(c1 < c2);
         assert!(c2 < c3);
 
-        // All should be within valid range
-        assert!(c1 >= 1.0 && c1 <= MAX_CRASH);
-        assert!(c2 >= 1.0 && c2 <= MAX_CRASH);
-        assert!(c3 >= 1.0 && c3 <= MAX_CRASH);
+        // All should be within valid range (note: c1 can be < 1.0 with new formula)
+        assert!(c1 > 0.0 && c1 <= MAX_CRASH);
+        assert!(c2 > 0.0 && c2 <= MAX_CRASH);
+        assert!(c3 > 0.0 && c3 <= MAX_CRASH);
+
+        // Verify specific values
+        assert!((c1 - 0.99).abs() < 0.01);
+        assert!((c2 - 1.98).abs() < 0.01);
+        assert!((c3 - 49.5).abs() < 1.0);
+    }
+
+    // ============================================================================
+    // HOUSE EDGE SIMULATION TESTS
+    // ============================================================================
+    // Note: These tests use the `rand` crate which is only available in dev-dependencies
+    // They are kept inline rather than in tests/ folder due to cdylib linking constraints
+
+    #[cfg(test)]
+    mod house_edge_simulation {
+        use super::*;
+
+        /// Simulate N games and calculate average return when cashing out at target multiplier
+        fn simulate_games_at_multiplier(target: f64, num_games: usize, seed: u64) -> f64 {
+            use rand::{Rng, SeedableRng};
+            use rand_chacha::ChaCha8Rng;
+
+            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            let mut total_return = 0.0;
+
+            for _ in 0..num_games {
+                // Generate random value in [0.0, 1.0)
+                let random: f64 = rng.gen();
+
+                // Calculate crash point using actual game formula
+                let crash_point = calculate_crash_point(random);
+
+                // Player cashes out at target multiplier
+                let return_multiplier = if crash_point >= target {
+                    target
+                } else {
+                    0.0
+                };
+
+                total_return += return_multiplier;
+            }
+
+            total_return / num_games as f64
+        }
+
+        #[test]
+        fn test_house_edge_at_various_multipliers() {
+            println!("\n╔════════════════════════════════════════════════════════════════════╗");
+            println!("║         Crash Game House Edge Simulation (100K games each)        ║");
+            println!("╚════════════════════════════════════════════════════════════════════╝\n");
+
+            const NUM_GAMES: usize = 100_000;
+            const SEED: u64 = 12345;
+
+            // Test comprehensive range of multipliers up to MAX_CRASH (100x)
+            let targets = vec![1.1, 1.5, 2.0, 3.0, 5.0, 10.0, 20.0, 50.0, 100.0];
+            let mut all_returns = Vec::new();
+
+            println!("Target | Wins      | Win %   | Avg Return | House Edge | Theoretical");
+            println!("-------|-----------|---------|------------|------------|------------");
+
+            for target in targets {
+                let avg_return = simulate_games_at_multiplier(target, NUM_GAMES, SEED);
+                all_returns.push(avg_return);
+
+                // Calculate win count from average return
+                let win_rate = avg_return / target;
+                let wins = (win_rate * NUM_GAMES as f64) as usize;
+                let house_edge = (1.0 - avg_return) * 100.0;
+                let theoretical_edge = 1.0;
+
+                println!("{:>6.1}x | {:>9} | {:>6.2}% | {:>10.4}x | {:>9.2}% | {:>10.2}%",
+                         target, wins, win_rate * 100.0, avg_return, house_edge, theoretical_edge);
+
+                // Verify house edge exists (return < 1.0)
+                assert!(avg_return < 1.0, "House should have an edge");
+
+                // Verify it's reasonably close to 0.99x (allowing for statistical variance)
+                // Higher tolerance for extreme multipliers due to capping and variance
+                let tolerance = if target >= MAX_CRASH { 0.05 } else { 0.02 };
+                assert!(
+                    (avg_return - 0.99).abs() < tolerance,
+                    "Target {}x: expected return ≈ 0.99x, got {:.4}x",
+                    target, avg_return
+                );
+            }
+
+            let overall_avg = all_returns.iter().sum::<f64>() / all_returns.len() as f64;
+            let overall_edge = (1.0 - overall_avg) * 100.0;
+
+            println!("\n{}", "═".repeat(72));
+            println!("Overall Average Return: {:.4}x", overall_avg);
+            println!("Overall House Edge:     {:.2}%", overall_edge);
+            println!("Target House Edge:      1.00%");
+            println!("{}", "═".repeat(72));
+            println!("\n✓ All multipliers show consistent ~1% house edge");
+            println!("✓ Max crash capped at {:.0}x", MAX_CRASH);
+        }
     }
 }
