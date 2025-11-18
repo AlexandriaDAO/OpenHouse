@@ -1,43 +1,17 @@
 # DeFi Accounting Module for ICP Games
 
-A secure, auditable, and reusable dual-mode accounting module for Internet Computer Protocol (ICP) based games with Liquidity Pool support.
+A secure, auditable, and reusable accounting module for Internet Computer Protocol (ICP) based games using a Liquidity Pool system.
 
 ## 🎯 Overview
 
-This module provides complete DeFi functionality for ICP-based games with two operating modes:
+This module provides complete DeFi functionality for ICP-based games using a Liquidity Pool system:
 
-### Legacy Mode
-- Traditional house balance management
-- Direct player deposits and withdrawals
-- House funds at risk
-
-### Liquidity Pool Mode (Default)
 - Liquidity providers stake ICP for shares
 - Players win/lose from the pool
 - Distributed risk among LPs
 - Fully decentralized (no admin control)
 
 ## 🏗️ Architecture
-
-### Dual-Mode Operation
-
-The system automatically detects which mode to use:
-
-```rust
-pub enum HouseMode {
-    Legacy,        // Traditional house balance
-    LiquidityPool  // LP system with shares
-}
-
-// Automatic detection based on pool state
-pub fn get_house_mode() -> HouseMode {
-    if pool_initialized && pool_reserve > 0 {
-        HouseMode::LiquidityPool
-    } else {
-        HouseMode::Legacy
-    }
-}
-```
 
 ### Why No Guards Needed
 
@@ -54,7 +28,7 @@ This eliminates the need for reentrancy guards while maintaining security.
 ```
 defi_accounting/
 ├── mod.rs              # Public interface and exports
-├── accounting.rs       # Core user accounting, HouseMode enum
+├── accounting.rs       # Core user accounting
 ├── liquidity_pool.rs   # LP system (deposits, withdrawals, shares)
 ├── nat_helpers.rs      # Arbitrary precision math utilities
 ├── CLAUDE.md          # AI assistant guide
@@ -66,24 +40,14 @@ defi_accounting/
 ### For Games Using the Module
 
 ```rust
-// Check operating mode
-let mode = defi_accounting::get_house_mode();
-
-// Handle game outcomes based on mode
-match mode {
-    HouseMode::LiquidityPool => {
-        if is_win {
-            liquidity_pool::update_pool_on_win(profit);
-        } else {
-            liquidity_pool::update_pool_on_loss(bet_amount);
-        }
-    }
-    HouseMode::Legacy => {
-        // Traditional balance updates
-    }
+// Handle game outcomes
+if is_win {
+    liquidity_pool::update_pool_on_win(profit);
+} else {
+    liquidity_pool::update_pool_on_loss(bet_amount);
 }
 
-// Check bet limits (works in both modes)
+// Check bet limits
 let max = defi_accounting::get_max_allowed_payout();
 if potential_payout > max {
     return Err("Exceeds limit");

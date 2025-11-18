@@ -8,18 +8,6 @@ use std::cell::RefCell;
 use crate::{MEMORY_MANAGER, Memory};
 use super::liquidity_pool;
 
-// ====================================================================
-// House Mode Enum - Type-safe mode detection
-// ====================================================================
-// Using an enum instead of strings prevents typos and enables
-// compile-time checking of all mode handling code.
-// ====================================================================
-#[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub enum HouseMode {
-    Legacy,
-    LiquidityPool,
-}
-
 // Constants
 const ICP_TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP in e8s
 const MIN_DEPOSIT: u64 = 10_000_000; // 0.1 ICP
@@ -270,42 +258,9 @@ pub fn get_max_allowed_payout() -> u64 {
     (house_balance as f64 * MAX_PAYOUT_PERCENTAGE) as u64
 }
 
-// Keep legacy calculation available (internal use only)
-pub(crate) fn get_legacy_house_balance() -> u64 {
-    let canister_balance = CACHED_CANISTER_BALANCE.with(|b| *b.borrow());
-    let total_user_deposits = get_total_user_deposits();
-    canister_balance.saturating_sub(total_user_deposits)
-}
-
-// Update main house balance function for dual-mode
 #[query]
 pub fn get_house_balance() -> u64 {
-    // Check LP pool first
-    if liquidity_pool::is_pool_initialized() {
-        let pool_reserve = liquidity_pool::get_pool_reserve();
-        if pool_reserve > 0 {
-            return pool_reserve;
-        }
-    }
-
-    // Fall back to legacy
-    get_legacy_house_balance()
-}
-
-// Add helper for mode detection
-pub fn get_house_mode() -> HouseMode {
-    // ====================================================================
-    // House Mode Detection Logic
-    // ====================================================================
-    // Determines whether to use legacy house balance or liquidity pool.
-    // Using an enum instead of strings prevents typos and enables
-    // compile-time checking of all mode handling code.
-    // ====================================================================
-    if liquidity_pool::is_pool_initialized() && liquidity_pool::get_pool_reserve() > 0 {
-        HouseMode::LiquidityPool
-    } else {
-        HouseMode::Legacy
-    }
+    liquidity_pool::get_pool_reserve()
 }
 
 #[query]
@@ -316,11 +271,7 @@ pub fn get_accounting_stats() -> AccountingStats {
     );
 
     let canister_balance = CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow());
-    let house_balance = if canister_balance > total_deposits {
-        canister_balance - total_deposits
-    } else {
-        0
-    };
+    let house_balance = liquidity_pool::get_pool_reserve();
 
     AccountingStats {
         total_user_deposits: total_deposits,
@@ -338,21 +289,16 @@ pub fn get_accounting_stats() -> AccountingStats {
 pub fn audit_balances() -> Result<String, String> {
     let total_deposits = calculate_total_deposits();
     let canister_balance = CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow());
+    let pool_reserve = liquidity_pool::get_pool_reserve();
 
-    let house_balance = if canister_balance > total_deposits {
-        canister_balance - total_deposits
-    } else {
-        0
-    };
-
-    let calculated_total = house_balance + total_deposits;
+    let calculated_total = pool_reserve + total_deposits;
 
     if calculated_total == canister_balance {
-        Ok(format!("✅ Audit passed: house ({}) + deposits ({}) = canister ({})",
-                   house_balance, total_deposits, canister_balance))
+        Ok(format!("✅ Audit passed: pool_reserve ({}) + deposits ({}) = canister ({})",
+                   pool_reserve, total_deposits, canister_balance))
     } else {
-        Err(format!("❌ Audit FAILED: house ({}) + deposits ({}) = {} != canister ({})",
-                    house_balance, total_deposits, calculated_total, canister_balance))
+        Err(format!("❌ Audit FAILED: pool_reserve ({}) + deposits ({}) = {} != canister ({})",
+                    pool_reserve, total_deposits, calculated_total, canister_balance))
     }
 }
 

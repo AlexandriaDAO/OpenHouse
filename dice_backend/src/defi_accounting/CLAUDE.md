@@ -1,27 +1,16 @@
 # DeFi Accounting Module - AI Assistant Guide
 
 ## Purpose
-Self-contained, auditable accounting module for ICP-based games with dual-mode operation: Legacy house balance and Liquidity Pool system.
+Self-contained, auditable accounting module for ICP-based games using a Liquidity Pool system.
 
 ## Core Features
-- **Dual Mode Operation**: Legacy house balance OR Liquidity Pool (LP) system
+- **Liquidity Pool System**: LP providers stake ICP for shares
 - **User Deposits/Withdrawals**: Player fund management with ICP ledger
 - **LP Deposits/Withdrawals**: Liquidity providers can stake ICP for shares
 - **Balance Tracking**: Stable storage persistence across upgrades
-- **Bet Limits**: 10% of house/pool balance max payout per bet
-- **Type-Safe Mode Detection**: HouseMode enum prevents string comparison errors
+- **Bet Limits**: 10% of pool balance max payout per bet
 
 ## Architecture Overview
-
-### Operating Modes
-```rust
-pub enum HouseMode {
-    Legacy,        // Traditional house balance
-    LiquidityPool  // LP providers stake ICP for shares
-}
-```
-
-The system automatically detects which mode to use based on pool initialization and balance.
 
 ### Why No Guards Needed
 Unlike multi-step async operations, our liquidity pool follows the Checks-Effects-Interactions pattern:
@@ -31,17 +20,9 @@ Unlike multi-step async operations, our liquidity pool follows the Checks-Effect
 
 ## Integration Points
 ```rust
-// Check operating mode
-let mode = defi_accounting::get_house_mode();
-match mode {
-    HouseMode::LiquidityPool => {
-        // Update pool on win/loss
-        liquidity_pool::update_pool_on_win(profit);
-    }
-    HouseMode::Legacy => {
-        // Use traditional house balance
-    }
-}
+// Update pool on win/loss
+liquidity_pool::update_pool_on_win(profit);
+liquidity_pool::update_pool_on_loss(bet_amount);
 
 // Check before accepting bets
 let max = defi_accounting::get_max_allowed_payout();
@@ -53,7 +34,7 @@ defi_accounting::update_balance(player, new_balance)?;
 
 ## Module Structure
 - `mod.rs` - Public interface and exports
-- `accounting.rs` - Core user accounting, HouseMode enum
+- `accounting.rs` - Core user accounting
 - `liquidity_pool.rs` - LP system (deposits, withdrawals, share calculations)
 - `nat_helpers.rs` - Utilities for Nat (arbitrary precision) math
 
@@ -75,7 +56,7 @@ defi_accounting::update_balance(player, new_balance)?;
 - Min LP deposit: 1 ICP (prevents attacks)
 - Min user deposit/withdraw: 0.1 ICP
 - Transfer fee: 0.0001 ICP
-- Max payout: 10% of house/pool
+- Max payout: 10% of pool balance
 - Minimum liquidity burned: 1000 shares (first depositor)
 
 ## When Modifying
@@ -83,5 +64,4 @@ defi_accounting::update_balance(player, new_balance)?;
 - Maintain stable storage compatibility
 - Remember IC's sequential execution model (no guards needed)
 - Test with real ICP on mainnet (no local env)
-- Use HouseMode enum, never string comparisons
 - All state changes must happen BEFORE await points
