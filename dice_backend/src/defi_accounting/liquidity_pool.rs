@@ -375,9 +375,9 @@ pub fn can_accept_bets() -> bool {
     }
 }
 
-// Game integration
+// Game integration (internal use only - called by game logic)
 
-pub fn update_pool_on_win(payout: u64) {
+pub(crate) fn update_pool_on_win(payout: u64) {
     // Player won - deduct from pool (concurrent-safe)
     POOL_STATE.with(|state| {
         let mut pool_state = state.borrow().get().clone();
@@ -401,7 +401,7 @@ pub fn update_pool_on_win(payout: u64) {
     });
 }
 
-pub fn update_pool_on_loss(bet: u64) {
+pub(crate) fn update_pool_on_loss(bet: u64) {
     // Player lost - add to pool (concurrent-safe)
     POOL_STATE.with(|state| {
         let mut pool_state = state.borrow().get().clone();
