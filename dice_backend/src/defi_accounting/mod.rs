@@ -1,7 +1,7 @@
 // Module exports
 
 pub mod accounting;
-pub mod nat_helpers;
+
 pub mod liquidity_pool;
 
 pub use accounting::{
@@ -17,7 +17,7 @@ pub use accounting::{
     refresh_canister_balance,
     update_balance,
     AccountingStats,
-    Account,
+
 };
 
 pub use liquidity_pool::{

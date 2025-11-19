@@ -1,4 +1,4 @@
-use candid::{Nat, Principal};
+use candid::{CandidType, Nat, Principal};
 use ic_cdk::{init, post_upgrade, pre_upgrade, query, update};
 use ic_stable_structures::memory_manager::{MemoryManager, VirtualMemory};
 use ic_stable_structures::DefaultMemoryImpl;
@@ -21,7 +21,7 @@ mod analytics;
 pub use defi_accounting::{
     deposit, withdraw, withdraw_all, get_balance, get_my_balance, get_house_balance,
     get_max_allowed_payout, get_accounting_stats, audit_balances, refresh_canister_balance,
-    AccountingStats, Account,
+    AccountingStats,
     // Liquidity Pool types only
     LPPosition, PoolStats,
 };
@@ -125,6 +125,12 @@ fn calculate_payout_info(target_number: u8, direction: RollDirection) -> Result<
 
 #[update]
 async fn get_canister_balance() -> u64 {
+    #[derive(CandidType, serde::Serialize)]
+    struct Account {
+        owner: Principal,
+        subaccount: Option<Vec<u8>>,
+    }
+
     let account = Account {
         owner: ic_cdk::id(),
         subaccount: None,

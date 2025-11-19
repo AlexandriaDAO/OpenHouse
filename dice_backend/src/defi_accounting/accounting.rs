@@ -1,8 +1,12 @@
-use candid::{CandidType, Deserialize, Nat, Principal};
+use candid::{CandidType, Deserialize, Principal};
 use ic_cdk::{query, update};
 use ic_stable_structures::memory_manager::MemoryId;
 use ic_stable_structures::StableBTreeMap;
 use std::cell::RefCell;
+use ic_ledger_types::{
+    AccountIdentifier, TransferArgs, Tokens, DEFAULT_SUBACCOUNT,
+    MAINNET_LEDGER_CANISTER_ID, Memo, AccountBalanceArgs,
+};
 
 use crate::{MEMORY_MANAGER, Memory};
 use super::liquidity_pool;
@@ -12,37 +16,9 @@ const ICP_TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP in e8s
 const MIN_DEPOSIT: u64 = 10_000_000; // 0.1 ICP
 const MIN_WITHDRAW: u64 = 10_000_000; // 0.1 ICP
 const USER_BALANCES_MEMORY_ID: u8 = 10; // Memory ID for user balances
-const ICP_LEDGER_CANISTER_ID: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai"; // ICP ledger principal
 const MAX_PAYOUT_PERCENTAGE: f64 = 0.10; // 10% of house balance
 
-// ICRC-1 types (since ic-ledger-types doesn't have them all)
-#[derive(CandidType, Deserialize, Clone, Debug)]
-pub struct Account {
-    pub owner: Principal,
-    pub subaccount: Option<Vec<u8>>,
-}
 
-#[derive(CandidType, Deserialize)]
-pub struct TransferArg {
-    pub from_subaccount: Option<Vec<u8>>,
-    pub to: Account,
-    pub amount: Nat,
-    pub fee: Option<Nat>,
-    pub memo: Option<Vec<u8>>,
-    pub created_at_time: Option<u64>,
-}
-
-#[derive(CandidType, Deserialize, Debug)]
-pub enum TransferErrorIcrc {
-    BadFee { expected_fee: Nat },
-    BadBurn { min_burn_amount: Nat },
-    InsufficientFunds { balance: Nat },
-    TooOld,
-    CreatedInFuture { ledger_time: u64 },
-    Duplicate { duplicate_of: Nat },
-    TemporarilyUnavailable,
-    GenericError { error_code: Nat, message: String },
-}
 
 // User balance tracking (stable storage only)
 thread_local! {
@@ -100,47 +76,32 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
 
     let caller = ic_cdk::caller();
 
-    // STEP 2: Transfer ICP from user to canister using ICRC-1
-    let transfer_args = TransferArg {
+    // STEP 2: Transfer ICP from user to canister using standard ledger types
+    let transfer_args = TransferArgs {
+        memo: Memo(0),
+        amount: Tokens::from_e8s(amount),
+        fee: Tokens::from_e8s(ICP_TRANSFER_FEE),
         from_subaccount: None,
-        to: Account {
-            owner: ic_cdk::id(),
-            subaccount: None,
-        },
-        amount: Nat::from(amount),
-        fee: Some(Nat::from(ICP_TRANSFER_FEE)),
-        memo: None,
+        to: AccountIdentifier::new(&ic_cdk::id(), &DEFAULT_SUBACCOUNT),
         created_at_time: None,
     };
 
-    let ledger = Principal::from_text(ICP_LEDGER_CANISTER_ID)
-        .expect("ICP ledger canister ID must be valid");
-    let call_result: Result<(Result<Nat, TransferErrorIcrc>,), _> =
-        ic_cdk::call(ledger, "icrc1_transfer", (transfer_args,)).await;
+    match ic_ledger_types::transfer(MAINNET_LEDGER_CANISTER_ID, transfer_args).await {
+        Ok(Ok(block_index)) => {
+            // Credit user with full amount
+            let new_balance = USER_BALANCES_STABLE.with(|balances| {
+                let mut balances = balances.borrow_mut();
+                let current = balances.get(&caller).unwrap_or(0);
+                let new_bal = current + amount;
+                balances.insert(caller, new_bal);
+                new_bal
+            });
 
-    match call_result {
-        Ok((transfer_result,)) => match transfer_result {
-            Ok(_block_index) => {
-                // Credit user with full amount
-                // In ICRC-1: user pays (amount + fee), canister receives amount
-                let new_balance = USER_BALANCES_STABLE.with(|balances| {
-                    let mut balances = balances.borrow_mut();
-                    let current = balances.get(&caller).unwrap_or(0);
-                    let new_bal = current + amount;
-                    balances.insert(caller, new_bal);
-                    new_bal
-                });
-
-                ic_cdk::println!("Deposit successful: {} deposited {} e8s", caller, amount);
-                Ok(new_balance)
-            }
-            Err(transfer_error) => {
-                Err(format!("Transfer failed: {:?}", transfer_error))
-            }
+            ic_cdk::println!("Deposit successful: {} deposited {} e8s at block {}", caller, amount, block_index);
+            Ok(new_balance)
         }
-        Err(call_error) => {
-            Err(format!("Transfer call failed: {:?}", call_error))
-        }
+        Ok(Err(e)) => Err(format!("Transfer failed: {:?}", e)),
+        Err((code, msg)) => Err(format!("Transfer call failed: {:?} {}", code, msg)),
     }
 }
 
@@ -172,39 +133,30 @@ pub async fn withdraw(amount: u64) -> Result<u64, String> {
     });
 
     // Transfer ICP from canister to user
-    let transfer_args = TransferArg {
+    // We use standard `transfer` (legacy) for simplicity and type safety with ic-ledger-types
+    let transfer_args = TransferArgs {
+        memo: Memo(0),
+        amount: Tokens::from_e8s(amount - ICP_TRANSFER_FEE),
+        fee: Tokens::from_e8s(ICP_TRANSFER_FEE),
         from_subaccount: None,
-        to: Account {
-            owner: caller,
-            subaccount: None,
-        },
-        amount: Nat::from(amount - ICP_TRANSFER_FEE),
-        fee: Some(Nat::from(ICP_TRANSFER_FEE)),
-        memo: None,
+        to: AccountIdentifier::new(&caller, &DEFAULT_SUBACCOUNT),
         created_at_time: None,
     };
 
-    let ledger = Principal::from_text(ICP_LEDGER_CANISTER_ID)
-        .expect("ICP ledger canister ID must be valid");
-    let call_result: Result<(Result<Nat, TransferErrorIcrc>,), _> =
-        ic_cdk::call(ledger, "icrc1_transfer", (transfer_args,)).await;
-
-    match call_result {
-        Ok((transfer_result,)) => match transfer_result {
-            Ok(_block_index) => {
-                ic_cdk::println!("Withdrawal successful: {} withdrew {} e8s", caller, amount);
-                Ok(new_balance)
-            }
-            Err(transfer_error) => {
-                // Use helper for rollback
-                rollback_balance_change(caller, user_balance);
-                Err(format!("Transfer failed: {:?}", transfer_error))
-            }
+    match ic_ledger_types::transfer(MAINNET_LEDGER_CANISTER_ID, transfer_args).await {
+        Ok(Ok(block_index)) => {
+            ic_cdk::println!("Withdrawal successful: {} withdrew {} e8s at block {}", caller, amount, block_index);
+            Ok(new_balance)
         }
-        Err(call_error) => {
-            // Use helper for rollback
+        Ok(Err(e)) => {
+            // Rollback
             rollback_balance_change(caller, user_balance);
-            Err(format!("Transfer call failed: {:?}", call_error))
+            Err(format!("Transfer failed: {:?}", e))
+        }
+        Err((code, msg)) => {
+            // Rollback
+            rollback_balance_change(caller, user_balance);
+            Err(format!("Transfer call failed: {:?} {}", code, msg))
         }
     }
 }
@@ -323,18 +275,14 @@ pub fn update_balance(user: Principal, new_balance: u64) -> Result<(), String> {
 /// Called by heartbeat every hour to keep cache fresh
 #[update]
 pub async fn refresh_canister_balance() -> u64 {
-    let account = Account {
-        owner: ic_cdk::id(),
-        subaccount: None,
-    };
-
-    let ledger = Principal::from_text(ICP_LEDGER_CANISTER_ID)
-        .expect("ICP ledger canister ID must be valid");
-    let result: Result<(Nat,), _> = ic_cdk::call(ledger, "icrc1_balance_of", (account,)).await;
+    let ledger = MAINNET_LEDGER_CANISTER_ID;
+    let result: Result<(Tokens,), _> = ic_cdk::call(ledger, "account_balance", (AccountBalanceArgs {
+        account: AccountIdentifier::new(&ic_cdk::id(), &DEFAULT_SUBACCOUNT)
+    },)).await;
 
     match result {
         Ok((balance,)) => {
-            let balance_u64 = balance.0.try_into().unwrap_or(0);
+            let balance_u64 = balance.e8s();
             // Update the cache
             CACHED_CANISTER_BALANCE.with(|cache| {
                 *cache.borrow_mut() = balance_u64;
@@ -352,29 +300,19 @@ pub async fn refresh_canister_balance() -> u64 {
 
 // Internal transfer function for withdrawals (used by liquidity_pool)
 pub(crate) async fn transfer_to_user(recipient: Principal, amount: u64) -> Result<(), String> {
-    // Existing ICRC-1 transfer logic
-    let ledger_canister_id = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
-
-    let transfer_args = TransferArg {
+    let transfer_args = TransferArgs {
+        memo: Memo(0),
+        amount: Tokens::from_e8s(amount),
+        fee: Tokens::from_e8s(10_000),
         from_subaccount: None,
-        to: Account {
-            owner: recipient,
-            subaccount: None,
-        },
-        amount: Nat::from(amount),
-        fee: Some(Nat::from(10_000u64)),
-        memo: None,
+        to: AccountIdentifier::new(&recipient, &DEFAULT_SUBACCOUNT),
         created_at_time: None,
     };
 
-    let (result,): (Result<Nat, TransferErrorIcrc>,) =
-        ic_cdk::call(ledger_canister_id, "icrc1_transfer", (transfer_args,))
-        .await
-        .map_err(|e| format!("Transfer call failed: {:?}", e))?;
-
-    match result {
-        Ok(_) => Ok(()),
-        Err(e) => Err(format!("Transfer failed: {:?}", e)),
+    match ic_ledger_types::transfer(MAINNET_LEDGER_CANISTER_ID, transfer_args).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(e)) => Err(format!("Transfer failed: {:?}", e)),
+        Err((code, msg)) => Err(format!("Transfer call failed: {:?} {}", code, msg)),
     }
 }
 
