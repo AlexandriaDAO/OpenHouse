@@ -9,6 +9,7 @@ pub use accounting::{
     withdraw_all,
     refresh_canister_balance,
     update_balance,
+    admin_restore_balance,
     AccountingStats,
 };
 

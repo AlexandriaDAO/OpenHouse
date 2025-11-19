@@ -114,7 +114,7 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
     // STEP 2: Transfer ICP from user to canister using ICRC-2 TransferFrom
     // This replaces the old self-transfer ledger call which was the source of the bug.
     // User must have previously approved this canister to spend amount + fee.
-    
+
     let args = TransferFromArgs {
         from: Account {
             owner: caller,
@@ -131,7 +131,7 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
         spender_subaccount: None,
     };
 
-    let (result,): (TransferFromResult,) = 
+    let (result,): (TransferFromResult,) =
         ic_cdk::call(MAINNET_LEDGER_CANISTER_ID, "icrc2_transfer_from", (args,))
         .await
         .map_err(|(code, msg)| format!("Ledger call failed: {:?} {}", code, msg))?;
@@ -206,7 +206,7 @@ pub async fn withdraw(amount: u64) -> Result<u64, String> {
             // SYSTEM ERROR - UNSAFE TO ROLLBACK
             // We assume the transfer MIGHT have succeeded.
             // Do not restore balance.
-            ic_cdk::println!("CRITICAL: Withdrawal system error for {}. Amount: {}. Code: {:?}, Msg: {}. Balance NOT restored.",
+            ic_cdk::println!("CRITICAL: Withdrawal system error for {}. Amount: {}. Code: {:?}, Msg: {}. Balance NOT restored.", 
                caller, amount, code, msg);
             Err(format!("System error during transfer. Funds pending. Contact support. Error: {:?} {}", code, msg))
         }
@@ -352,4 +352,29 @@ pub(crate) async fn transfer_to_user(recipient: Principal, amount: u64) -> Resul
         Ok(Err(e)) => Err(format!("Transfer failed: {:?}", e)),
         Err((code, msg)) => Err(format!("Transfer call failed: {:?} {}", code, msg)),
     }
+}
+
+// =============================================================================
+// ADMIN FUNCTIONS
+// =============================================================================
+
+#[update]
+pub fn admin_restore_balance(user: Principal, amount: u64, reason: String) -> Result<(), String> {
+    // 1. Check authorization
+    if !ic_cdk::api::is_controller(&ic_cdk::caller()) {
+        return Err("Unauthorized: Caller is not a controller".to_string());
+    }
+
+    // 2. Update balance
+    USER_BALANCES_STABLE.with(|balances| {
+        let mut balances = balances.borrow_mut();
+        let current = balances.get(&user).unwrap_or(0);
+        let new_bal = current + amount;
+        balances.insert(user, new_bal);
+    });
+
+    ic_cdk::println!("ADMIN RESTORE: Restored {} e8s to {} by admin {}. Reason: {}", 
+        amount, user, ic_cdk::caller(), reason);
+
+    Ok(())
 }

@@ -21,7 +21,7 @@ mod analytics;
 pub use defi_accounting::{
     deposit, withdraw, withdraw_all, get_balance, get_my_balance, get_house_balance,
     get_max_allowed_payout, get_accounting_stats, audit_balances, refresh_canister_balance,
-    AccountingStats,
+    AccountingStats, admin_restore_balance,
     // Liquidity Pool types only
     LPPosition, PoolStats,
 };
@@ -195,3 +195,11 @@ fn can_accept_bets() -> bool {
     defi_accounting::can_accept_bets()
 }
 
+// =============================================================================
+// ADMIN API ENDPOINTS
+// =============================================================================
+
+#[update]
+fn admin_restore_balance(user: Principal, amount: u64, reason: String) -> Result<(), String> {
+    defi_accounting::admin_restore_balance(user, amount, reason)
+}
