@@ -7,6 +7,7 @@ use ic_ledger_types::{
     AccountIdentifier, TransferArgs, Tokens, DEFAULT_SUBACCOUNT,
     MAINNET_LEDGER_CANISTER_ID, Memo, AccountBalanceArgs,
 };
+use num_traits::ToPrimitive;
 
 // Define ICRC-2 types manually to avoid dependency issues
 #[derive(CandidType, Deserialize, Clone, Debug)]
@@ -132,7 +133,7 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
     // We need to call the ledger canister. Assuming MAINNET_LEDGER_CANISTER_ID supports ICRC-2.
     // The ICP ledger canister ID is ryjl3-tyaaa-aaaaa-aaaba-cai
     
-    let (result,) = ic_cdk::call::<_, (Result<u64, TransferFromError>,)>(
+    let (result,) = ic_cdk::call::<_, (Result<candid::Nat, TransferFromError>,)>(
         MAINNET_LEDGER_CANISTER_ID,
         "icrc2_transfer_from",
         (transfer_args,),
@@ -141,7 +142,9 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
     .map_err(|(code, msg)| format!("Transfer call failed: {:?} {}", code, msg))?;
 
     match result {
-        Ok(block_index) => {
+        Ok(block_index_nat) => {
+            let block_index = block_index_nat.0.to_u64().ok_or("Block index too large")?;
+            
             // Credit user with full amount
             let new_balance = USER_BALANCES_STABLE.with(|balances| {
                 let mut balances = balances.borrow_mut();
@@ -207,9 +210,12 @@ pub async fn withdraw(amount: u64) -> Result<u64, String> {
             Err(format!("Transfer failed: {:?}", e))
         }
         Err((code, msg)) => {
-            // Rollback
-            rollback_balance_change(caller, user_balance);
-            Err(format!("Transfer call failed: {:?} {}", code, msg))
+            // SYSTEM ERROR - UNSAFE TO ROLLBACK
+            // We assume the transfer MIGHT have succeeded.
+            // Do not restore balance.
+            ic_cdk::println!("CRITICAL: Withdrawal system error for {}. Amount: {}. Code: {:?}, Msg: {}. Balance NOT restored.",
+               caller, amount, code, msg);
+            Err(format!("System error during transfer. Funds pending. Contact support. Error: {:?} {}", code, msg))
         }
     }
 }
@@ -352,5 +358,51 @@ pub(crate) async fn transfer_to_user(recipient: Principal, amount: u64) -> Resul
         Ok(Ok(_)) => Ok(()),
         Ok(Err(e)) => Err(format!("Transfer failed: {:?}", e)),
         Err((code, msg)) => Err(format!("Transfer call failed: {:?} {}", code, msg)),
+    }
+}
+
+// =============================================================================
+// ADMIN & DEBUG FUNCTIONS
+// =============================================================================
+
+#[update]
+pub fn admin_restore_balance(user: Principal, amount: u64, reason: String) -> Result<(), String> {
+    // Only controllers can call this
+    if !ic_cdk::api::is_controller(&ic_cdk::caller()) {
+        return Err("Unauthorized: Caller is not a controller".to_string());
+    }
+
+    USER_BALANCES_STABLE.with(|balances| {
+        let mut balances = balances.borrow_mut();
+        let current = balances.get(&user).unwrap_or(0);
+        balances.insert(user, current + amount);
+    });
+
+    ic_cdk::println!("ADMIN: Restored {} e8s to {}. Reason: {}",
+        amount, user, reason);
+    Ok(())
+}
+
+#[update]
+pub async fn verify_deposit_fee(amount: u64) -> Result<String, String> {
+    // Only controllers can call this
+    if !ic_cdk::api::is_controller(&ic_cdk::caller()) {
+        return Err("Unauthorized: Caller is not a controller".to_string());
+    }
+
+    let before_balance = refresh_canister_balance().await;
+    
+    // We call deposit internally. Note: caller() will be the controller calling this function.
+    // So the controller must have approved the canister to spend their funds.
+    let result = deposit(amount).await;
+    
+    let after_balance = refresh_canister_balance().await;
+    let actual_increase = after_balance.saturating_sub(before_balance);
+
+    ic_cdk::println!("FEE TEST: Amount: {}, Increase: {}", amount, actual_increase);
+    
+    match result {
+        Ok(_) => Ok(format!("Deposit success. Balance increased by {}. Expected: {}", actual_increase, amount)),
+        Err(e) => Err(format!("Deposit failed: {}. Balance increased by {}", e, actual_increase)),
     }
 }
