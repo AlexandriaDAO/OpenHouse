@@ -1,5 +1,6 @@
-use candid::{CandidType, Deserialize, Principal, Nat};
-use ic_cdk::{query, update};
+use candid::{CandidType, Deserialize, Principal};
+use ic_cdk::update;
+use ic_cdk::api::call::RejectionCode;
 use ic_stable_structures::memory_manager::MemoryId;
 use ic_stable_structures::StableBTreeMap;
 use std::cell::RefCell;
@@ -17,6 +18,8 @@ const MIN_DEPOSIT: u64 = 10_000_000; // 0.1 ICP
 const MIN_WITHDRAW: u64 = 10_000_000; // 0.1 ICP
 const USER_BALANCES_MEMORY_ID: u8 = 10; // Memory ID for user balances
 const MAX_PAYOUT_PERCENTAGE: f64 = 0.10; // 10% of house balance
+
+
 
 // User balance tracking (stable storage only)
 thread_local! {
@@ -39,42 +42,6 @@ pub struct AccountingStats {
     pub canister_balance: u64,
     pub unique_depositors: u64,
 }
-
-// =============================================================================
-// ICRC-2 HELPERS
-// =============================================================================
-
-#[derive(CandidType, Deserialize)]
-struct Account {
-    owner: Principal,
-    subaccount: Option<Vec<u8>>,
-}
-
-#[derive(CandidType, Deserialize)]
-struct TransferFromArgs {
-    from: Account,
-    to: Account,
-    amount: Nat,
-    fee: Option<Nat>,
-    memo: Option<Vec<u8>>,
-    created_at_time: Option<u64>,
-    spender_subaccount: Option<Vec<u8>>,
-}
-
-#[derive(CandidType, Deserialize, Debug)]
-enum TransferFromError {
-    BadFee { expected_fee: Nat },
-    BadBurn { min_burn_amount: Nat },
-    InsufficientFunds { balance: Nat },
-    InsufficientAllowance { allowance: Nat },
-    TooOld,
-    CreatedInFuture { ledger_time: u64 },
-    Duplicate { duplicate_of: Nat },
-    TemporarilyUnavailable,
-    GenericError { error_code: Nat, message: String },
-}
-
-type TransferFromResult = Result<Nat, TransferFromError>;
 
 // =============================================================================
 // HELPER FUNCTIONS
@@ -109,35 +76,19 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
     }
 
     let caller = ic_cdk::caller();
-    let canister_id = ic_cdk::id();
 
-    // STEP 2: Transfer ICP from user to canister using ICRC-2 TransferFrom
-    // This replaces the old self-transfer ledger call which was the source of the bug.
-    // User must have previously approved this canister to spend amount + fee.
-
-    let args = TransferFromArgs {
-        from: Account {
-            owner: caller,
-            subaccount: None,
-        },
-        to: Account {
-            owner: canister_id,
-            subaccount: None,
-        },
-        amount: Nat::from(amount),
-        fee: Some(Nat::from(ICP_TRANSFER_FEE)),
-        memo: None,
+    // STEP 2: Transfer ICP from user to canister using standard ledger types
+    let transfer_args = TransferArgs {
+        memo: Memo(0),
+        amount: Tokens::from_e8s(amount),
+        fee: Tokens::from_e8s(ICP_TRANSFER_FEE),
+        from_subaccount: None,
+        to: AccountIdentifier::new(&ic_cdk::id(), &DEFAULT_SUBACCOUNT),
         created_at_time: None,
-        spender_subaccount: None,
     };
 
-    let (result,): (TransferFromResult,) =
-        ic_cdk::call(MAINNET_LEDGER_CANISTER_ID, "icrc2_transfer_from", (args,))
-        .await
-        .map_err(|(code, msg)| format!("Ledger call failed: {:?} {}", code, msg))?;
-
-    match result {
-        Ok(_block_index) => {
+    match ic_ledger_types::transfer(MAINNET_LEDGER_CANISTER_ID, transfer_args).await {
+        Ok(Ok(block_index)) => {
             // Credit user with full amount
             let new_balance = USER_BALANCES_STABLE.with(|balances| {
                 let mut balances = balances.borrow_mut();
@@ -147,10 +98,11 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
                 new_bal
             });
 
-            ic_cdk::println!("Deposit successful: {} deposited {} e8s", caller, amount);
+            ic_cdk::println!("Deposit successful: {} deposited {} e8s at block {}", caller, amount, block_index);
             Ok(new_balance)
         }
-        Err(e) => Err(format!("Transfer failed: {:?}", e)),
+        Ok(Err(e)) => Err(format!("Transfer failed: {:?}", e)),
+        Err((code, msg)) => Err(format!("Transfer call failed: {:?} {}", code, msg)),
     }
 }
 
@@ -198,17 +150,26 @@ pub async fn withdraw(amount: u64) -> Result<u64, String> {
             Ok(new_balance)
         }
         Ok(Err(e)) => {
-            // Rollback - Ledger rejected it (Safe)
+            // Rollback
             rollback_balance_change(caller, user_balance);
             Err(format!("Transfer failed: {:?}", e))
         }
         Err((code, msg)) => {
-            // SYSTEM ERROR - UNSAFE TO ROLLBACK
-            // We assume the transfer MIGHT have succeeded.
-            // Do not restore balance.
-            ic_cdk::println!("CRITICAL: Withdrawal system error for {}. Amount: {}. Code: {:?}, Msg: {}. Balance NOT restored.", 
-               caller, amount, code, msg);
-            Err(format!("System error during transfer. Funds pending. Contact support. Error: {:?} {}", code, msg))
+            match code {
+                RejectionCode::SysTransient | RejectionCode::Unknown => {
+                    // UNSAFE TO ROLLBACK - Potential Double Spend Risk
+                    // The transfer might have succeeded but the response was lost/timed out.
+                    // We leave the balance deducted and log the error.
+                    ic_cdk::println!("CRITICAL: Withdrawal transfer failed with uncertain status. Balance deducted but transfer status unknown. User: {}, Amount: {}, Error: {:?} {}", caller, amount, code, msg);
+                    Err(format!("Transfer failed with uncertain status (no rollback): {:?} {}", code, msg))
+                }
+                _ => {
+                    // Safe to rollback (SysFatal, DestinationInvalid, CanisterReject, CanisterError)
+                    // These imply the message was definitely not processed successfully or rejected.
+                    rollback_balance_change(caller, user_balance);
+                    Err(format!("Transfer call failed: {:?} {}", code, msg))
+                }
+            }
         }
     }
 }
@@ -352,29 +313,4 @@ pub(crate) async fn transfer_to_user(recipient: Principal, amount: u64) -> Resul
         Ok(Err(e)) => Err(format!("Transfer failed: {:?}", e)),
         Err((code, msg)) => Err(format!("Transfer call failed: {:?} {}", code, msg)),
     }
-}
-
-// =============================================================================
-// ADMIN FUNCTIONS
-// =============================================================================
-
-#[update]
-pub fn admin_restore_balance(user: Principal, amount: u64, reason: String) -> Result<(), String> {
-    // 1. Check authorization
-    if !ic_cdk::api::is_controller(&ic_cdk::caller()) {
-        return Err("Unauthorized: Caller is not a controller".to_string());
-    }
-
-    // 2. Update balance
-    USER_BALANCES_STABLE.with(|balances| {
-        let mut balances = balances.borrow_mut();
-        let current = balances.get(&user).unwrap_or(0);
-        let new_bal = current + amount;
-        balances.insert(user, new_bal);
-    });
-
-    ic_cdk::println!("ADMIN RESTORE: Restored {} e8s to {} by admin {}. Reason: {}", 
-        amount, user, ic_cdk::caller(), reason);
-
-    Ok(())
 }
