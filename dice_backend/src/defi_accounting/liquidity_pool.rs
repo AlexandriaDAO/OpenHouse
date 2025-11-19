@@ -4,7 +4,7 @@ use ic_stable_structures::{StableBTreeMap, StableCell, memory_manager::VirtualMe
 use serde::Serialize;
 use std::cell::RefCell;
 use std::borrow::Cow;
-use std::sync::LazyLock;
+// use std::sync::LazyLock;
 use num_traits::ToPrimitive;
 
 use super::nat_helpers::*;
@@ -21,10 +21,16 @@ const TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP
 const PARENT_STAKER_CANISTER: &str = "e454q-riaaa-aaaap-qqcyq-cai";
 const LP_WITHDRAWAL_FEE_BPS: u64 = 100; // 1%
 
-static PARENT_PRINCIPAL: LazyLock<Principal> = LazyLock::new(|| {
-    Principal::from_text(PARENT_STAKER_CANISTER)
-        .expect("Invalid parent canister ID")
-});
+use std::sync::OnceLock;
+
+static PARENT_PRINCIPAL: OnceLock<Principal> = OnceLock::new();
+
+fn get_parent_principal() -> Principal {
+    *PARENT_PRINCIPAL.get_or_init(|| {
+        Principal::from_text(PARENT_STAKER_CANISTER)
+            .expect("Invalid parent canister ID")
+    })
+}
 
 // Pool state for stable storage
 #[derive(Clone, CandidType, Deserialize, Serialize)]
@@ -281,7 +287,7 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
             let net_fee = fee_amount.saturating_sub(TRANSFER_FEE);
             
             if net_fee > 0 {
-                match transfer_to_user(*PARENT_PRINCIPAL, net_fee).await {
+                match transfer_to_user(get_parent_principal(), net_fee).await {
                     Ok(_) => {
                         // Success! Fee sent to parent.
                         ic_cdk::println!("LP withdrawal: {} got {} e8s, parent fee {} e8s", 
