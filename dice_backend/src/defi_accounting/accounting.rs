@@ -8,6 +8,46 @@ use ic_ledger_types::{
     MAINNET_LEDGER_CANISTER_ID, Memo, AccountBalanceArgs,
 };
 
+// Define ICRC-2 types manually to avoid dependency issues
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct Account {
+    pub owner: Principal,
+    pub subaccount: Option<[u8; 32]>,
+}
+
+impl From<Principal> for Account {
+    fn from(owner: Principal) -> Self {
+        Self {
+            owner,
+            subaccount: None,
+        }
+    }
+}
+
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct TransferFromArgs {
+    pub spender_subaccount: Option<[u8; 32]>,
+    pub from: Account,
+    pub to: Account,
+    pub amount: candid::Nat,
+    pub fee: Option<candid::Nat>,
+    pub memo: Option<Vec<u8>>,
+    pub created_at_time: Option<u64>,
+}
+
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub enum TransferFromError {
+    BadFee { expected_fee: candid::Nat },
+    BadBurn { min_burn_amount: candid::Nat },
+    InsufficientFunds { balance: candid::Nat },
+    InsufficientAllowance { allowance: candid::Nat },
+    TooOld,
+    CreatedInFuture { ledger_time: u64 },
+    Duplicate { duplicate_of: candid::Nat },
+    TemporarilyUnavailable,
+    GenericError { error_code: candid::Nat, message: String },
+}
+
 use crate::{MEMORY_MANAGER, Memory};
 use super::liquidity_pool;
 
@@ -77,17 +117,31 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
     let caller = ic_cdk::caller();
 
     // STEP 2: Transfer ICP from user to canister using standard ledger types
-    let transfer_args = TransferArgs {
-        memo: Memo(0),
-        amount: Tokens::from_e8s(amount),
-        fee: Tokens::from_e8s(ICP_TRANSFER_FEE),
-        from_subaccount: None,
-        to: AccountIdentifier::new(&ic_cdk::id(), &DEFAULT_SUBACCOUNT),
+    // STEP 2: Transfer ICP from user to canister using ICRC-2 transfer_from
+    // This requires the user to have approved the canister to spend their funds
+    let transfer_args = TransferFromArgs {
+        spender_subaccount: None,
+        from: Account::from(caller),
+        to: Account::from(ic_cdk::id()),
+        amount: amount.into(),
+        fee: None, // Use default fee
+        memo: None,
         created_at_time: None,
     };
 
-    match ic_ledger_types::transfer(MAINNET_LEDGER_CANISTER_ID, transfer_args).await {
-        Ok(Ok(block_index)) => {
+    // We need to call the ledger canister. Assuming MAINNET_LEDGER_CANISTER_ID supports ICRC-2.
+    // The ICP ledger canister ID is ryjl3-tyaaa-aaaaa-aaaba-cai
+    
+    let (result,) = ic_cdk::call::<_, (Result<u64, TransferFromError>,)>(
+        MAINNET_LEDGER_CANISTER_ID,
+        "icrc2_transfer_from",
+        (transfer_args,),
+    )
+    .await
+    .map_err(|(code, msg)| format!("Transfer call failed: {:?} {}", code, msg))?;
+
+    match result {
+        Ok(block_index) => {
             // Credit user with full amount
             let new_balance = USER_BALANCES_STABLE.with(|balances| {
                 let mut balances = balances.borrow_mut();
@@ -100,8 +154,7 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
             ic_cdk::println!("Deposit successful: {} deposited {} e8s at block {}", caller, amount, block_index);
             Ok(new_balance)
         }
-        Ok(Err(e)) => Err(format!("Transfer failed: {:?}", e)),
-        Err((code, msg)) => Err(format!("Transfer call failed: {:?} {}", code, msg)),
+        Err(e) => Err(format!("Transfer failed: {:?}", e)),
     }
 }
 
