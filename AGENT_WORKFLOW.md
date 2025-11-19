@@ -31,7 +31,13 @@ When starting a new conversation or task:
         git commit -m "feat: <description of changes>"
         git push origin agent/<topic>
         ```
-    *   Inform the user that the branch has been pushed and is ready for a PR.
+
+4.  **Create Pull Request**:
+    *   Use the GitHub CLI to create a PR immediately after pushing:
+        ```bash
+        gh pr create --title "feat: <description>" --body "Automated PR by AI Agent"
+        ```
+    *   If `gh` is not available, provide the PR URL to the user.
 
 ## Example Prompt
 
