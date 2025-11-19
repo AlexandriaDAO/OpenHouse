@@ -3,6 +3,8 @@ use ic_cdk::{init, post_upgrade, pre_upgrade, query, update};
 use ic_stable_structures::memory_manager::{MemoryManager, VirtualMemory};
 use ic_stable_structures::DefaultMemoryImpl;
 use std::cell::RefCell;
+use ic_cdk_timers::set_timer_interval;
+use std::time::Duration;
 
 // =============================================================================
 // MODULE DECLARATIONS
@@ -19,9 +21,10 @@ mod analytics;
 // =============================================================================
 
 pub use defi_accounting::{
-    deposit, withdraw, withdraw_all, get_balance, get_my_balance, get_house_balance,
+    deposit, withdraw_all, get_balance, get_my_balance, get_house_balance,
     get_max_allowed_payout, get_accounting_stats, audit_balances, refresh_canister_balance,
-    AccountingStats,
+    get_withdrawal_status, get_audit_log,
+    AccountingStats, WithdrawalStatusResponse, AuditEntry, AuditEventType,
     // Liquidity Pool types only
     LPPosition, PoolStats,
 };
@@ -47,7 +50,8 @@ fn init() {
     // Initialize game state
     ic_cdk::println!("Dice Game Backend Initialized");
 
-    // NO TIMER INITIALIZATION - removed completely
+    // Start background timers
+    start_retry_timer();
 }
 
 #[pre_upgrade]
@@ -60,8 +64,17 @@ fn post_upgrade() {
     // Restore game state
     seed::restore_seed_state();
 
-    // NO TIMER INITIALIZATION - removed completely
-    // Note: StableBTreeMap restores automatically, no accounting restore needed
+    // Restart background timers (timers do not survive upgrades)
+    start_retry_timer();
+}
+
+fn start_retry_timer() {
+    // Run every 5 minutes (300 seconds)
+    set_timer_interval(Duration::from_secs(300), || {
+        ic_cdk::spawn(async {
+            defi_accounting::process_pending_withdrawals().await;
+        });
+    });
 }
 
 // =============================================================================

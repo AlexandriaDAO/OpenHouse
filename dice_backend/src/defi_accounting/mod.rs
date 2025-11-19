@@ -5,11 +5,16 @@ pub mod query;
 // Re-export types and update functions from original modules
 pub use accounting::{
     deposit,
-    withdraw,
     withdraw_all,
     refresh_canister_balance,
     update_balance,
+    process_pending_withdrawals,
+    get_withdrawal_status,
+    get_audit_log,
     AccountingStats,
+    WithdrawalStatusResponse,
+    AuditEntry,
+    AuditEventType,
 };
 
 pub use liquidity_pool::{

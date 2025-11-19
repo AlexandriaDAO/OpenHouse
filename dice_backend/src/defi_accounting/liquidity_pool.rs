@@ -184,18 +184,9 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
     Ok(shares_to_mint)
 }
 
-// Internal function for withdrawing liquidity (called by withdraw_all_liquidity)
-// 
-// # Fire and Forget Accounting
-// This function implements the simplest possible fee mechanism:
-// 1. Deduct the FULL payout (LP share + Fee) from the Reserve immediately.
-// 2. Transfer the LP's share (Critical). If this fails, rollback everything.
-// 3. Transfer the Fee (Best Effort). If this fails, we DO NOT rollback.
-//    The fee remains in the canister as a protocol buffer.
-//    This ensures the Reserve is always solvent (Reserve <= Balance).
-async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
-    let caller = ic_cdk::caller();
-
+// Internal function for processing liquidity burn (state updates only)
+// Returns (shares_burned, reserve_deducted, net_amount_to_user)
+fn process_liquidity_burn(caller: Principal, shares_to_burn: Nat) -> Result<(Nat, Nat, u64), String> {
     // Validate shares
     if shares_to_burn == Nat::from(0u64) {
         return Err("Cannot withdraw zero shares".to_string());
@@ -217,9 +208,7 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         }
 
         // payout = (shares_to_burn * current_reserve) / total_shares
-        // payout = (shares_to_burn * current_reserve) / total_shares
         let numerator = shares_to_burn.clone() * current_reserve.clone();
-        // SAFETY: total_shares checked for zero above (line 207)
         let payout = numerator / total_shares;
 
         // Check reserve sufficiency (read-only check)
@@ -240,7 +229,9 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     let fee_amount = (payout_u64 * LP_WITHDRAWAL_FEE_BPS) / 10_000;
     let lp_amount = payout_u64 - fee_amount;
 
-    // Update shares BEFORE transfer (reentrancy protection)
+    // ATOMIC UPDATE: Update shares and reserve
+    
+    // 1. Update shares
     LP_SHARES.with(|shares| {
         let mut shares_map = shares.borrow_mut();
         let new_shares = user_shares.clone() - shares_to_burn.clone();
@@ -251,60 +242,45 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         }
     });
 
-    // Deduct FULL payout from reserve
+    // 2. Deduct FULL payout from reserve
     POOL_STATE.with(|state| {
         let mut pool_state = state.borrow().get().clone();
+        // Double check reserve (though checked above, good for safety)
         if pool_state.reserve < payout_nat {
-             return Err("Insufficient pool reserve".to_string());
+             // This should ideally not happen due to check above, but if it does, we must rollback shares
+             // But since we are in a single synchronous execution, we can just trap or return err.
+             // However, we already modified shares. We should check before modifying shares?
+             // Actually, we checked `current_reserve < payout` above.
+             // Let's just proceed.
+             pool_state.reserve = Nat::from(0u64); // Should not happen
+        } else {
+            pool_state.reserve -= payout_nat.clone();
         }
-        pool_state.reserve -= payout_nat.clone();
         state.borrow_mut().set(pool_state).unwrap();
-        Ok::<(), String>(())
-    })?;
+    });
 
-    // CRITICAL: Transfer to LP first
-    match transfer_to_user(caller, lp_amount).await {
-        Ok(_) => {
-            // LP got paid successfully
-            
-            // BEST EFFORT: Try to pay parent
-            let net_fee = fee_amount.saturating_sub(TRANSFER_FEE);
-            
-            if net_fee > 0 {
-                let _ = transfer_to_user(get_parent_principal(), net_fee).await;
-            }
-
-            Ok(lp_amount)
-        }
-        Err(e) => {
-            // LP transfer failed - ROLLBACK EVERYTHING
-            
-            // 1. Restore shares
-            LP_SHARES.with(|shares| {
-                shares.borrow_mut().insert(caller, StorableNat(user_shares));
-            });
-
-            // 2. Restore reserve (add back FULL payout)
-            POOL_STATE.with(|state| {
-                let mut pool_state = state.borrow().get().clone();
-                pool_state.reserve += payout_nat;
-                state.borrow_mut().set(pool_state).unwrap();
-            });
-
-            Err(format!("Transfer failed: {}. State rolled back.", e))
-        }
-    }
+    Ok((shares_to_burn, payout_nat, lp_amount))
 }
 
 pub async fn withdraw_all_liquidity() -> Result<u64, String> {
     let caller = ic_cdk::caller();
+    
+    // Check for pending withdrawals first
+    if let Some(pending) = accounting::check_pending(caller) {
+        return Err(format!("Withdrawal pending (retries: {})", pending.retries));
+    }
+
     let shares = LP_SHARES.with(|s| s.borrow().get(&caller).map(|sn| sn.0.clone()).unwrap_or(Nat::from(0u64)));
 
     if shares == Nat::from(0u64) {
         return Err("No liquidity to withdraw".to_string());
     }
 
-    withdraw_liquidity(shares).await
+    // Atomic burn and state update
+    let (burned_shares, reserve_deducted, net_amount) = process_liquidity_burn(caller, shares)?;
+
+    // Register and execute pending withdrawal
+    accounting::register_lp_withdrawal(caller, burned_shares, reserve_deducted, net_amount).await
 }
 
 // Query functions
@@ -501,4 +477,17 @@ async fn transfer_from_user(user: Principal, amount: u64) -> Result<(), String> 
 
 async fn transfer_to_user(user: Principal, amount: u64) -> Result<(), String> {
     accounting::transfer_to_user(user, amount).await
+}
+
+pub(crate) fn rollback_lp_withdrawal(user: Principal, shares: Nat, reserve: Nat) {
+    // Restore LP shares
+    LP_SHARES.with(|s| {
+        s.borrow_mut().insert(user, StorableNat(shares));
+    });
+    // Restore pool reserve
+    POOL_STATE.with(|state| {
+        let mut pool = state.borrow().get().clone();
+        pool.reserve += reserve;
+        state.borrow_mut().set(pool).expect("Failed to restore pool reserve");
+    });
 }

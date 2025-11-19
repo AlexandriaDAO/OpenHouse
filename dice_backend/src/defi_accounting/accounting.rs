@@ -1,8 +1,11 @@
-use candid::{CandidType, Deserialize, Principal};
+use candid::{CandidType, Deserialize, Principal, Nat};
 use ic_cdk::{query, update};
-use ic_stable_structures::memory_manager::MemoryId;
-use ic_stable_structures::StableBTreeMap;
+use ic_cdk::api::call::RejectionCode;
+use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
+use ic_stable_structures::{StableBTreeMap, StableVec, Storable, DefaultMemoryImpl};
+use ic_stable_structures::storable::Bound;
 use std::cell::RefCell;
+use std::borrow::Cow;
 use ic_ledger_types::{
     AccountIdentifier, TransferArgs, Tokens, DEFAULT_SUBACCOUNT,
     MAINNET_LEDGER_CANISTER_ID, Memo, AccountBalanceArgs,
@@ -57,11 +60,91 @@ const ICP_TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP in e8s
 const MIN_DEPOSIT: u64 = 10_000_000; // 0.1 ICP
 const MIN_WITHDRAW: u64 = 10_000_000; // 0.1 ICP
 const USER_BALANCES_MEMORY_ID: u8 = 10; // Memory ID for user balances
+const PENDING_WITHDRAWALS_MEMORY_ID: u8 = 20;
+const AUDIT_LOG_MEMORY_ID: u8 = 21;
 const MAX_PAYOUT_PERCENTAGE: f64 = 0.10; // 10% of house balance
 
+// =============================================================================
+// DATA STRUCTURES
+// =============================================================================
 
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub enum WithdrawalType {
+    User {
+        amount: u64
+    },
+    LP {
+        shares: Nat,
+        reserve: Nat,
+        amount: u64,
+    },
+}
 
-// User balance tracking (stable storage only)
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct PendingWithdrawal {
+    pub withdrawal_type: WithdrawalType,
+    pub created_at: u64,        // Idempotency Key
+    pub retries: u8,
+    pub last_error: Option<String>,
+}
+
+impl Storable for PendingWithdrawal {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(candid::encode_one(self).unwrap())
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        candid::decode_one(&bytes).unwrap()
+    }
+
+    const BOUND: Bound = Bound::Bounded {
+        max_size: 1024, // Should be enough for Nat and error strings
+        is_fixed_size: false,
+    };
+}
+
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub enum AuditEventType {
+    WithdrawalInitiated,
+    WithdrawalCompleted,
+    WithdrawalFailed,
+    WithdrawalExpired,
+    BalanceRestored,
+}
+
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct AuditEntry {
+    pub timestamp: u64,
+    pub event_type: AuditEventType,
+    pub user: Principal,
+    pub amount: u64,
+    pub details: String,
+}
+
+impl Storable for AuditEntry {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(candid::encode_one(self).unwrap())
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        candid::decode_one(&bytes).unwrap()
+    }
+
+    const BOUND: Bound = Bound::Bounded {
+        max_size: 2048,
+        is_fixed_size: false,
+    };
+}
+
+pub enum TransferError {
+    Uncertain(RejectionCode, String),  // Retry
+    Definite(String),                   // Rollback
+}
+
+// =============================================================================
+// STORAGE
+// =============================================================================
+
 thread_local! {
     // Stable storage for persistence across upgrades
     static USER_BALANCES_STABLE: RefCell<StableBTreeMap<Principal, u64, Memory>> = RefCell::new(
@@ -70,9 +153,24 @@ thread_local! {
         )
     );
 
+    // Pending withdrawals: One per user (Principal key)
+    static PENDING_WITHDRAWALS: RefCell<StableBTreeMap<Principal, PendingWithdrawal, Memory>> =
+        RefCell::new(StableBTreeMap::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(PENDING_WITHDRAWALS_MEMORY_ID)))
+        ));
+
+    // Audit trail for critical events
+    static WITHDRAWAL_AUDIT_LOG: RefCell<StableVec<AuditEntry, Memory>> =
+        RefCell::new(StableVec::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(AUDIT_LOG_MEMORY_ID)))
+        ).unwrap());
+
     // Cached canister balance (refreshed hourly via heartbeat)
     // This avoids 500ms ledger query on every balance check
     static CACHED_CANISTER_BALANCE: RefCell<u64> = RefCell::new(0);
+
+    // Reentrancy guard for background processing
+    static PROCESSING: RefCell<bool> = RefCell::new(false);
 }
 
 #[derive(CandidType, Deserialize, Clone)]
@@ -97,11 +195,108 @@ fn calculate_total_deposits() -> u64 {
     })
 }
 
-/// Rollback balance change helper (DRY)
-fn rollback_balance_change(user: Principal, original_balance: u64) {
-    USER_BALANCES_STABLE.with(|balances| {
-        balances.borrow_mut().insert(user, original_balance);
+fn log_audit(event_type: AuditEventType, user: Principal, amount: u64, details: String) {
+    WITHDRAWAL_AUDIT_LOG.with(|log| {
+        let entry = AuditEntry {
+            timestamp: ic_cdk::api::time(),
+            event_type,
+            user,
+            amount,
+            details,
+        };
+        log.borrow_mut().push(&entry).expect("Failed to write audit log");
     });
+}
+
+async fn attempt_transfer(user: Principal, amount: u64, created_at: u64) -> Result<u64, TransferError> {
+    let transfer_args = TransferArgs {
+        memo: Memo(0),
+        amount: Tokens::from_e8s(amount - ICP_TRANSFER_FEE),
+        fee: Tokens::from_e8s(ICP_TRANSFER_FEE),
+        from_subaccount: None,
+        to: AccountIdentifier::new(&user, &DEFAULT_SUBACCOUNT),
+        created_at_time: Some(ic_ledger_types::Timestamp { timestamp_nanos: created_at }),
+    };
+
+    match ic_ledger_types::transfer(MAINNET_LEDGER_CANISTER_ID, transfer_args).await {
+        Ok(Ok(block_index)) => Ok(block_index),
+        Ok(Err(e)) => Err(TransferError::Definite(format!("{:?}", e))),
+        Err((code, msg)) => {
+            match code {
+                // Uncertain - might have succeeded
+                RejectionCode::SysTransient | RejectionCode::Unknown => {
+                    Err(TransferError::Uncertain(code, msg))
+                }
+                // Definite failures - safe to rollback
+                RejectionCode::SysFatal
+                | RejectionCode::DestinationInvalid
+                | RejectionCode::CanisterReject
+                | RejectionCode::CanisterError => {
+                    Err(TransferError::Definite(format!("{:?}: {}", code, msg)))
+                }
+                RejectionCode::NoError => unreachable!(),
+            }
+        }
+    }
+}
+
+fn rollback_withdrawal(user: Principal) -> Result<(), String> {
+    let pending = PENDING_WITHDRAWALS.with(|p| p.borrow().get(&user))
+        .ok_or("No pending withdrawal to rollback")?;
+
+    match pending.withdrawal_type {
+        WithdrawalType::User { amount } => {
+            // Restore user balance
+            USER_BALANCES_STABLE.with(|balances| {
+                let mut balances = balances.borrow_mut();
+                let current = balances.get(&user).unwrap_or(0);
+                balances.insert(user, current + amount);
+            });
+            log_audit(AuditEventType::BalanceRestored, user, amount, "User withdrawal failed".to_string());
+        }
+        WithdrawalType::LP { shares, reserve, amount } => {
+            // Restore LP shares and pool reserve
+            liquidity_pool::rollback_lp_withdrawal(user, shares, reserve);
+            log_audit(AuditEventType::BalanceRestored, user, amount, "LP withdrawal failed".to_string());
+        }
+    }
+
+    PENDING_WITHDRAWALS.with(|p| p.borrow_mut().remove(&user));
+    Ok(())
+}
+
+async fn execute_withdrawal(user: Principal, amount: u64, created_at: u64) -> Result<u64, String> {
+    match attempt_transfer(user, amount, created_at).await {
+        Ok(block_index) => {
+            // Success - remove pending
+            PENDING_WITHDRAWALS.with(|p| p.borrow_mut().remove(&user));
+            log_audit(AuditEventType::WithdrawalCompleted, user, amount, format!("Block: {}", block_index));
+            Ok(amount)
+        }
+        Err(TransferError::Definite(err)) => {
+            // Definite failure - safe to rollback
+            let _ = rollback_withdrawal(user);
+            log_audit(AuditEventType::WithdrawalFailed, user, amount, err.clone());
+            Err(format!("Withdrawal failed: {}", err))
+        }
+        Err(TransferError::Uncertain(code, msg)) => {
+            // Uncertain - keep pending for retry
+            PENDING_WITHDRAWALS.with(|p| {
+                if let Some(mut pending) = p.borrow_mut().get(&user) {
+                    pending.last_error = Some(format!("{:?}: {}", code, msg));
+                    p.borrow_mut().insert(user, pending);
+                }
+            });
+            Err(format!("Processing withdrawal. Check status later. Error: {:?}", code))
+        }
+    }
+}
+
+fn get_withdrawal_amount(pending: &PendingWithdrawal) -> u64 {
+    match &pending.withdrawal_type {
+        WithdrawalType::User { amount } => *amount,
+        WithdrawalType::LP { amount, .. } => *amount,
+    }
 }
 
 // =============================================================================
@@ -117,9 +312,7 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
 
     let caller = ic_cdk::caller();
 
-    // STEP 2: Transfer ICP from user to canister using standard ledger types
     // STEP 2: Transfer ICP from user to canister using ICRC-2 transfer_from
-    // This requires the user to have approved the canister to spend their funds
     let transfer_args = TransferFromArgs {
         spender_subaccount: None,
         from: Account::from(caller),
@@ -130,9 +323,6 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
         created_at_time: None,
     };
 
-    // We need to call the ledger canister. Assuming MAINNET_LEDGER_CANISTER_ID supports ICRC-2.
-    // The ICP ledger canister ID is ryjl3-tyaaa-aaaaa-aaaba-cai
-    
     let (result,) = ic_cdk::call::<_, (Result<candid::Nat, TransferFromError>,)>(
         MAINNET_LEDGER_CANISTER_ID,
         "icrc2_transfer_from",
@@ -146,8 +336,6 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
             let block_index = block_index_nat.0.to_u64().ok_or("Block index too large")?;
             
             // Credit user with amount MINUS fee
-            // The ledger deducts the fee from the transferred amount, so the canister receives (amount - fee).
-            // We must credit the user only for what the canister actually received.
             let received_amount = amount.saturating_sub(ICP_TRANSFER_FEE);
             
             let new_balance = USER_BALANCES_STABLE.with(|balances| {
@@ -167,62 +355,29 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
 }
 
 // =============================================================================
-// WITHDRAW FUNCTION
+// LP INTEGRATION HELPERS
 // =============================================================================
 
-#[update]
-pub async fn withdraw(amount: u64) -> Result<u64, String> {
-    // STEP 1: Validate withdrawal amount
-    if amount < MIN_WITHDRAW {
-        return Err(format!("Minimum withdrawal is {} ICP", MIN_WITHDRAW / 100_000_000));
-    }
+pub fn check_pending(user: Principal) -> Option<PendingWithdrawal> {
+    PENDING_WITHDRAWALS.with(|p| p.borrow().get(&user))
+}
 
-    let caller = ic_cdk::caller();
-
-    // STEP 2: Check user has sufficient balance
-    let user_balance = get_balance_internal(caller);
-    if user_balance < amount {
-        return Err(format!("Insufficient balance. You have {} e8s, trying to withdraw {} e8s", user_balance, amount));
-    }
-
-    // Deduct from user balance FIRST (prevent re-entrancy)
-    let new_balance = USER_BALANCES_STABLE.with(|balances| {
-        let mut balances = balances.borrow_mut();
-        let new_bal = user_balance - amount;
-        balances.insert(caller, new_bal);
-        new_bal
-    });
-
-    // Transfer ICP from canister to user
-    // We use standard `transfer` (legacy) for simplicity and type safety with ic-ledger-types
-    let transfer_args = TransferArgs {
-        memo: Memo(0),
-        amount: Tokens::from_e8s(amount - ICP_TRANSFER_FEE),
-        fee: Tokens::from_e8s(ICP_TRANSFER_FEE),
-        from_subaccount: None,
-        to: AccountIdentifier::new(&caller, &DEFAULT_SUBACCOUNT),
-        created_at_time: None,
+pub async fn register_lp_withdrawal(user: Principal, shares: Nat, reserve: Nat, amount: u64) -> Result<u64, String> {
+    let created_at = ic_cdk::api::time();
+    let pending = PendingWithdrawal {
+        withdrawal_type: WithdrawalType::LP {
+            shares,
+            reserve,
+            amount,
+        },
+        created_at,
+        retries: 0,
+        last_error: None,
     };
+    PENDING_WITHDRAWALS.with(|p| p.borrow_mut().insert(user, pending));
+    log_audit(AuditEventType::WithdrawalInitiated, user, amount, "LP withdraw_all".to_string());
 
-    match ic_ledger_types::transfer(MAINNET_LEDGER_CANISTER_ID, transfer_args).await {
-        Ok(Ok(block_index)) => {
-            ic_cdk::println!("Withdrawal successful: {} withdrew {} e8s at block {}", caller, amount, block_index);
-            Ok(new_balance)
-        }
-        Ok(Err(e)) => {
-            // Rollback
-            rollback_balance_change(caller, user_balance);
-            Err(format!("Transfer failed: {:?}", e))
-        }
-        Err((code, msg)) => {
-            // SYSTEM ERROR - UNSAFE TO ROLLBACK
-            // We assume the transfer MIGHT have succeeded.
-            // Do not restore balance.
-            ic_cdk::println!("CRITICAL: Withdrawal system error for {}. Amount: {}. Code: {:?}, Msg: {}. Balance NOT restored.",
-               caller, amount, code, msg);
-            Err(format!("System error during transfer. Funds pending. Contact support. Error: {:?} {}", code, msg))
-        }
-    }
+    execute_withdrawal(user, amount, created_at).await
 }
 
 // =============================================================================
@@ -232,21 +387,151 @@ pub async fn withdraw(amount: u64) -> Result<u64, String> {
 #[update]
 pub async fn withdraw_all() -> Result<u64, String> {
     let caller = ic_cdk::caller();
-    let user_balance = get_balance_internal(caller);
+    let balance = get_balance_internal(caller);
 
-    // Check if user has any balance to withdraw
-    if user_balance == 0 {
+    // Check for existing pending
+    if balance == 0 {
+        if let Some(pending) = PENDING_WITHDRAWALS.with(|p| p.borrow().get(&caller)) {
+            return Err(format!("Withdrawal pending (retries: {})", pending.retries));
+        }
         return Err("No balance to withdraw".to_string());
     }
 
-    // Check if balance meets minimum withdrawal
-    if user_balance < MIN_WITHDRAW {
-        return Err(format!("Balance {} e8s is below minimum withdrawal of {} ICP",
-                          user_balance, MIN_WITHDRAW / 100_000_000));
+    // Validate minimum
+    if balance < MIN_WITHDRAW {
+        return Err(format!("Minimum withdrawal: {} e8s", MIN_WITHDRAW));
     }
 
-    // Call the regular withdraw function with the full balance
-    withdraw(user_balance).await
+    // ATOMIC: Deduct balance + create pending
+    USER_BALANCES_STABLE.with(|balances| {
+        balances.borrow_mut().insert(caller, 0);
+    });
+    
+    let created_at = ic_cdk::api::time();
+    let pending = PendingWithdrawal {
+        withdrawal_type: WithdrawalType::User { amount: balance },
+        created_at,
+        retries: 0,
+        last_error: None,
+    };
+    PENDING_WITHDRAWALS.with(|p| p.borrow_mut().insert(caller, pending));
+    log_audit(AuditEventType::WithdrawalInitiated, caller, balance, "User withdraw_all".to_string());
+
+    // Attempt transfer
+    execute_withdrawal(caller, balance, created_at).await
+}
+
+// =============================================================================
+// BACKGROUND PROCESSING
+// =============================================================================
+
+const MAX_RETRIES: u8 = 10;
+const BATCH_SIZE: usize = 50;
+
+pub async fn process_pending_withdrawals() {
+    // Prevent reentrancy (timers can overlap)
+    if PROCESSING.with(|p| *p.borrow()) {
+        return; // Already processing
+    }
+    PROCESSING.with(|p| *p.borrow_mut() = true);
+
+    // Process in batches
+    let pending: Vec<(Principal, PendingWithdrawal)> = PENDING_WITHDRAWALS.with(|p| {
+        p.borrow()
+            .iter()
+            .take(BATCH_SIZE)
+            .collect()
+    });
+
+    for (user, mut pending_withdrawal) in pending {
+        // Check max retries
+        if pending_withdrawal.retries >= MAX_RETRIES {
+            // Give up - rollback
+            ic_cdk::println!(
+                "CRITICAL: Withdrawal exceeded max retries. User: {}, Amount: {:?}",
+                user,
+                pending_withdrawal.withdrawal_type
+            );
+            log_audit(
+                AuditEventType::WithdrawalExpired,
+                user,
+                get_withdrawal_amount(&pending_withdrawal),
+                format!("Max retries ({}) exceeded", MAX_RETRIES)
+            );
+            let _ = rollback_withdrawal(user);
+            continue;
+        }
+
+        // Retry with SAME created_at_time (idempotent)
+        let amount = get_withdrawal_amount(&pending_withdrawal);
+        match attempt_transfer(user, amount, pending_withdrawal.created_at).await {
+            Ok(block_index) => {
+                // Success
+                PENDING_WITHDRAWALS.with(|p| p.borrow_mut().remove(&user));
+                log_audit(
+                    AuditEventType::WithdrawalCompleted,
+                    user,
+                    amount,
+                    format!("Block: {} (retry {})", block_index, pending_withdrawal.retries)
+                );
+            }
+            Err(TransferError::Definite(err)) => {
+                // Definite failure - rollback
+                let _ = rollback_withdrawal(user);
+                log_audit(AuditEventType::WithdrawalFailed, user, amount, err);
+            }
+            Err(TransferError::Uncertain(code, msg)) => {
+                // Still uncertain - increment retries
+                pending_withdrawal.retries += 1;
+                pending_withdrawal.last_error = Some(format!("{:?}: {}", code, msg));
+                PENDING_WITHDRAWALS.with(|p| {
+                    p.borrow_mut().insert(user, pending_withdrawal);
+                });
+            }
+        }
+    }
+
+    PROCESSING.with(|p| *p.borrow_mut() = false);
+}
+
+// =============================================================================
+// QUERIES
+// =============================================================================
+
+#[derive(CandidType)]
+pub enum WithdrawalStatusResponse {
+    None,
+    Pending {
+        amount: u64,
+        retries: u8,
+        last_error: Option<String>,
+    },
+}
+
+#[query]
+pub fn get_withdrawal_status() -> WithdrawalStatusResponse {
+    let caller = ic_cdk::caller();
+
+    if let Some(pending) = PENDING_WITHDRAWALS.with(|p| p.borrow().get(&caller)) {
+        WithdrawalStatusResponse::Pending {
+            amount: get_withdrawal_amount(&pending),
+            retries: pending.retries,
+            last_error: pending.last_error,
+        }
+    } else {
+        WithdrawalStatusResponse::None
+    }
+}
+
+#[query]
+pub fn get_audit_log(start: usize, limit: usize) -> Vec<AuditEntry> {
+    WITHDRAWAL_AUDIT_LOG.with(|log| {
+        log.borrow()
+            .iter()
+            .skip(start)
+            .take(limit)
+            .collect()
+    })
 }
 
 // =============================================================================
