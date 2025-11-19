@@ -149,14 +149,17 @@ pub async fn withdraw(amount: u64) -> Result<u64, String> {
             Ok(new_balance)
         }
         Ok(Err(e)) => {
-            // Rollback
+            // Rollback - Ledger rejected it (Safe)
             rollback_balance_change(caller, user_balance);
             Err(format!("Transfer failed: {:?}", e))
         }
         Err((code, msg)) => {
-            // Rollback
-            rollback_balance_change(caller, user_balance);
-            Err(format!("Transfer call failed: {:?} {}", code, msg))
+            // SYSTEM ERROR - UNSAFE TO ROLLBACK
+            // We assume the transfer MIGHT have succeeded.
+            // Do not restore balance.
+            ic_cdk::println!("CRITICAL: Withdrawal system error for {}. Amount: {}. Code: {:?}, Msg: {}. Balance NOT restored.", 
+               caller, amount, code, msg);
+            Err(format!("System error during transfer. Funds pending. Contact support. Error: {:?} {}", code, msg))
         }
     }
 }
