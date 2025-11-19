@@ -180,7 +180,14 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
     Ok(shares_to_mint)
 }
 
-// Internal function for withdrawing liquidity (called by withdraw_all_liquidity)
+// 
+// # Safety Valve Accounting
+// This function implements a "Safety Valve" mechanism for fees:
+// 1. The LP's portion (99%) is critical and is transferred first.
+// 2. The Fee portion (1%) is best-effort.
+// 3. If the Fee transfer fails, the fee remains in the Pool Reserve.
+//    This ensures that Reserve + User Deposits always equals Canister Balance.
+//    There are NO floating funds.
 async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     // ====================================================================
     // SECURITY: Checks-Effects-Interactions Pattern
@@ -209,7 +216,7 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     }
 
     // Calculate payout
-    let (payout_nat, new_reserve) = POOL_STATE.with(|state| {
+    let payout_nat = POOL_STATE.with(|state| {
         let pool_state = state.borrow().get().clone();
         let current_reserve = pool_state.reserve.clone();
         let total_shares = calculate_total_supply();
@@ -223,10 +230,12 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         let payout = nat_divide(&numerator, &total_shares)
             .ok_or("Division error".to_string())?;
 
-        let new_reserve = nat_subtract(&current_reserve, &payout)
-            .ok_or("Insufficient pool reserve".to_string())?;
+        // Check reserve sufficiency (read-only check)
+        if &current_reserve < &payout {
+             return Err("Insufficient pool reserve".to_string());
+        }
 
-        Ok((payout, new_reserve))
+        Ok(payout)
     })?;
 
     // Check minimum withdrawal
@@ -281,10 +290,12 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
                 match transfer_to_user(*PARENT_PRINCIPAL, net_fee).await {
                     Ok(_) => {
                         // Parent transfer succeeded - NOW we deduct the fee from reserve
+                        // Note: We transfer 'net_fee' (fee - transfer_cost) but deduct 'fee_amount'
+                        // from reserve. The difference (transfer_cost) is paid by the canister to the ledger.
                         POOL_STATE.with(|state| {
                             let mut pool_state = state.borrow().get().clone();
                             pool_state.reserve = nat_subtract(&pool_state.reserve, &u64_to_nat(fee_amount))
-                                .unwrap_or(pool_state.reserve);
+                                .expect("CRITICAL: Reserve underflow on fee deduction");
                             state.borrow_mut().set(pool_state).unwrap();
                         });
                         ic_cdk::println!("LP withdrawal: {} got {} e8s, parent fee {} e8s", 
@@ -313,6 +324,7 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
             });
 
             // 2. Restore reserve (add back ONLY what we deducted: lp_amount)
+            // Note: We don't need 'new_reserve' here, we just add back what we took.
             POOL_STATE.with(|state| {
                 let mut pool_state = state.borrow().get().clone();
                 pool_state.reserve = nat_add(&pool_state.reserve, &u64_to_nat(lp_amount));

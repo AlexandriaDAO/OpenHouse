@@ -1,3 +1,2 @@
-export { CrashRocket } from './CrashRocket';
-export { CrashGraph } from './CrashGraph';
+export { CrashCanvas } from './CrashCanvas';
 export { CrashProbabilityTable } from './CrashProbabilityTable';
