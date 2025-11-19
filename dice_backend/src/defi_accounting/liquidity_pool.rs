@@ -9,7 +9,7 @@ use ic_ledger_types::MAINNET_LEDGER_CANISTER_ID;
 use super::accounting;
 
 // Constants
-const LP_DECIMALS: u8 = 8;
+
 const MINIMUM_LIQUIDITY: u64 = 1000;
 const MIN_DEPOSIT: u64 = 100_000_000; // 1 ICP minimum for all deposits
 const MIN_WITHDRAWAL: u64 = 100_000; // 0.001 ICP
@@ -36,9 +36,13 @@ impl Storable for StorableNat {
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        if bytes.len() < 4 { return StorableNat(Nat::from(0u64)); }
+        if bytes.len() < 4 { 
+            panic!("StorableNat: Invalid byte length < 4");
+        }
         let len = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
-        if bytes.len() < 4 + len { return StorableNat(Nat::from(0u64)); }
+        if bytes.len() < 4 + len { 
+            panic!("StorableNat: Invalid byte length, expected {} but got {}", 4 + len, bytes.len());
+        }
         let bigint_bytes = &bytes[4..4+len];
         let biguint = num_bigint::BigUint::from_bytes_be(bigint_bytes);
         StorableNat(Nat(biguint))
@@ -110,7 +114,11 @@ pub struct PoolStats {
     pub is_initialized: bool,
 }
 
-// Deposit liquidity (frontend handles ICRC-2 approval first)
+// Deposit liquidity
+// NOTE: We use `icrc2_transfer_from` here because the user must approve the canister 
+// to spend their funds (ICRC-2 approval flow). This is different from user deposits
+// in `accounting.rs` which use the legacy `transfer` (ICRC-1) where the user sends
+// funds directly to the canister's subaccount.
 pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
     // Validate
     if amount < MIN_DEPOSIT {
@@ -209,7 +217,9 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         }
 
         // payout = (shares_to_burn * current_reserve) / total_shares
+        // payout = (shares_to_burn * current_reserve) / total_shares
         let numerator = shares_to_burn.clone() * current_reserve.clone();
+        // SAFETY: total_shares checked for zero above (line 207)
         let payout = numerator / total_shares;
 
         // Check reserve sufficiency (read-only check)
@@ -316,6 +326,7 @@ pub fn get_lp_position(user: Principal) -> LPPosition {
         let ownership = (user_shares.0.to_f64().unwrap_or(0.0) /
                         total_shares.0.to_f64().unwrap_or(1.0)) * 100.0;
         let numerator = user_shares.clone() * pool_reserve.clone();
+        // SAFETY: total_shares checked for zero above (line 307)
         let redeemable = numerator / total_shares;
         (ownership, redeemable)
     };
@@ -338,6 +349,7 @@ pub fn get_pool_stats() -> PoolStats {
     } else if pool_reserve == Nat::from(0u64) {
         Nat::from(1u64) // Minimum price if drained
     } else {
+        // SAFETY: total_shares checked for zero above (line 336)
         pool_reserve.clone() / total_shares.clone()
     };
 
@@ -374,16 +386,14 @@ fn calculate_total_supply() -> Nat {
 }
 
 pub fn get_pool_reserve() -> u64 {
-    get_pool_reserve_nat().0.to_u64().unwrap_or(0)
+    get_pool_reserve_nat().0.to_u64().expect("Pool reserve exceeds u64")
 }
 
 pub fn get_pool_reserve_nat() -> Nat {
     POOL_STATE.with(|s| s.borrow().get().reserve.clone())
 }
 
-pub fn is_pool_initialized() -> bool {
-    POOL_STATE.with(|s| s.borrow().get().initialized)
-}
+
 
 pub fn can_accept_bets() -> bool {
     let pool_reserve = get_pool_reserve();
@@ -404,7 +414,7 @@ pub(crate) fn update_pool_on_win(payout: u64) {
              ic_cdk::trap(&format!(
                 "CRITICAL: Pool insolvent. Attempted payout {} e8s exceeds reserve {} e8s. Halting to protect LPs.",
                 payout,
-                pool_state.reserve.0.to_u64().unwrap_or(0)
+                pool_state.reserve.0.to_u64().unwrap_or(u64::MAX) // Use MAX to indicate overflow if it happens
             ));
         }
         pool_state.reserve -= payout_nat;
@@ -425,9 +435,15 @@ pub(crate) fn update_pool_on_loss(bet: u64) {
 
 // ICRC-2 types not in ic_ledger_types
 #[derive(CandidType, Deserialize)]
+struct Account {
+    owner: Principal,
+    subaccount: Option<Vec<u8>>,
+}
+
+#[derive(CandidType, Deserialize)]
 struct TransferFromArgs {
-    from: super::accounting::Account,
-    to: super::accounting::Account,
+    from: Account,
+    to: Account,
     amount: Nat,
     fee: Option<Nat>,
     memo: Option<Vec<u8>>,
@@ -457,11 +473,11 @@ async fn transfer_from_user(user: Principal, amount: u64) -> Result<(), String> 
     let canister_id = ic_cdk::id();
 
     let args = TransferFromArgs {
-        from: super::accounting::Account {
+        from: Account {
             owner: user,
             subaccount: None,
         },
-        to: super::accounting::Account {
+        to: Account {
             owner: canister_id,
             subaccount: None,
         },

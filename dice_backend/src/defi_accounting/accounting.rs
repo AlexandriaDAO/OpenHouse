@@ -18,11 +18,7 @@ const MIN_WITHDRAW: u64 = 10_000_000; // 0.1 ICP
 const USER_BALANCES_MEMORY_ID: u8 = 10; // Memory ID for user balances
 const MAX_PAYOUT_PERCENTAGE: f64 = 0.10; // 10% of house balance
 
-#[derive(CandidType, Deserialize, Clone, Debug)]
-pub struct Account {
-    pub owner: Principal,
-    pub subaccount: Option<Vec<u8>>,
-}
+
 
 // User balance tracking (stable storage only)
 thread_local! {
