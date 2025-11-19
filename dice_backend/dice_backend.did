@@ -80,6 +80,13 @@ service : {
   get_seed_info: () -> (text, nat64, nat64) query;
 
   // Accounting methods
+  // Accounting methods
+  // IMPORTANT: Deposit requires ICRC-2 Approval first!
+  // 1. Call `icrc2_approve` on the Ledger Canister (ryjl3-tyaaa-aaaaa-aaaba-cai)
+  //    Spender: This canister ID
+  //    Amount: Deposit amount + 10,000 e8s (fee)
+  // 2. Call `deposit(amount)` here.
+  //    Note: The user is credited `amount - 10,000 e8s` (ledger fee).
   deposit: (nat64) -> (variant { Ok: nat64; Err: text });
   withdraw: (nat64) -> (variant { Ok: nat64; Err: text });
   withdraw_all: () -> (variant { Ok: nat64; Err: text });

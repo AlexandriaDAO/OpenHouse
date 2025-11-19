@@ -145,16 +145,21 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
         Ok(block_index_nat) => {
             let block_index = block_index_nat.0.to_u64().ok_or("Block index too large")?;
             
-            // Credit user with full amount
+            // Credit user with amount MINUS fee
+            // The ledger deducts the fee from the transferred amount, so the canister receives (amount - fee).
+            // We must credit the user only for what the canister actually received.
+            let received_amount = amount.saturating_sub(ICP_TRANSFER_FEE);
+            
             let new_balance = USER_BALANCES_STABLE.with(|balances| {
                 let mut balances = balances.borrow_mut();
                 let current = balances.get(&caller).unwrap_or(0);
-                let new_bal = current + amount;
+                let new_bal = current + received_amount;
                 balances.insert(caller, new_bal);
                 new_bal
             });
 
-            ic_cdk::println!("Deposit successful: {} deposited {} e8s at block {}", caller, amount, block_index);
+            ic_cdk::println!("Deposit successful: {} deposited {} e8s (net {}) at block {}", 
+                caller, amount, received_amount, block_index);
             Ok(new_balance)
         }
         Err(e) => Err(format!("Transfer failed: {:?}", e)),
