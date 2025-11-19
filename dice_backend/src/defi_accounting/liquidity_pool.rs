@@ -180,14 +180,15 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
     Ok(shares_to_mint)
 }
 
+// Internal function for withdrawing liquidity (called by withdraw_all_liquidity)
 // 
-// # Safety Valve Accounting
-// This function implements a "Safety Valve" mechanism for fees:
-// 1. The LP's portion (99%) is critical and is transferred first.
-// 2. The Fee portion (1%) is best-effort.
-// 3. If the Fee transfer fails, the fee remains in the Pool Reserve.
-//    This ensures that Reserve + User Deposits always equals Canister Balance.
-//    There are NO floating funds.
+// # Fire and Forget Accounting
+// This function implements the simplest possible fee mechanism:
+// 1. Deduct the FULL payout (LP share + Fee) from the Reserve immediately.
+// 2. Transfer the LP's share (Critical). If this fails, rollback everything.
+// 3. Transfer the Fee (Best Effort). If this fails, we DO NOT rollback.
+//    The fee remains in the canister as a protocol buffer.
+//    This ensures the Reserve is always solvent (Reserve <= Balance).
 async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     // ====================================================================
     // SECURITY: Checks-Effects-Interactions Pattern
@@ -196,11 +197,6 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     // 1. CHECK: Validate shares and calculate payout
     // 2. EFFECTS: Update state (deduct shares, reduce pool)
     // 3. INTERACTIONS: Transfer ICP (with rollback on failure)
-    //
-    // Even without guards, this is safe because:
-    // - State is updated BEFORE the transfer
-    // - If transfer fails, we explicitly rollback
-    // - IC's sequential execution prevents concurrent modifications
     // ====================================================================
 
     let caller = ic_cdk::caller();
@@ -261,17 +257,15 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     });
 
     // ====================================================================
-    // SAFETY VALVE ACCOUNTING:
-    // 1. Deduct ONLY the LP's portion from the reserve initially.
-    // 2. The fee portion remains in the reserve until it is successfully transferred.
-    // 3. If the fee transfer fails, we DO NOT deduct it.
-    //    Result: Reserve matches Balance. Fee is "refunded" to the pool.
+    // FIRE AND FORGET ACCOUNTING:
+    // 1. Deduct the FULL payout (LP + Fee) from the reserve immediately.
+    // 2. This ensures the Reserve is always solvent.
     // ====================================================================
     
     POOL_STATE.with(|state| {
         let mut pool_state = state.borrow().get().clone();
-        // Deduct only what we are about to send to the LP
-        pool_state.reserve = nat_subtract(&pool_state.reserve, &u64_to_nat(lp_amount))
+        // Deduct FULL payout
+        pool_state.reserve = nat_subtract(&pool_state.reserve, &payout_nat)
             .ok_or("Insufficient pool reserve")?;
         state.borrow_mut().set(pool_state).unwrap();
         Ok::<(), String>(())
@@ -283,36 +277,26 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
             // LP got paid successfully ✅
             
             // BEST EFFORT: Try to pay parent
-            // Only attempt if fee > transfer cost, otherwise it stays in pool
+            // Only attempt if fee > transfer cost, otherwise it stays in canister buffer
             let net_fee = fee_amount.saturating_sub(TRANSFER_FEE);
             
             if net_fee > 0 {
                 match transfer_to_user(*PARENT_PRINCIPAL, net_fee).await {
                     Ok(_) => {
-                        // Parent transfer succeeded - NOW we deduct the fee from reserve
-                        // Note: We transfer 'net_fee' (fee - transfer_cost) but deduct 'fee_amount'
-                        // from reserve. The difference (transfer_cost) is paid by the canister to the ledger.
-                        // Total cost to canister = net_fee + transfer_cost = fee_amount.
-                        // The Reserve correctly reflects this deduction.
-                        POOL_STATE.with(|state| {
-                            let mut pool_state = state.borrow().get().clone();
-                            pool_state.reserve = nat_subtract(&pool_state.reserve, &u64_to_nat(fee_amount))
-                                .unwrap_or(pool_state.reserve);
-                            state.borrow_mut().set(pool_state).unwrap();
-                        });
+                        // Success! Fee sent to parent.
                         ic_cdk::println!("LP withdrawal: {} got {} e8s, parent fee {} e8s", 
                                        caller, lp_amount, fee_amount);
                     }
                     Err(e) => {
-                        // SAFETY VALVE: Parent transfer failed.
-                        // We do NOTHING. The fee remains in the reserve.
-                        // Reserve matches Balance. No floating funds.
-                        ic_cdk::println!("Parent fee transfer failed: {}, {} e8s remains in pool",
+                        // Failure. We do NOTHING.
+                        // The fee remains in the canister as a protocol buffer.
+                        // Reserve was already reduced, so Reserve < Balance. This is safe.
+                        ic_cdk::println!("Parent fee transfer failed: {}, {} e8s remains in canister buffer",
                                        e, fee_amount);
                     }
                 }
             } else {
-                ic_cdk::println!("Fee {} e8s too small to transfer, remains in pool", fee_amount);
+                ic_cdk::println!("Fee {} e8s too small to transfer, remains in canister buffer", fee_amount);
             }
 
             Ok(lp_amount)
@@ -325,11 +309,10 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
                 shares.borrow_mut().insert(caller, StorableNat(user_shares));
             });
 
-            // 2. Restore reserve (add back ONLY what we deducted: lp_amount)
-            // Note: We don't need 'new_reserve' here, we just add back what we took.
+            // 2. Restore reserve (add back FULL payout)
             POOL_STATE.with(|state| {
                 let mut pool_state = state.borrow().get().clone();
-                pool_state.reserve = nat_add(&pool_state.reserve, &u64_to_nat(lp_amount));
+                pool_state.reserve = nat_add(&pool_state.reserve, &payout_nat);
                 state.borrow_mut().set(pool_state).unwrap();
             });
 
