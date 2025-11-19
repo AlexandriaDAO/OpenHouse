@@ -102,10 +102,6 @@ service : {
   get_house_mode : () -> (text) query;
   can_accept_bets : () -> (bool) query;
 
-  // Admin & Debug
-  admin_restore_balance: (principal, nat64, text) -> (variant { Ok: null; Err: text });
-  verify_deposit_fee: (nat64) -> (variant { Ok: text; Err: text });
-
   // Test function
   greet: (text) -> (text) query;
 }

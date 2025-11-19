@@ -364,45 +364,4 @@ pub(crate) async fn transfer_to_user(recipient: Principal, amount: u64) -> Resul
 // =============================================================================
 // ADMIN & DEBUG FUNCTIONS
 // =============================================================================
-
-#[update]
-pub fn admin_restore_balance(user: Principal, amount: u64, reason: String) -> Result<(), String> {
-    // Only controllers can call this
-    if !ic_cdk::api::is_controller(&ic_cdk::caller()) {
-        return Err("Unauthorized: Caller is not a controller".to_string());
-    }
-
-    USER_BALANCES_STABLE.with(|balances| {
-        let mut balances = balances.borrow_mut();
-        let current = balances.get(&user).unwrap_or(0);
-        balances.insert(user, current + amount);
-    });
-
-    ic_cdk::println!("ADMIN: Restored {} e8s to {}. Reason: {}",
-        amount, user, reason);
-    Ok(())
-}
-
-#[update]
-pub async fn verify_deposit_fee(amount: u64) -> Result<String, String> {
-    // Only controllers can call this
-    if !ic_cdk::api::is_controller(&ic_cdk::caller()) {
-        return Err("Unauthorized: Caller is not a controller".to_string());
-    }
-
-    let before_balance = refresh_canister_balance().await;
-    
-    // We call deposit internally. Note: caller() will be the controller calling this function.
-    // So the controller must have approved the canister to spend their funds.
-    let result = deposit(amount).await;
-    
-    let after_balance = refresh_canister_balance().await;
-    let actual_increase = after_balance.saturating_sub(before_balance);
-
-    ic_cdk::println!("FEE TEST: Amount: {}, Increase: {}", amount, actual_increase);
-    
-    match result {
-        Ok(_) => Ok(format!("Deposit success. Balance increased by {}. Expected: {}", actual_increase, amount)),
-        Err(e) => Err(format!("Deposit failed: {}. Balance increased by {}", e, actual_increase)),
-    }
-}
+// Removed per user request to maintain atomic ethos.
