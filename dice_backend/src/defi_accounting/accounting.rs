@@ -1,5 +1,6 @@
 use candid::{CandidType, Deserialize, Principal};
-use ic_cdk::{query, update};
+use ic_cdk::update;
+use ic_cdk::api::call::RejectionCode;
 use ic_stable_structures::memory_manager::MemoryId;
 use ic_stable_structures::StableBTreeMap;
 use std::cell::RefCell;
@@ -154,9 +155,21 @@ pub async fn withdraw(amount: u64) -> Result<u64, String> {
             Err(format!("Transfer failed: {:?}", e))
         }
         Err((code, msg)) => {
-            // Rollback
-            rollback_balance_change(caller, user_balance);
-            Err(format!("Transfer call failed: {:?} {}", code, msg))
+            match code {
+                RejectionCode::SysTransient | RejectionCode::Unknown => {
+                    // UNSAFE TO ROLLBACK - Potential Double Spend Risk
+                    // The transfer might have succeeded but the response was lost/timed out.
+                    // We leave the balance deducted and log the error.
+                    ic_cdk::println!("CRITICAL: Withdrawal transfer failed with uncertain status. Balance deducted but transfer status unknown. User: {}, Amount: {}, Error: {:?} {}", caller, amount, code, msg);
+                    Err(format!("Transfer failed with uncertain status (no rollback): {:?} {}", code, msg))
+                }
+                _ => {
+                    // Safe to rollback (SysFatal, DestinationInvalid, CanisterReject, CanisterError)
+                    // These imply the message was definitely not processed successfully or rejected.
+                    rollback_balance_change(caller, user_balance);
+                    Err(format!("Transfer call failed: {:?} {}", code, msg))
+                }
+            }
         }
     }
 }
