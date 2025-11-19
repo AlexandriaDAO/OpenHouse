@@ -1,15 +1,13 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import useCrashActor from '../hooks/actors/useCrashActor';
 import {
   GameLayout,
   GameButton,
   GameStats,
-  GameHistory,
   type GameStat
 } from '../components/game-ui';
 import {
-  CrashRocket,
-  CrashGraph,
+  CrashCanvas,
   CrashProbabilityTable
 } from '../components/game-specific/crash';
 import { useAuth } from '../providers/AuthProvider';
@@ -33,6 +31,7 @@ export const Crash: React.FC = () => {
 
   // Game state
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isCrashed, setIsCrashed] = useState(false);
   const [currentMultiplier, setCurrentMultiplier] = useState(1.0);
   const [crashPoint, setCrashPoint] = useState<number | null>(null);
   const [targetCashout, setTargetCashout] = useState(2.5);
@@ -52,6 +51,7 @@ export const Crash: React.FC = () => {
 
     // Reset state
     setIsPlaying(true);
+    setIsCrashed(false);
     setGameError('');
     setCrashPoint(null);
     setCurrentMultiplier(1.0);
@@ -113,6 +113,7 @@ export const Crash: React.FC = () => {
         requestAnimationFrame(animate);
       } else {
         setCurrentMultiplier(crashPoint);
+        setIsCrashed(true);
         setTimeout(() => {
           setIsPlaying(false);
         }, 2000); // Pause to show result
@@ -121,13 +122,6 @@ export const Crash: React.FC = () => {
 
     requestAnimationFrame(animate);
   };
-
-  const handleCrashComplete = useCallback(() => {
-    // Called when rocket explosion animation finishes
-    setCurrentMultiplier(1.0);
-    setCrashPoint(null);
-    setGraphHistory([]);
-  }, []);
 
   // Stats for display
   const stats: GameStat[] = [
@@ -170,18 +164,19 @@ export const Crash: React.FC = () => {
       maxWin={100}
       houseEdge={1}
     >
-      {/* Rocket Animation */}
-      <div className="card max-w-4xl mx-auto relative">
-        <CrashRocket
-          isLaunching={isPlaying}
+      {/* Main Game Area */}
+      <div className="card max-w-4xl mx-auto relative p-0 overflow-hidden border-0">
+        <CrashCanvas
           currentMultiplier={currentMultiplier}
+          isCrashed={isCrashed}
           crashPoint={crashPoint}
-          onCrashComplete={handleCrashComplete}
+          history={graphHistory}
         />
+
         {/* Milestone overlay when passing target */}
-        {passedTarget && isPlaying && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="bg-green-500/20 border-2 border-green-400 rounded-lg p-6 animate-pulse">
+        {passedTarget && isPlaying && !isCrashed && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-40">
+            <div className="bg-green-500/20 border-2 border-green-400 rounded-lg p-6 animate-pulse backdrop-blur-sm">
               <div className="text-3xl font-bold text-green-400">
                 ✅ TARGET REACHED!
               </div>
@@ -191,17 +186,6 @@ export const Crash: React.FC = () => {
             </div>
           </div>
         )}
-      </div>
-
-      {/* Multiplier Graph */}
-      <div className="card max-w-4xl mx-auto">
-        <h3 className="font-bold mb-4">Multiplier Graph</h3>
-        <CrashGraph
-          isPlaying={isPlaying}
-          currentMultiplier={currentMultiplier}
-          crashPoint={crashPoint}
-          history={graphHistory}
-        />
       </div>
 
       {/* Game Controls */}

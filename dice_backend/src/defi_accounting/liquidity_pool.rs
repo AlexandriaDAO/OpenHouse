@@ -4,6 +4,7 @@ use ic_stable_structures::{StableBTreeMap, StableCell, memory_manager::VirtualMe
 use serde::Serialize;
 use std::cell::RefCell;
 use std::borrow::Cow;
+// use std::sync::LazyLock;
 use num_traits::ToPrimitive;
 
 use super::nat_helpers::*;
@@ -17,6 +18,19 @@ const MIN_DEPOSIT: u64 = 100_000_000; // 1 ICP minimum for all deposits
 const MIN_WITHDRAWAL: u64 = 100_000; // 0.001 ICP
 const MIN_OPERATING_BALANCE: u64 = 1_000_000_000; // 10 ICP to operate games
 const TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP
+const PARENT_STAKER_CANISTER: &str = "e454q-riaaa-aaaap-qqcyq-cai";
+const LP_WITHDRAWAL_FEE_BPS: u64 = 100; // 1%
+
+use std::sync::OnceLock;
+
+static PARENT_PRINCIPAL: OnceLock<Principal> = OnceLock::new();
+
+fn get_parent_principal() -> Principal {
+    *PARENT_PRINCIPAL.get_or_init(|| {
+        Principal::from_text(PARENT_STAKER_CANISTER)
+            .expect("Invalid parent canister ID")
+    })
+}
 
 // Pool state for stable storage
 #[derive(Clone, CandidType, Deserialize, Serialize)]
@@ -173,6 +187,14 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
 }
 
 // Internal function for withdrawing liquidity (called by withdraw_all_liquidity)
+// 
+// # Fire and Forget Accounting
+// This function implements the simplest possible fee mechanism:
+// 1. Deduct the FULL payout (LP share + Fee) from the Reserve immediately.
+// 2. Transfer the LP's share (Critical). If this fails, rollback everything.
+// 3. Transfer the Fee (Best Effort). If this fails, we DO NOT rollback.
+//    The fee remains in the canister as a protocol buffer.
+//    This ensures the Reserve is always solvent (Reserve <= Balance).
 async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     // ====================================================================
     // SECURITY: Checks-Effects-Interactions Pattern
@@ -181,11 +203,6 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     // 1. CHECK: Validate shares and calculate payout
     // 2. EFFECTS: Update state (deduct shares, reduce pool)
     // 3. INTERACTIONS: Transfer ICP (with rollback on failure)
-    //
-    // Even without guards, this is safe because:
-    // - State is updated BEFORE the transfer
-    // - If transfer fails, we explicitly rollback
-    // - IC's sequential execution prevents concurrent modifications
     // ====================================================================
 
     let caller = ic_cdk::caller();
@@ -201,7 +218,7 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     }
 
     // Calculate payout
-    let (payout_nat, new_reserve) = POOL_STATE.with(|state| {
+    let payout_nat = POOL_STATE.with(|state| {
         let pool_state = state.borrow().get().clone();
         let current_reserve = pool_state.reserve.clone();
         let total_shares = calculate_total_supply();
@@ -215,10 +232,12 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         let payout = nat_divide(&numerator, &total_shares)
             .ok_or("Division error".to_string())?;
 
-        let new_reserve = nat_subtract(&current_reserve, &payout)
-            .ok_or("Insufficient pool reserve".to_string())?;
+        // Check reserve sufficiency (read-only check)
+        if &current_reserve < &payout {
+             return Err("Insufficient pool reserve".to_string());
+        }
 
-        Ok((payout, new_reserve))
+        Ok(payout)
     })?;
 
     // Check minimum withdrawal
@@ -227,7 +246,12 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         return Err(format!("Minimum withdrawal is {} e8s", MIN_WITHDRAWAL));
     }
 
-    // Update state BEFORE transfer (reentrancy protection)
+    // Calculate fee (1% using basis points for precision)
+    // SAFETY: We use integer math. 100 bps = 1%.
+    let fee_amount = (payout_u64 * LP_WITHDRAWAL_FEE_BPS) / 10_000;
+    let lp_amount = payout_u64 - fee_amount;
+
+    // Update shares BEFORE transfer (reentrancy protection)
     LP_SHARES.with(|shares| {
         let mut shares_map = shares.borrow_mut();
         let new_shares = nat_subtract(&user_shares, &shares_to_burn).unwrap();
@@ -238,24 +262,63 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         }
     });
 
+    // ====================================================================
+    // FIRE AND FORGET ACCOUNTING:
+    // 1. Deduct the FULL payout (LP + Fee) from the reserve immediately.
+    // 2. This ensures the Reserve is always solvent.
+    // ====================================================================
+    
     POOL_STATE.with(|state| {
         let mut pool_state = state.borrow().get().clone();
-        pool_state.reserve = new_reserve.clone();
+        // Deduct FULL payout
+        pool_state.reserve = nat_subtract(&pool_state.reserve, &payout_nat)
+            .ok_or("Insufficient pool reserve")?;
         state.borrow_mut().set(pool_state).unwrap();
-    });
+        Ok::<(), String>(())
+    })?;
 
-    // Transfer to user
-    match transfer_to_user(caller, payout_u64).await {
-        Ok(_) => Ok(payout_u64),
+    // CRITICAL: Transfer to LP first
+    match transfer_to_user(caller, lp_amount).await {
+        Ok(_) => {
+            // LP got paid successfully ✅
+            
+            // BEST EFFORT: Try to pay parent
+            // Only attempt if fee > transfer cost, otherwise it stays in canister buffer
+            let net_fee = fee_amount.saturating_sub(TRANSFER_FEE);
+            
+            if net_fee > 0 {
+                match transfer_to_user(get_parent_principal(), net_fee).await {
+                    Ok(_) => {
+                        // Success! Fee sent to parent.
+                        ic_cdk::println!("LP withdrawal: {} got {} e8s, parent fee {} e8s", 
+                                       caller, lp_amount, fee_amount);
+                    }
+                    Err(e) => {
+                        // Failure. We do NOTHING.
+                        // The fee remains in the canister as a protocol buffer.
+                        // Reserve was already reduced, so Reserve < Balance. This is safe.
+                        ic_cdk::println!("Parent fee transfer failed: {}, {} e8s remains in canister buffer",
+                                       e, fee_amount);
+                    }
+                }
+            } else {
+                ic_cdk::println!("Fee {} e8s too small to transfer, remains in canister buffer", fee_amount);
+            }
+
+            Ok(lp_amount)
+        }
         Err(e) => {
-            // ROLLBACK on failure
+            // LP transfer failed - ROLLBACK EVERYTHING
+            
+            // 1. Restore shares
             LP_SHARES.with(|shares| {
                 shares.borrow_mut().insert(caller, StorableNat(user_shares));
             });
 
+            // 2. Restore reserve (add back FULL payout)
             POOL_STATE.with(|state| {
                 let mut pool_state = state.borrow().get().clone();
-                pool_state.reserve = nat_add(&new_reserve, &payout_nat);
+                pool_state.reserve = nat_add(&pool_state.reserve, &payout_nat);
                 state.borrow_mut().set(pool_state).unwrap();
             });
 
