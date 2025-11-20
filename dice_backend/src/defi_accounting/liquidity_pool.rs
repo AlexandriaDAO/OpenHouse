@@ -6,7 +6,7 @@ use std::borrow::Cow;
 use num_traits::ToPrimitive;
 use ic_ledger_types::MAINNET_LEDGER_CANISTER_ID;
 
-use super::{accounting, config, guard::OperationGuard};
+use super::accounting;
 
 // Constants
 
@@ -15,7 +15,12 @@ const MIN_DEPOSIT: u64 = 100_000_000; // 1 ICP minimum for all deposits
 const MIN_WITHDRAWAL: u64 = 100_000; // 0.001 ICP
 const MIN_OPERATING_BALANCE: u64 = 1_000_000_000; // 10 ICP to operate games
 const TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP
+const PARENT_STAKER_CANISTER: &str = "e454q-riaaa-aaaap-qqcyq-cai";
 const LP_WITHDRAWAL_FEE_BPS: u64 = 100; // 1%
+
+fn get_parent_principal() -> Principal {
+    Principal::from_text(PARENT_STAKER_CANISTER).expect("Invalid parent canister ID")
+}
 
 // Storable wrapper for Nat
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -267,7 +272,7 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
             
             if net_fee > 0 {
                  ic_cdk::spawn(async move {
-                    let _ = accounting::transfer_to_user(config::get_parent_canister(), net_fee).await;
+                    let _ = accounting::transfer_to_user(get_parent_principal(), net_fee).await;
                  });
             }
 
@@ -429,7 +434,7 @@ pub(crate) fn update_pool_on_loss(bet: u64) {
 }
 
 /// Restore LP position after failed withdrawal (called by accounting module)
-pub(crate) fn restore_lp_position(user: Principal, shares: Nat, reserve_amount: Nat) {
+pub fn restore_lp_position(user: Principal, shares: Nat, reserve_amount: Nat) {
     // Restore user's LP shares
     LP_SHARES.with(|shares_map| {
         shares_map.borrow_mut().insert(user, StorableNat(shares));

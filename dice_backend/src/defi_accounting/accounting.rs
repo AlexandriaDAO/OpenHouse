@@ -1,5 +1,5 @@
 use candid::{CandidType, Deserialize, Principal, Nat};
-use ic_cdk::{query, update};
+use ic_cdk::update;
 use ic_stable_structures::memory_manager::MemoryId;
 use ic_stable_structures::{StableBTreeMap, StableVec};
 use std::cell::RefCell;
