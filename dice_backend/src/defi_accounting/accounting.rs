@@ -12,7 +12,7 @@ use crate::types::{Account, TransferFromArgs, TransferFromError};
 use ic_cdk::api::call::RejectionCode;
 
 use crate::{MEMORY_MANAGER, Memory};
-use super::liquidity_pool;
+use super::{guard::OperationGuard, liquidity_pool};
 use super::types::{PendingWithdrawal, WithdrawalType, AuditEntry, AuditEvent};
 
 // Constants
@@ -46,6 +46,7 @@ thread_local! {
 
     static CACHED_CANISTER_BALANCE: RefCell<u64> = RefCell::new(0);
     static PROCESSING_WITHDRAWALS: RefCell<bool> = RefCell::new(false);
+    static RETRY_TIMER_ID: RefCell<Option<ic_cdk_timers::TimerId>> = RefCell::new(None);
 }
 
 #[derive(CandidType, Deserialize, Clone)]
@@ -70,9 +71,11 @@ fn log_audit(event: AuditEvent) {
     AUDIT_LOG.with(|log| {
         let entry = AuditEntry {
             timestamp: ic_cdk::api::time(),
-            event,
+            event: event.clone(),
         };
-        log.borrow_mut().push(&entry).ok(); // Ignore error if log is full
+        if let Err(_) = log.borrow_mut().push(&entry) {
+             ic_cdk::println!("⚠️ AUDIT LOG FULL! Failed to log event: {:?}", event);
+        }
     });
 }
 
@@ -91,6 +94,9 @@ fn calculate_total_deposits() -> u64 {
 
 #[update]
 pub async fn deposit(amount: u64) -> Result<u64, String> {
+    // Prevent concurrent operations from same caller
+    let _guard = OperationGuard::new()?;
+
     if amount < MIN_DEPOSIT {
         return Err(format!("Minimum deposit is {} ICP", MIN_DEPOSIT / 100_000_000));
     }
@@ -141,8 +147,11 @@ pub async fn withdraw(_amount: u64) -> Result<u64, String> {
 
 #[update]
 pub async fn withdraw_all() -> Result<u64, String> {
+    // Prevent concurrent operations from same caller
+    let _guard = OperationGuard::new()?;
+
     let caller = ic_cdk::caller();
-    
+
     // Check if already pending
     if PENDING_WITHDRAWALS.with(|p| p.borrow().contains_key(&caller)) {
         return Err("Withdrawal already pending".to_string());
@@ -293,10 +302,16 @@ fn update_pending_error(user: Principal, error: String) {
 // =============================================================================
 
 pub fn start_retry_timer() {
-    ic_cdk_timers::set_timer_interval(Duration::from_secs(300), || {
-        ic_cdk::spawn(async {
-            process_pending_withdrawals().await;
+    RETRY_TIMER_ID.with(|id| {
+        if id.borrow().is_some() {
+             return;
+        }
+        let timer_id = ic_cdk_timers::set_timer_interval(Duration::from_secs(300), || {
+            ic_cdk::spawn(async {
+                process_pending_withdrawals().await;
+            });
         });
+        *id.borrow_mut() = Some(timer_id);
     });
 }
 
@@ -431,6 +446,24 @@ pub fn get_audit_log(offset: usize, limit: usize) -> Vec<AuditEntry> {
             .take(limit)
             .collect()
     })
+}
+
+// Internal function needed by liquidity_pool.rs
+pub(crate) async fn transfer_to_user(user: Principal, amount: u64) -> Result<(), String> {
+    let args = TransferArgs {
+        memo: Memo(0),
+        amount: Tokens::from_e8s(amount - ICP_TRANSFER_FEE),
+        fee: Tokens::from_e8s(ICP_TRANSFER_FEE),
+        from_subaccount: None,
+        to: AccountIdentifier::new(&user, &DEFAULT_SUBACCOUNT),
+        created_at_time: None, // No idempotency for this internal helper yet? Should we?
+    };
+
+    match ic_ledger_types::transfer(MAINNET_LEDGER_CANISTER_ID, args).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(e)) => Err(format!("{:?}", e)),
+        Err((code, msg)) => Err(format!("{:?}: {}", code, msg)),
+    }
 }
 
 #[update]

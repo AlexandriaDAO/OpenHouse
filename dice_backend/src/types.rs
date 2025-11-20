@@ -144,7 +144,7 @@ pub struct DetailedGameHistory {
 #[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
 pub struct Account {
     pub owner: Principal,
-    pub subaccount: Option<Vec<u8>>,
+    pub subaccount: Option<[u8; 32]>,
 }
 
 impl From<Principal> for Account {
@@ -164,7 +164,7 @@ pub struct TransferFromArgs {
     pub fee: Option<candid::Nat>,
     pub memo: Option<Vec<u8>>,
     pub created_at_time: Option<u64>,
-    pub spender_subaccount: Option<Vec<u8>>,
+    pub spender_subaccount: Option<[u8; 32]>,
 }
 
 #[derive(CandidType, Deserialize, Serialize, Clone, Debug)]

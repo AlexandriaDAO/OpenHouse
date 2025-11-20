@@ -1,4 +1,6 @@
 pub mod accounting;
+pub mod config;
+pub mod guard;
 pub mod liquidity_pool;
 pub mod query;
 pub mod types;

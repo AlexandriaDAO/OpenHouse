@@ -19,11 +19,11 @@ pub enum WithdrawalType {
 
 impl Storable for PendingWithdrawal {
     fn to_bytes(&self) -> Cow<[u8]> {
-        Cow::Owned(candid::encode_one(self).unwrap())
+        Cow::Owned(candid::encode_one(self).expect("Failed to encode PendingWithdrawal"))
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        candid::decode_one(&bytes).unwrap()
+        candid::decode_one(&bytes).expect("Failed to decode PendingWithdrawal")
     }
 
     const BOUND: Bound = Bound::Bounded {
@@ -51,11 +51,11 @@ pub enum AuditEvent {
 
 impl Storable for AuditEntry {
     fn to_bytes(&self) -> Cow<[u8]> {
-        Cow::Owned(candid::encode_one(self).unwrap())
+        Cow::Owned(candid::encode_one(self).expect("Failed to encode AuditEntry"))
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        candid::decode_one(&bytes).unwrap()
+        candid::decode_one(&bytes).expect("Failed to decode AuditEntry")
     }
 
     const BOUND: Bound = Bound::Bounded {
