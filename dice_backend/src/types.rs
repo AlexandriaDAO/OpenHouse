@@ -136,3 +136,46 @@ pub struct DetailedGameHistory {
     pub expected_value: f64,  // e8s
     pub house_edge_actual: f64,  // percentage
 }
+
+// =============================================================================
+// ICRC-2 TYPES
+// =============================================================================
+
+#[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
+pub struct Account {
+    pub owner: Principal,
+    pub subaccount: Option<Vec<u8>>,
+}
+
+impl From<Principal> for Account {
+    fn from(owner: Principal) -> Self {
+        Self {
+            owner,
+            subaccount: None,
+        }
+    }
+}
+
+#[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
+pub struct TransferFromArgs {
+    pub from: Account,
+    pub to: Account,
+    pub amount: candid::Nat,
+    pub fee: Option<candid::Nat>,
+    pub memo: Option<Vec<u8>>,
+    pub created_at_time: Option<u64>,
+    pub spender_subaccount: Option<Vec<u8>>,
+}
+
+#[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
+pub enum TransferFromError {
+    BadFee { expected_fee: candid::Nat },
+    BadBurn { min_burn_amount: candid::Nat },
+    InsufficientFunds { balance: candid::Nat },
+    InsufficientAllowance { allowance: candid::Nat },
+    TooOld,
+    CreatedInFuture { ledger_time: u64 },
+    Duplicate { duplicate_of: candid::Nat },
+    TemporarilyUnavailable,
+    GenericError { error_code: candid::Nat, message: String },
+}

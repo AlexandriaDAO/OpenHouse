@@ -47,7 +47,8 @@ fn init() {
     // Initialize game state
     ic_cdk::println!("Dice Game Backend Initialized");
 
-    // NO TIMER INITIALIZATION - removed completely
+    // Start retry timer for pending withdrawals
+    defi_accounting::accounting::start_retry_timer();
 }
 
 #[pre_upgrade]
@@ -60,7 +61,8 @@ fn post_upgrade() {
     // Restore game state
     seed::restore_seed_state();
 
-    // NO TIMER INITIALIZATION - removed completely
+    // Start retry timer for pending withdrawals
+    defi_accounting::accounting::start_retry_timer();
     // Note: StableBTreeMap restores automatically, no accounting restore needed
 }
 
@@ -195,3 +197,12 @@ fn can_accept_bets() -> bool {
     defi_accounting::can_accept_bets()
 }
 
+#[query]
+fn get_withdrawal_status() -> Option<defi_accounting::types::PendingWithdrawal> {
+    defi_accounting::accounting::get_withdrawal_status()
+}
+
+#[query]
+fn get_audit_log(offset: usize, limit: usize) -> Vec<defi_accounting::types::AuditEntry> {
+    defi_accounting::accounting::get_audit_log(offset, limit)
+}

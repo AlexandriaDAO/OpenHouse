@@ -1,6 +1,7 @@
 pub mod accounting;
 pub mod liquidity_pool;
 pub mod query;
+pub mod types;
 
 // Re-export types and update functions from original modules
 pub use accounting::{
