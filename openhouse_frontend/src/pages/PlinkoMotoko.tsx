@@ -135,7 +135,7 @@ export const PlinkoMotoko: React.FC = () => {
       maxWin={6.52}
       houseEdge={1}
     >
-      <ConnectionStatus game="plinko-motoko" />
+      <ConnectionStatus game="mines" />
 
       {/* Badge showing this is Motoko version */}
       <div className="text-center mb-4">
