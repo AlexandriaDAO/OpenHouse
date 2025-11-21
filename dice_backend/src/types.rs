@@ -40,6 +40,10 @@ impl Storable for RandomnessSeed {
         Cow::Owned(serde_json::to_vec(self).unwrap())
     }
 
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
+    }
+
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
         serde_json::from_slice(&bytes).unwrap()
     }
@@ -62,6 +66,10 @@ pub struct SeedRotationRecord {
 impl Storable for SeedRotationRecord {
     fn to_bytes(&self) -> Cow<[u8]> {
         Cow::Owned(serde_json::to_vec(self).unwrap())
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
@@ -101,6 +109,10 @@ pub struct DiceResult {
 impl Storable for DiceResult {
     fn to_bytes(&self) -> Cow<[u8]> {
         Cow::Owned(serde_json::to_vec(self).unwrap())
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Self {

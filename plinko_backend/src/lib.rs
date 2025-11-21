@@ -21,7 +21,7 @@
 
 use candid::{CandidType, Deserialize};
 use ic_cdk::{init, pre_upgrade, post_upgrade, query, update};
-use ic_cdk::api::management_canister::main::raw_rand;
+use ic_cdk::management_canister::raw_rand;
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct PlinkoResult {
@@ -67,7 +67,7 @@ async fn drop_ball() -> Result<PlinkoResult, String> {
     // Get randomness - fail safely if unavailable
     let random_bytes = raw_rand().await
         .map_err(|e| format!("Randomness unavailable: {:?}", e))?
-        .0;
+;
 
     // For 8 rows, use single byte (efficient)
     let random_byte = random_bytes.get(0)
@@ -108,7 +108,7 @@ async fn drop_balls(num_balls: u8) -> Result<MultiBallResult, String> {
     // Get random bytes for all balls (single VRF call)
     let random_bytes = raw_rand().await
         .map_err(|e| format!("Randomness unavailable: {:?}", e))?
-        .0;
+;
 
     // Ensure we have enough bytes
     if random_bytes.len() < num_balls as usize {

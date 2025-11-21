@@ -268,7 +268,7 @@ pub fn get_recent_games(limit: u32) -> Vec<DiceResult> {
             .iter()
             .rev()
             .take(limit as usize)
-            .map(|(_, game)| game)
+            .map(|entry| entry.value().clone())
             .collect()
     })
 }

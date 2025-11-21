@@ -166,6 +166,10 @@ impl Storable for MinesGame {
         Cow::Owned(serde_json::to_vec(self).unwrap())
     }
 
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
+    }
+
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
         serde_json::from_slice(&bytes).unwrap()
     }
@@ -177,6 +181,10 @@ impl Storable for MinesGame {
 impl Storable for GameStats {
     fn to_bytes(&self) -> Cow<[u8]> {
         Cow::Owned(serde_json::to_vec(self).unwrap())
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
@@ -193,6 +201,10 @@ impl Storable for GameStats {
 impl Storable for Bankroll {
     fn to_bytes(&self) -> Cow<[u8]> {
         Cow::Owned(serde_json::to_vec(self).unwrap())
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
@@ -212,6 +224,10 @@ struct GameId(u64);
 impl Storable for GameId {
     fn to_bytes(&self) -> Cow<[u8]> {
         Cow::Owned(self.0.to_be_bytes().to_vec())
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
@@ -239,21 +255,21 @@ thread_local! {
         StableCell::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(1))),
             GameStats::default()
-        ).expect("Failed to initialize STATS")
+        )
     );
 
     static NEXT_ID: RefCell<StableCell<GameId, Memory>> = RefCell::new(
         StableCell::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(2))),
             GameId(0)
-        ).expect("Failed to initialize NEXT_ID")
+        )
     );
 
     static BANKROLL: RefCell<StableCell<Bankroll, Memory>> = RefCell::new(
         StableCell::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(3))),
             Bankroll::default()
-        ).expect("Failed to initialize BANKROLL")
+        )
     );
 }
 
@@ -375,7 +391,7 @@ async fn start_game(bet_amount: u64) -> Result<u64, String> {
         games
             .borrow()
             .iter()
-            .filter(|(_, game)| game.player == caller && game.is_active)
+            .filter(|entry| entry.value().player == caller && entry.value().is_active)
             .count()
     });
 
@@ -414,9 +430,7 @@ async fn start_game(bet_amount: u64) -> Result<u64, String> {
     let game_id = NEXT_ID.with(|id| {
         let mut id_cell = id.borrow_mut();
         let current = id_cell.get().clone();
-        id_cell
-            .set(GameId(current.0 + 1))
-            .expect("Failed to increment NEXT_ID");
+        id_cell.set(GameId(current.0 + 1));
         current.0
     });
 
@@ -428,16 +442,14 @@ async fn start_game(bet_amount: u64) -> Result<u64, String> {
         let mut current = br.get().clone();
         current.total_wagered += bet_amount;
         current.balance += bet_amount;
-        br.set(current).expect("Failed to update bankroll");
+        br.set(current);
     });
 
     STATS.with(|stats| {
         let mut stats_cell = stats.borrow_mut();
         let mut current_stats = stats_cell.get().clone();
         current_stats.total_games += 1;
-        stats_cell
-            .set(current_stats)
-            .expect("Failed to update stats");
+        stats_cell.set(current_stats);
     });
 
     Ok(game_id)
@@ -467,9 +479,7 @@ fn reveal_tile(game_id: u64, position: u8) -> Result<RevealResult, String> {
             let mut stats_cell = stats.borrow_mut();
             let mut current_stats = stats_cell.get().clone();
             current_stats.total_busted += 1;
-            stats_cell
-                .set(current_stats)
-                .expect("Failed to update stats");
+            stats_cell.set(current_stats);
         });
 
         // Update bankroll (house keeps the bet)
@@ -477,7 +487,7 @@ fn reveal_tile(game_id: u64, position: u8) -> Result<RevealResult, String> {
             let mut br = bankroll.borrow_mut();
             let mut current = br.get().clone();
             current.house_profit += bet_amount as i64;
-            br.set(current).expect("Failed to update bankroll");
+            br.set(current);
         });
 
         Ok(RevealResult {
@@ -552,9 +562,7 @@ async fn cash_out(game_id: u64) -> Result<u64, String> {
         let mut stats_cell = stats.borrow_mut();
         let mut current_stats = stats_cell.get().clone();
         current_stats.total_completed += 1;
-        stats_cell
-            .set(current_stats)
-            .expect("Failed to update stats");
+        stats_cell.set(current_stats);
     });
 
     BANKROLL.with(|bankroll| {
@@ -564,7 +572,7 @@ async fn cash_out(game_id: u64) -> Result<u64, String> {
         current.balance = current.balance.saturating_sub(capped_payout);
         current.house_profit =
             (current.total_wagered as i64) - (current.total_paid_out as i64);
-        br.set(current).expect("Failed to update bankroll");
+        br.set(current);
     });
 
     Ok(capped_payout)
@@ -602,13 +610,13 @@ fn get_recent_games(limit: u32) -> Vec<GameSummary> {
             .borrow()
             .iter()
             .rev()
-            .filter(|(_, game)| game.player == caller)
+            .filter(|entry| entry.value().player == caller)
             .take(limit as usize)
-            .map(|(id, game)| GameSummary {
-                game_id: id,
-                num_mines: game.num_mines,
-                is_active: game.is_active,
-                timestamp: game.timestamp,
+            .map(|entry| GameSummary {
+                game_id: entry.key().clone(),
+                num_mines: entry.value().num_mines,
+                is_active: entry.value().is_active,
+                timestamp: entry.value().timestamp,
             })
             .collect()
     })
@@ -637,7 +645,7 @@ async fn deposit_to_bankroll(amount: u64) -> Result<(), String> {
         let mut br = bankroll.borrow_mut();
         let mut current = br.get().clone();
         current.balance += amount;
-        br.set(current).expect("Failed to update bankroll");
+        br.set(current);
     });
 
     Ok(())

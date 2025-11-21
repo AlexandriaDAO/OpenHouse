@@ -13,7 +13,8 @@ pub fn get_detailed_history(limit: u32) -> Vec<DetailedGameHistory> {
             .iter()
             .rev()
             .take(limit as usize)
-            .map(|(game_id, game)| {
+            .map(|entry| {
+                let (game_id, game) = (entry.key().clone(), entry.value().clone());
                 DetailedGameHistory {
                     game_id,
                     player: game.player.to_text(),

@@ -1,5 +1,5 @@
 use crate::types::{RandomnessSeed, SeedRotationRecord, MAX_NUMBER};
-use ic_cdk::api::management_canister::main::raw_rand;
+use ic_cdk::management_canister::raw_rand;
 use ic_stable_structures::memory_manager::MemoryId;
 use ic_stable_structures::{StableBTreeMap, StableCell};
 use sha2::{Digest, Sha256};
@@ -28,7 +28,7 @@ thread_local! {
         StableCell::init(
             crate::MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(1))),
             RandomnessSeed::default()
-        ).unwrap()
+        )
     );
 
     // Memory ID 2
@@ -36,7 +36,7 @@ thread_local! {
         StableCell::init(
             crate::MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(2))),
             0u64
-        ).unwrap()
+        )
     );
 
     static ROTATION_HISTORY: RefCell<StableBTreeMap<u64, SeedRotationRecord, Memory>> = RefCell::new(
@@ -75,7 +75,7 @@ pub async fn initialize_seed() {
     }
 
     let random_bytes = match raw_rand().await {
-        Ok((bytes,)) => bytes,
+        Ok(bytes) => bytes,
         Err(_) => {
             // Improved fallback: combine timestamp with caller principal
             let time = ic_cdk::api::time();
@@ -107,12 +107,12 @@ pub async fn initialize_seed() {
 
     // Persist to stable cell
     SEED_CELL.with(|cell| {
-        cell.borrow_mut().set(new_seed).expect("Failed to save seed to stable cell");
+        cell.borrow_mut().set(new_seed);
     });
 
     // Update last rotation timestamp
     LAST_ROTATION_CELL.with(|cell| {
-        cell.borrow_mut().set(now).expect("Failed to save rotation time");
+        cell.borrow_mut().set(now);
     });
 
     // Release lock
@@ -249,7 +249,7 @@ pub async fn rotate_seed_async() {
     }
 
     // Get new VRF seed
-    if let Ok((random_bytes,)) = raw_rand().await {
+    if let Ok(random_bytes) = raw_rand().await {
         let mut hasher = Sha256::new();
         hasher.update(&random_bytes);
         let seed_array: [u8; 32] = hasher.finalize()[0..32].try_into().unwrap();
@@ -333,7 +333,7 @@ pub fn get_rotation_history(limit: u32) -> Vec<(u64, SeedRotationRecord)> {
             .iter()
             .rev()
             .take(limit as usize)
-            .map(|(id, record)| (id, record))
+            .map(|entry| (entry.key().clone(), entry.value().clone()))
             .collect()
     })
 }

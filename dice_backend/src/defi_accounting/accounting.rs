@@ -46,7 +46,7 @@ thread_local! {
     static AUDIT_LOG: RefCell<StableVec<AuditEntry, Memory>> = RefCell::new(
         StableVec::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(AUDIT_LOG_MEMORY_ID)))
-        ).expect("Failed to init audit log")
+        )
     );
 
     static CACHED_CANISTER_BALANCE: RefCell<u64> = RefCell::new(0);
@@ -78,9 +78,7 @@ fn log_audit(event: AuditEvent) {
             timestamp: ic_cdk::api::time(),
             event: event.clone(),
         };
-        if let Err(_) = log.borrow_mut().push(&entry) {
-             ic_cdk::println!("⚠️ AUDIT LOG FULL! Failed to log event: {:?}", event);
-        }
+        log.borrow_mut().push(&entry);
     });
 }
 
@@ -88,7 +86,7 @@ fn calculate_total_deposits() -> u64 {
     USER_BALANCES_STABLE.with(|balances| {
         balances.borrow()
             .iter()
-            .map(|(_, balance)| balance)
+            .map(|entry| entry.value().clone())
             .sum()
     })
 }
@@ -256,21 +254,15 @@ async fn attempt_transfer(user: Principal, amount: u64, created_at: u64) -> Tran
         created_at_time: Some(Timestamp { timestamp_nanos: created_at }),
     };
 
-    match ic_ledger_types::transfer(MAINNET_LEDGER_CANISTER_ID, args).await {
+    match ic_ledger_types::transfer(MAINNET_LEDGER_CANISTER_ID, &args).await {
         Ok(Ok(block)) => TransferResult::Success(block),
         Ok(Err(e)) => {
              // ic_ledger_types::TransferError
              TransferResult::DefiniteError(format!("{:?}", e))
         }
-        Err((code, msg)) => {
-            match code {
-                RejectionCode::SysTransient | RejectionCode::Unknown => {
-                    TransferResult::UncertainError(code, msg)
-                }
-                _ => {
-                    TransferResult::DefiniteError(format!("{:?}: {}", code, msg))
-                }
-            }
+        Err(e) => {
+            // In newer ic-ledger-types, we get a single Error type
+            TransferResult::DefiniteError(format!("{:?}", e))
         }
     }
 }
@@ -318,10 +310,8 @@ pub fn start_retry_timer() {
         if id.borrow().is_some() {
              return;
         }
-        let timer_id = ic_cdk_timers::set_timer_interval(Duration::from_secs(300), || {
-            ic_cdk::spawn(async {
-                process_pending_withdrawals().await;
-            });
+        let timer_id = ic_cdk_timers::set_timer_interval(Duration::from_secs(300), || async {
+            process_pending_withdrawals().await;
         });
         *id.borrow_mut() = Some(timer_id);
     });
@@ -334,7 +324,7 @@ async fn process_pending_withdrawals() {
     PROCESSING_WITHDRAWALS.with(|p| *p.borrow_mut() = true);
 
     let pending_users: Vec<Principal> = PENDING_WITHDRAWALS.with(|p| {
-        p.borrow().iter().take(50).map(|(k, _)| k).collect()
+        p.borrow().iter().take(50).map(|entry| entry.key().clone()).collect()
     });
 
     for user in pending_users {
@@ -471,10 +461,10 @@ pub(crate) async fn transfer_to_user(user: Principal, amount: u64) -> Result<(),
         created_at_time: None, // No idempotency for this internal helper yet? Should we?
     };
 
-    match ic_ledger_types::transfer(MAINNET_LEDGER_CANISTER_ID, args).await {
+    match ic_ledger_types::transfer(MAINNET_LEDGER_CANISTER_ID, &args).await {
         Ok(Ok(_)) => Ok(()),
         Ok(Err(e)) => Err(format!("{:?}", e)),
-        Err((code, msg)) => Err(format!("{:?}: {}", code, msg)),
+        Err(e) => Err(format!("{:?}", e)),
     }
 }
 

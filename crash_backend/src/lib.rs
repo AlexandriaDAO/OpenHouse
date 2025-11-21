@@ -20,7 +20,7 @@
 
 use candid::{CandidType, Deserialize};
 use ic_cdk::{init, pre_upgrade, post_upgrade, query, update};
-use ic_cdk::api::management_canister::main::raw_rand;
+use ic_cdk::management_canister::raw_rand;
 
 // Constants
 const MAX_CRASH: f64 = 100.0;  // Cap crash at 100x
@@ -67,7 +67,7 @@ async fn simulate_crash() -> Result<CrashResult, String> {
     // Get randomness from IC's threshold randomness beacon (raw_rand)
     let random_bytes = raw_rand().await
         .map_err(|e| format!("Randomness unavailable: {:?}", e))?
-        .0;
+;
 
     // Convert first 8 bytes to f64 in range [0.0, 1.0)
     let random = bytes_to_float(&random_bytes)?;
@@ -104,7 +104,7 @@ async fn play_crash(target_multiplier: f64) -> Result<PlayCrashResult, String> {
     // Get randomness from IC VRF
     let random_bytes = raw_rand().await
         .map_err(|e| format!("Randomness unavailable: {:?}", e))?
-        .0;
+;
 
     // Convert to float and calculate crash point
     let random = bytes_to_float(&random_bytes)?;

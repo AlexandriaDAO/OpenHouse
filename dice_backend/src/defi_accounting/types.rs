@@ -28,6 +28,10 @@ impl Storable for PendingWithdrawal {
         )
     }
 
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
+    }
+
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
         candid::decode_one(&bytes).expect(
             "CRITICAL: Failed to decode PendingWithdrawal from stable storage. \
@@ -68,6 +72,10 @@ impl Storable for AuditEntry {
                  Audit logging is failing - system integrity may be compromised."
             )
         )
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Self {

@@ -35,12 +35,16 @@ impl Storable for StorableNat {
         Cow::Owned(result)
     }
 
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
+    }
+
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        if bytes.len() < 4 { 
+        if bytes.len() < 4 {
             panic!("StorableNat: Invalid byte length < 4");
         }
         let len = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
-        if bytes.len() < 4 + len { 
+        if bytes.len() < 4 + len {
             panic!("StorableNat: Invalid byte length, expected {} but got {}", 4 + len, bytes.len());
         }
         let bigint_bytes = &bytes[4..4+len];
@@ -62,6 +66,10 @@ impl Storable for PoolState {
     fn to_bytes(&self) -> Cow<[u8]> {
         let serialized = serde_json::to_vec(self).unwrap();
         Cow::Owned(serialized)
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
@@ -92,7 +100,7 @@ thread_local! {
                 reserve: Nat::from(0u64),
                 initialized: false,
             }
-        ).expect("Failed to init pool state"))
+        ))
     };
 }
 
@@ -178,7 +186,7 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
     POOL_STATE.with(|state| {
         let mut pool_state = state.borrow().get().clone();
         pool_state.reserve += amount_nat;
-        state.borrow_mut().set(pool_state).unwrap();
+        state.borrow_mut().set(pool_state);
     });
 
     Ok(shares_to_mint)
@@ -258,7 +266,7 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
              return Err("Insufficient pool reserve".to_string());
         }
         pool_state.reserve -= payout_nat.clone();
-        state.borrow_mut().set(pool_state).unwrap();
+        state.borrow_mut().set(pool_state);
         Ok::<(), String>(())
     })?;
 
@@ -290,7 +298,7 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
             POOL_STATE.with(|state| {
                 let mut pool_state = state.borrow().get().clone();
                 pool_state.reserve += payout_nat;
-                state.borrow_mut().set(pool_state).unwrap();
+                state.borrow_mut().set(pool_state);
             });
 
             Err(format!("Transfer failed: {}. State rolled back.", e))
@@ -358,7 +366,7 @@ pub(crate) fn get_pool_stats_internal() -> PoolStats {
     // Count LPs (excluding burned shares)
     let total_lps = LP_SHARES.with(|shares| {
         shares.borrow().iter()
-            .filter(|(p, amt)| *p != Principal::anonymous() && amt.0 != Nat::from(0u64))
+            .filter(|entry| entry.key() != &Principal::anonymous() && entry.value().0 != Nat::from(0u64))
             .count() as u64
     });
 
@@ -382,7 +390,7 @@ fn calculate_total_supply() -> Nat {
     LP_SHARES.with(|shares| {
         shares.borrow()
             .iter()
-            .map(|(_, amt)| amt.0.clone())
+            .map(|entry| entry.value().0.clone())
             .fold(Nat::from(0u64), |acc, amt| acc + amt)
     })
 }
@@ -420,7 +428,7 @@ pub(crate) fn update_pool_on_win(payout: u64) {
             ));
         }
         pool_state.reserve -= payout_nat;
-        state.borrow_mut().set(pool_state).unwrap();
+        state.borrow_mut().set(pool_state);
     });
 }
 
@@ -429,7 +437,7 @@ pub(crate) fn update_pool_on_loss(bet: u64) {
     POOL_STATE.with(|state| {
         let mut pool_state = state.borrow().get().clone();
         pool_state.reserve += Nat::from(bet);
-        state.borrow_mut().set(pool_state).unwrap();
+        state.borrow_mut().set(pool_state);
     });
 }
 
@@ -444,7 +452,7 @@ pub fn restore_lp_position(user: Principal, shares: Nat, reserve_amount: Nat) {
     POOL_STATE.with(|state| {
         let mut pool_state = state.borrow().get().clone();
         pool_state.reserve += reserve_amount;
-        state.borrow_mut().set(pool_state).unwrap();
+        state.borrow_mut().set(pool_state);
     });
 
     ic_cdk::println!("LP position restored for user: {}", user);
