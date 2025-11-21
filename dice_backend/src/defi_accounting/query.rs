@@ -41,12 +41,10 @@ pub fn audit_balances() -> Result<String, String> {
 // LIQUIDITY POOL QUERIES
 // =============================================================================
 
-#[query]
 pub fn get_lp_position(user: Principal) -> LPPosition {
     liquidity_pool::get_lp_position_internal(user)
 }
 
-#[query]
 pub fn get_pool_stats() -> PoolStats {
     liquidity_pool::get_pool_stats_internal()
 }

@@ -271,7 +271,9 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
             let net_fee = fee_amount.saturating_sub(TRANSFER_FEE);
             
             if net_fee > 0 {
-                let _ = transfer_to_user(get_parent_principal(), net_fee).await;
+                 ic_cdk::spawn(async move {
+                    let _ = accounting::transfer_to_user(get_parent_principal(), net_fee).await;
+                 });
             }
 
             Ok(lp_amount)
@@ -431,13 +433,30 @@ pub(crate) fn update_pool_on_loss(bet: u64) {
     });
 }
 
+/// Restore LP position after failed withdrawal (called by accounting module)
+pub fn restore_lp_position(user: Principal, shares: Nat, reserve_amount: Nat) {
+    // Restore user's LP shares
+    LP_SHARES.with(|shares_map| {
+        shares_map.borrow_mut().insert(user, StorableNat(shares));
+    });
+
+    // Restore pool reserve
+    POOL_STATE.with(|state| {
+        let mut pool_state = state.borrow().get().clone();
+        pool_state.reserve += reserve_amount;
+        state.borrow_mut().set(pool_state).unwrap();
+    });
+
+    ic_cdk::println!("LP position restored for user: {}", user);
+}
+
 // Transfer helpers (using existing accounting module)
 
 // ICRC-2 types not in ic_ledger_types
 #[derive(CandidType, Deserialize)]
 struct Account {
     owner: Principal,
-    subaccount: Option<Vec<u8>>,
+    subaccount: Option<[u8; 32]>,
 }
 
 #[derive(CandidType, Deserialize)]
@@ -448,7 +467,7 @@ struct TransferFromArgs {
     fee: Option<Nat>,
     memo: Option<Vec<u8>>,
     created_at_time: Option<u64>,
-    spender_subaccount: Option<Vec<u8>>,
+    spender_subaccount: Option<[u8; 32]>,
 }
 
 #[derive(CandidType, Deserialize, Debug)]
