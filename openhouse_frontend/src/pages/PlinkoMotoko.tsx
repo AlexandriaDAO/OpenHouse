@@ -67,9 +67,11 @@ export const PlinkoMotoko: React.FC = () => {
     try {
       // Use multi-ball method for all drops
       const result = await (actor as any).drop_balls(ballCount);
+      console.log('Drop balls result:', result);
 
-      if ('Ok' in result) {
-        const multiResult = result.Ok;
+      if ('ok' in result) {
+        const multiResult = result.ok;
+        console.log('Multi result:', multiResult);
         setCurrentMultiResult(multiResult);
 
         // For single ball, also set currentResult for backward compatibility
@@ -94,8 +96,12 @@ export const PlinkoMotoko: React.FC = () => {
           };
           setHistory(prev => [aggregateResult, ...prev.slice(0, 19)]);
         }
+      } else if ('err' in result) {
+        setGameError(result.err);
+        setIsPlaying(false);
       } else {
-        setGameError(result.Err);
+        console.error('Unexpected result format:', result);
+        setGameError('Unexpected result format');
         setIsPlaying(false);
       }
     } catch (err) {
