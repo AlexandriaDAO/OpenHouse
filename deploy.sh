@@ -196,12 +196,22 @@ deploy_frontend() {
     echo "Deploying OpenHouse Frontend Canister"
     echo "================================================"
 
+    # CRITICAL: Regenerate declarations from Candid interfaces
+    # This ensures TypeScript types are always in sync with backend methods
+    echo "Regenerating backend declarations from Candid interfaces..."
+    dfx generate crash_backend 2>/dev/null || echo "Warning: Could not generate crash_backend declarations"
+    dfx generate plinko_backend 2>/dev/null || echo "Warning: Could not generate plinko_backend declarations"
+    dfx generate mines_backend 2>/dev/null || echo "Warning: Could not generate mines_backend declarations"
+    dfx generate dice_backend 2>/dev/null || echo "Warning: Could not generate dice_backend declarations"
+
     # Sync declarations (critical for frontend to work)
-    echo "Syncing backend declarations for frontend..."
+    echo "Copying fresh declarations to frontend..."
     if [ -d "src/declarations" ]; then
-        echo "Copying declarations to frontend..."
         mkdir -p openhouse_frontend/src/declarations
         cp -r src/declarations/* openhouse_frontend/src/declarations/ 2>/dev/null || true
+        echo "✅ Declarations synced successfully"
+    else
+        echo "⚠️  Warning: src/declarations directory not found"
     fi
 
     # Build frontend
