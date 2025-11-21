@@ -12,7 +12,7 @@ use crate::types::{Account, TransferFromArgs, TransferFromError};
 use ic_cdk::api::call::RejectionCode;
 
 use crate::{MEMORY_MANAGER, Memory};
-use super::{guard::OperationGuard, liquidity_pool};
+use super::liquidity_pool;
 use super::types::{PendingWithdrawal, WithdrawalType, AuditEntry, AuditEvent};
 
 // Constants
@@ -99,9 +99,6 @@ fn calculate_total_deposits() -> u64 {
 
 #[update]
 pub async fn deposit(amount: u64) -> Result<u64, String> {
-    // Prevent concurrent operations from same caller
-    let _guard = OperationGuard::new()?;
-
     if amount < MIN_DEPOSIT {
         return Err(format!("Minimum deposit is {} ICP", MIN_DEPOSIT / 100_000_000));
     }
@@ -159,12 +156,9 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
 
 #[update]
 pub async fn withdraw_all() -> Result<u64, String> {
-    // Prevent concurrent operations from same caller
-    let _guard = OperationGuard::new()?;
-
     let caller = ic_cdk::caller();
 
-    // Check if already pending
+    // Check if already pending (prevents concurrent withdrawals)
     if PENDING_WITHDRAWALS.with(|p| p.borrow().contains_key(&caller)) {
         return Err("Withdrawal already pending".to_string());
     }
