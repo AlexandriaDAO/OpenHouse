@@ -88,11 +88,15 @@ export const Dice: React.FC = () => {
       try {
         const directionVariant = direction === 'Over' ? { Over: null } : { Under: null };
 
+        // Declare mult in outer scope so it's accessible throughout the try block
+        let mult = 0;
+
         // Get payout info (existing)
         const result = await actor.calculate_payout_info(targetNumber, directionVariant);
 
         if ('Ok' in result) {
-          const [chance, mult] = result.Ok;
+          const [chance, multiplier] = result.Ok;
+          mult = multiplier; // Assign to outer scope variable
           setWinChance(chance * 100);
           setMultiplier(mult);
         } else if ('Err' in result) {
@@ -105,6 +109,7 @@ export const Dice: React.FC = () => {
           const maxPayoutICP = Number(maxPayoutE8s) / E8S_PER_ICP;
 
           // Calculate max bet: max_allowed_payout / multiplier
+          // Now 'mult' is defined and accessible here
           const maxBetICP = mult > 0 ? maxPayoutICP / mult : 0;
           setMaxBet(maxBetICP);
 
