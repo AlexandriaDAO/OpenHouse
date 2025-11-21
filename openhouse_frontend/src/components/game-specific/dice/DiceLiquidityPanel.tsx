@@ -67,6 +67,9 @@ export const DiceLiquidityPanel: React.FC = () => {
     setSuccess(null);
 
     try {
+      // ICRC-2 standard transfer fee
+      const TRANSFER_FEE = 10_000; // 0.0001 ICP
+
       const amountE8s = BigInt(Math.floor(parseFloat(depositAmount) * 100_000_000));
 
       // Validate
@@ -78,13 +81,18 @@ export const DiceLiquidityPanel: React.FC = () => {
 
       // CRITICAL: ICRC-2 Approval Flow
       // Step 1: Approve dice_backend to spend funds
+      // The backend's icrc2_transfer_from needs allowance for BOTH amount AND fee
       const diceBackendPrincipal = Principal.fromText('whchi-hyaaa-aaaao-a4ruq-cai');
+
+      // Approve amount + fee (not just amount)
+      const approvalAmount = amountE8s + BigInt(TRANSFER_FEE);
+
       const approveArgs = {
         spender: {
           owner: diceBackendPrincipal,
           subaccount: [],
         },
-        amount: amountE8s,
+        amount: approvalAmount,
         fee: [],
         memo: [],
         from_subaccount: [],
