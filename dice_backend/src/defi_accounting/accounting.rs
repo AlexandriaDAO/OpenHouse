@@ -24,6 +24,8 @@ const PENDING_WITHDRAWALS_MEMORY_ID: u8 = 20;
 const AUDIT_LOG_MEMORY_ID: u8 = 21;
 const MAX_PAYOUT_PERCENTAGE: f64 = 0.10;
 const MAX_RETRIES: u8 = 10;
+/// Minimum balance before triggering automatic weekly withdrawal to parent canister.
+/// Set to 1 ICP to minimize gas costs while ensuring timely fee collection.
 const PARENT_AUTO_WITHDRAW_THRESHOLD: u64 = 100_000_000; // 1 ICP
 
 thread_local! {
@@ -339,12 +341,26 @@ pub fn start_parent_withdrawal_timer() {
 
 async fn auto_withdraw_parent() {
      let parent = crate::defi_accounting::liquidity_pool::get_parent_principal();
+     
+     // SAFETY: TOCTOU race is acceptable here because withdraw_internal()
+     // performs its own balance checks atomically. Worst case is the timer
+     // attempts a withdrawal that immediately fails with "Withdrawal already pending"
+     // or "No balance to withdraw", which is harmless.
      let balance = get_balance_internal(parent);
+     
      if balance > PARENT_AUTO_WITHDRAW_THRESHOLD {
          // Use withdraw_internal directly
          match withdraw_internal(parent).await {
-             Ok(amount) => ic_cdk::println!("Auto-withdraw success: {} e8s to parent", amount),
-             Err(e) => ic_cdk::println!("Auto-withdraw skipped: {}", e),
+             Ok(amount) => {
+                 ic_cdk::println!("Auto-withdraw success: {} e8s to parent", amount);
+                 // Note: Successful withdrawal already logs WithdrawalCompleted audit event in withdraw_internal
+             },
+             Err(e) => {
+                 ic_cdk::println!("Auto-withdraw skipped: {}", e);
+                 log_audit(AuditEvent::SystemError {
+                     error: format!("Auto-withdraw failed: {}", e)
+                 });
+             },
          }
      }
 }
