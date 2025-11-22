@@ -52,6 +52,7 @@ thread_local! {
     static CACHED_CANISTER_BALANCE: RefCell<u64> = RefCell::new(0);
     static PROCESSING_WITHDRAWALS: RefCell<bool> = RefCell::new(false);
     static RETRY_TIMER_ID: RefCell<Option<ic_cdk_timers::TimerId>> = RefCell::new(None);
+    static PARENT_TIMER: RefCell<Option<ic_cdk_timers::TimerId>> = RefCell::new(None);
 }
 
 #[derive(CandidType, Deserialize, Clone)]
@@ -317,6 +318,18 @@ pub fn start_retry_timer() {
             process_pending_withdrawals().await;
         });
         *id.borrow_mut() = Some(timer_id);
+    });
+}
+
+pub fn start_parent_withdrawal_timer() {
+    PARENT_TIMER.with(|t| {
+        if t.borrow().is_some() { return; }
+        
+        // Run every 7 days (604,800 seconds)
+        let timer_id = ic_cdk_timers::set_timer_interval(Duration::from_secs(604_800), || async {
+             crate::defi_accounting::liquidity_pool::auto_withdraw_parent().await;
+        });
+        *t.borrow_mut() = Some(timer_id);
     });
 }
 

@@ -194,29 +194,44 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
     Ok(shares_to_mint)
 }
 
-// Internal function for withdrawing liquidity (called by withdraw_all_liquidity)
+// Internal function for withdrawing liquidity (implements Share Inheritance)
 // 
-// # Fire and Forget Accounting
-// This function implements the simplest possible fee mechanism:
-// 1. Deduct the FULL payout (LP share + Fee) from the Reserve immediately.
-// 2. Transfer the LP's share (Critical). If this fails, rollback everything.
-// 3. Transfer the Fee (Best Effort). If this fails, we DO NOT rollback.
-//    The fee remains in the canister as a protocol buffer.
-//    This ensures the Reserve is always solvent (Reserve <= Balance).
-async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
-    let caller = ic_cdk::caller();
-
-    // Validate shares
-    if shares_to_burn == Nat::from(0u64) {
+// # Share Inheritance Accounting
+// Instead of paying fees in ICP (which depletes the pool and risks "ghost funds"),
+// we pay fees in LP Shares.
+// 1. 1% of the User's Shares are transferred to the Parent Canister.
+// 2. The remaining 99% are burned.
+// 3. The User receives the ICP value of the burned shares.
+// 4. The Parent Canister now owns shares and participates in House Risk/Reward.
+async fn withdraw_liquidity_internal(
+    user: Principal, 
+    shares_total: Nat, 
+    apply_fee: bool
+) -> Result<u64, String> {
+    // Validate
+    if shares_total == Nat::from(0u64) {
         return Err("Cannot withdraw zero shares".to_string());
     }
 
-    let user_shares = LP_SHARES.with(|s| s.borrow().get(&caller).map(|sn| sn.0.clone()).unwrap_or(Nat::from(0u64)));
-    if user_shares < shares_to_burn {
-        return Err("Insufficient shares".to_string());
+    // 1. Calculate Split
+    let (shares_fee, shares_burn) = if apply_fee {
+        let fee = shares_total.clone() / 100u64; // 1%
+        (fee.clone(), shares_total.clone() - fee)
+    } else {
+        (Nat::from(0u64), shares_total.clone())
+    };
+
+    // 2. Inherit Fee Shares (Atomic)
+    if shares_fee > Nat::from(0u64) {
+        let parent = get_parent_principal();
+        LP_SHARES.with(|s| {
+             let mut map = s.borrow_mut();
+             let current = map.get(&parent).map(|sn| sn.0.clone()).unwrap_or(Nat::from(0u64));
+             map.insert(parent, StorableNat(current + shares_fee.clone()));
+        });
     }
 
-    // Calculate payout
+    // 3. Calculate Payout (on shares_burn ONLY)
     let payout_nat = POOL_STATE.with(|state| {
         let pool_state = state.borrow().get().clone();
         let current_reserve = pool_state.reserve.clone();
@@ -226,10 +241,10 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
             return Err("No shares in circulation".to_string());
         }
 
-        // payout = (shares_to_burn * current_reserve) / total_shares
-        // payout = (shares_to_burn * current_reserve) / total_shares
-        let numerator = shares_to_burn.clone() * current_reserve.clone();
-        // SAFETY: total_shares checked for zero above (line 207)
+        // payout = (shares_burn * current_reserve) / total_shares
+        // NOTE: total_shares currently INCLUDES the fee shares we just moved to parent.
+        // This is correct. The fee shares are still in circulation.
+        let numerator = shares_burn.clone() * current_reserve.clone();
         let payout = numerator / total_shares;
 
         // Check reserve sufficiency (read-only check)
@@ -243,64 +258,67 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     // Check minimum withdrawal
     let payout_u64 = payout_nat.0.to_u64().ok_or("Payout too large")?;
     if payout_u64 < MIN_WITHDRAWAL {
+        // ROLLBACK FEE ONLY (optimization)
+        if shares_fee > Nat::from(0u64) {
+            let parent = get_parent_principal();
+            LP_SHARES.with(|s| {
+                 let mut map = s.borrow_mut();
+                 let current = map.get(&parent).map(|sn| sn.0.clone()).unwrap_or(Nat::from(0u64));
+                 if current >= shares_fee {
+                    map.insert(parent, StorableNat(current - shares_fee));
+                 }
+            });
+        }
         return Err(format!("Minimum withdrawal is {} e8s", MIN_WITHDRAWAL));
     }
 
-    // Calculate fee (1% using basis points for precision)
-    let fee_amount = (payout_u64 * LP_WITHDRAWAL_FEE_BPS) / 10_000;
-    let lp_amount = payout_u64 - fee_amount;
-
-    // Update shares BEFORE transfer (reentrancy protection)
+    // 4. Update State
+    
+    // Burn user shares (shares_total)
+    // Note: We already updated Parent with the fee portion. Now we remove User's full amount.
     LP_SHARES.with(|shares| {
         let mut shares_map = shares.borrow_mut();
-        let new_shares = user_shares.clone() - shares_to_burn.clone();
-        if new_shares == Nat::from(0u64) {
-            shares_map.remove(&caller);
-        } else {
-            shares_map.insert(caller, StorableNat(new_shares));
-        }
+        shares_map.remove(&user);
     });
-
-    // Deduct FULL payout from reserve
+    
+    // Update Reserve (-payout)
     POOL_STATE.with(|state| {
         let mut pool_state = state.borrow().get().clone();
-        if pool_state.reserve < payout_nat {
-             return Err("Insufficient pool reserve".to_string());
-        }
         pool_state.reserve -= payout_nat.clone();
         state.borrow_mut().set(pool_state);
-        Ok::<(), String>(())
-    })?;
+    });
 
-    // Schedule Safe Withdrawal
-    match accounting::schedule_lp_withdrawal(caller, shares_to_burn.clone(), payout_nat.clone(), lp_amount) {
-        Ok(_) => {
-            // BEST EFFORT: Try to pay parent
-            let net_fee = fee_amount.saturating_sub(TRANSFER_FEE);
+    // 5. Execute Transfer
+    // Use shares_burn for logging/events, but shares_total was effectively processed
+    match accounting::schedule_lp_withdrawal(user, shares_burn.clone(), payout_nat.clone(), payout_u64) {
+        Ok(_) => Ok(payout_u64),
+        Err(e) => {
+            // ROLLBACK EVERYTHING
             
-            if net_fee > 0 {
-                 ic_cdk::spawn(async move {
-                    let _ = accounting::transfer_to_user(get_parent_principal(), net_fee).await;
+            // 1. Restore user shares
+            LP_SHARES.with(|shares| {
+                shares.borrow_mut().insert(user, StorableNat(shares_total.clone()));
+            });
+            
+            // 2. Reverse parent fee inheritance
+            if shares_fee > Nat::from(0u64) {
+                 let parent = get_parent_principal();
+                 LP_SHARES.with(|s| {
+                     let mut map = s.borrow_mut();
+                     let current = map.get(&parent).map(|sn| sn.0.clone()).unwrap_or(Nat::from(0u64));
+                     if current >= shares_fee {
+                         map.insert(parent, StorableNat(current - shares_fee));
+                     }
                  });
             }
-
-            Ok(lp_amount)
-        }
-        Err(e) => {
-            // If scheduling fails (e.g. duplicate), rollback state immediately
             
-            // 1. Restore shares
-            LP_SHARES.with(|shares| {
-                shares.borrow_mut().insert(caller, StorableNat(user_shares));
-            });
-
-            // 2. Restore reserve (add back FULL payout)
+            // 3. Restore reserve
             POOL_STATE.with(|state| {
                 let mut pool_state = state.borrow().get().clone();
                 pool_state.reserve += payout_nat;
                 state.borrow_mut().set(pool_state);
             });
-
+            
             Err(e)
         }
     }
@@ -310,12 +328,23 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
 pub async fn withdraw_all_liquidity() -> Result<u64, String> {
     let caller = ic_cdk::caller();
     let shares = LP_SHARES.with(|s| s.borrow().get(&caller).map(|sn| sn.0.clone()).unwrap_or(Nat::from(0u64)));
-
+    
     if shares == Nat::from(0u64) {
         return Err("No liquidity to withdraw".to_string());
     }
+    
+    // Regular LPs pay fee
+    withdraw_liquidity_internal(caller, shares, true).await
+}
 
-    withdraw_liquidity(shares).await
+pub async fn auto_withdraw_parent() {
+    let parent = get_parent_principal();
+    let shares = LP_SHARES.with(|s| s.borrow().get(&parent).map(|sn| sn.0.clone()).unwrap_or(Nat::from(0u64)));
+    
+    if shares > Nat::from(0u64) {
+        // Parent pays NO fee on own withdrawal
+        let _ = withdraw_liquidity_internal(parent, shares, false).await;
+    }
 }
 
 // Query functions
