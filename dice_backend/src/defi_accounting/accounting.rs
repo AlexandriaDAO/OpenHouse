@@ -257,12 +257,29 @@ async fn attempt_transfer(user: Principal, amount: u64, created_at: u64) -> Tran
     match ic_ledger_types::transfer(MAINNET_LEDGER_CANISTER_ID, &args).await {
         Ok(Ok(block)) => TransferResult::Success(block),
         Ok(Err(e)) => {
-             // ic_ledger_types::TransferError
-             TransferResult::DefiniteError(format!("{:?}", e))
+             // ic_ledger_types::TransferError - DEFINITE ledger errors
+             // Safe to rollback - transfer definitely didn't happen
+             TransferResult::DefiniteError(format!("Ledger error: {:?}", e))
         }
-        Err(e) => {
-            // In newer ic-ledger-types, we get a single Error type
-            TransferResult::DefiniteError(format!("{:?}", e))
+        Err(err) => {
+            // FIX: All inter-canister call failures are treated as UNCERTAIN
+            // This includes timeouts, system errors, and other network issues
+            // We cannot know if the transfer succeeded, so we enter pending/retry queue
+            //
+            // Note: ic_ledger_types::transfer wraps ic_cdk::call, so any Err here
+            // indicates a communication problem, not a definite transfer failure
+            let error_msg = format!("{:?}", err);
+
+            // Check error type to classify (defensive approach)
+            let error_str = error_msg.to_lowercase();
+            if error_str.contains("destination") || error_str.contains("invalid") {
+                // Definite: destination doesn't exist
+                TransferResult::DefiniteError(error_msg)
+            } else {
+                // Uncertain: treat as potential timeout/system error
+                // Safe default: treat as uncertain to prevent double-spend
+                TransferResult::UncertainError(RejectionCode::SysTransient, error_msg)
+            }
         }
     }
 }
@@ -338,13 +355,29 @@ async fn process_single_withdrawal(user: Principal) -> Result<(), String> {
     let pending = PENDING_WITHDRAWALS.with(|p| p.borrow().get(&user))
         .ok_or("No pending")?;
 
+    // FIX: Remove MAX_RETRIES auto-rollback to prevent double-spend from long network issues
+    // Instead, mark as "stuck" for manual intervention
     if pending.retries >= MAX_RETRIES {
         let amount = match pending.withdrawal_type {
             WithdrawalType::User { amount } => amount,
             WithdrawalType::LP { amount, .. } => amount,
         };
-        rollback_withdrawal(user)?;
-        log_audit(AuditEvent::WithdrawalExpired { user, amount });
+
+        // Mark as stuck, log for admin attention
+        log_audit(AuditEvent::SystemError {
+            error: format!("Withdrawal stuck after {} retries for user {}. Amount: {}. Manual intervention required.", MAX_RETRIES, user, amount)
+        });
+
+        // Update pending with stuck status
+        PENDING_WITHDRAWALS.with(|p| {
+            let mut map = p.borrow_mut();
+            if let Some(mut w) = map.get(&user) {
+                w.last_error = Some(format!("STUCK: Exceeded {} retries. Manual intervention required. Contact support.", MAX_RETRIES));
+                map.insert(user, w);
+            }
+        });
+
+        // Continue retrying (infinite retry with exponential backoff handled by timer)
         return Ok(());
     }
 
@@ -427,6 +460,11 @@ pub(crate) fn audit_balances_internal() -> Result<String, String> {
 }
 
 pub fn update_balance(user: Principal, new_balance: u64) -> Result<(), String> {
+    // FIX: Check if user has pending withdrawal (prevents race condition)
+    if PENDING_WITHDRAWALS.with(|p| p.borrow().contains_key(&user)) {
+        return Err("Cannot update balance: withdrawal in progress. Wait for withdrawal to complete or contact support.".to_string());
+    }
+
     USER_BALANCES_STABLE.with(|balances| {
         balances.borrow_mut().insert(user, new_balance);
     });

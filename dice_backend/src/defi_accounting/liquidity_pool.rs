@@ -195,14 +195,9 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
 }
 
 // Internal function for withdrawing liquidity (called by withdraw_all_liquidity)
-// 
-// # Fire and Forget Accounting
-// This function implements the simplest possible fee mechanism:
-// 1. Deduct the FULL payout (LP share + Fee) from the Reserve immediately.
-// 2. Transfer the LP's share (Critical). If this fails, rollback everything.
-// 3. Transfer the Fee (Best Effort). If this fails, we DO NOT rollback.
-//    The fee remains in the canister as a protocol buffer.
-//    This ensures the Reserve is always solvent (Reserve <= Balance).
+//
+// FIX: Migrated to pending/retry system to prevent double-spend from timeouts
+// Uses the same pending withdrawal mechanism as user withdrawals
 async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     let caller = ic_cdk::caller();
 
@@ -227,9 +222,8 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         }
 
         // payout = (shares_to_burn * current_reserve) / total_shares
-        // payout = (shares_to_burn * current_reserve) / total_shares
         let numerator = shares_to_burn.clone() * current_reserve.clone();
-        // SAFETY: total_shares checked for zero above (line 207)
+        // SAFETY: total_shares checked for zero above
         let payout = numerator / total_shares;
 
         // Check reserve sufficiency (read-only check)
@@ -250,7 +244,7 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     let fee_amount = (payout_u64 * LP_WITHDRAWAL_FEE_BPS) / 10_000;
     let lp_amount = payout_u64 - fee_amount;
 
-    // Update shares BEFORE transfer (reentrancy protection)
+    // Update shares BEFORE scheduling withdrawal (reentrancy protection)
     LP_SHARES.with(|shares| {
         let mut shares_map = shares.borrow_mut();
         let new_shares = user_shares.clone() - shares_to_burn.clone();
@@ -272,40 +266,20 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         Ok::<(), String>(())
     })?;
 
-    // CRITICAL: Transfer to LP first
-    match transfer_to_user(caller, lp_amount).await {
-        Ok(_) => {
-            // LP got paid successfully
-            
-            // BEST EFFORT: Try to pay parent
-            let net_fee = fee_amount.saturating_sub(TRANSFER_FEE);
-            
-            if net_fee > 0 {
-                 ic_cdk::spawn(async move {
-                    let _ = accounting::transfer_to_user(get_parent_principal(), net_fee).await;
-                 });
-            }
+    // FIX: Schedule LP withdrawal through pending/retry system
+    // This prevents immediate rollback on timeouts
+    accounting::schedule_lp_withdrawal(caller, shares_to_burn.clone(), payout_nat.clone(), lp_amount)?;
 
-            Ok(lp_amount)
-        }
-        Err(e) => {
-            // LP transfer failed - ROLLBACK EVERYTHING
-            
-            // 1. Restore shares
-            LP_SHARES.with(|shares| {
-                shares.borrow_mut().insert(caller, StorableNat(user_shares));
-            });
-
-            // 2. Restore reserve (add back FULL payout)
-            POOL_STATE.with(|state| {
-                let mut pool_state = state.borrow().get().clone();
-                pool_state.reserve += payout_nat;
-                state.borrow_mut().set(pool_state);
-            });
-
-            Err(format!("Transfer failed: {}. State rolled back.", e))
-        }
+    // BEST EFFORT: Try to pay parent fee (non-blocking)
+    let net_fee = fee_amount.saturating_sub(TRANSFER_FEE);
+    if net_fee > 0 {
+        ic_cdk::spawn(async move {
+            let _ = accounting::transfer_to_user(get_parent_principal(), net_fee).await;
+        });
     }
+
+    // Return the LP amount (withdrawal will be processed asynchronously)
+    Ok(lp_amount)
 }
 
 #[update]
