@@ -89,7 +89,7 @@ service : {
   get_canister_balance: () -> (nat64);
   get_accounting_stats: () -> (AccountingStats) query;
   audit_balances: () -> (variant { Ok: text; Err: text }) query;
-  refresh_canister_balance: () -> (nat64);
+  refresh_canister_balance: () -> (variant { Ok: nat64; Err: text });
   sweep_orphaned_fees: () -> (variant { Ok: nat64; Err: text });
 
   // Liquidity Pool Management

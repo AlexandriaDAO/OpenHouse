@@ -408,31 +408,56 @@ pub async fn sweep_orphaned_fees() -> Result<u64, String> {
     }
 
     // 1. Get Truth (Actual ICP in Canister)
-    let canister_balance = refresh_canister_balance().await;
+    // FIX H2: Check freshness (don't rely on cache if call fails)
+    let canister_balance = refresh_canister_balance().await?;
 
     // 2. Calculate Liabilities (What we owe)
     let total_deposits = calculate_total_deposits();
     let pool_reserve = liquidity_pool::get_pool_reserve();
     let pending_withdrawals = calculate_total_pending_withdrawals();
 
-    let total_liabilities = total_deposits + pool_reserve + pending_withdrawals;
+    // FIX H1: Integer Overflow Protection
+    let total_liabilities = total_deposits
+        .checked_add(pool_reserve).ok_or("Overflow in liability calculation")?
+        .checked_add(pending_withdrawals).ok_or("Overflow in liability calculation")?;
 
     // 3. Verify Surplus
     if canister_balance <= total_liabilities {
         return Err(format!("No surplus. Balance: {}, Liabilities: {}", canister_balance, total_liabilities));
     }
 
-    let surplus = canister_balance - total_liabilities;
+    let raw_surplus = canister_balance - total_liabilities;
+    
+    // FIX P0: TOCTOU Safety Buffer (Fixed 0.1 ICP)
+    // Ensures that if state changes slightly during execution, we don't accidentally dip into user funds.
+    // We leave a fixed buffer rather than a percentage to maximize recovery while maintaining safety.
+    const SAFETY_BUFFER: u64 = 10_000_000; // 0.1 ICP
+
+    if raw_surplus <= SAFETY_BUFFER {
+        return Err(format!("Surplus {} e8s is too small (min buffer required: {})", raw_surplus, SAFETY_BUFFER));
+    }
+
+    let safe_sweep_amount = raw_surplus - SAFETY_BUFFER;
 
     // 4. Sweep
     log_audit(AuditEvent::SystemError {
-        error: format!("Sweeping orphaned fees: {} e8s", surplus)
+        error: format!("Sweeping orphaned fees. Raw: {}, Sweeping: {} e8s", raw_surplus, safe_sweep_amount)
     });
 
-    // Use internal helper (idempotency not critical for admin sweep)
-    match transfer_to_user(caller, surplus).await {
-        Ok(_) => Ok(surplus),
-        Err(e) => Err(format!("Transfer failed: {}", e)),
+    // FIX P0: Idempotency & UncertainError Handling
+    let created_at = ic_cdk::api::time();
+    
+    match attempt_transfer(caller, safe_sweep_amount, created_at).await {
+        TransferResult::Success(block) => {
+            ic_cdk::println!("Sweep successful at block {}", block);
+            Ok(safe_sweep_amount)
+        },
+        TransferResult::DefiniteError(e) => Err(format!("Transfer failed: {}", e)),
+        TransferResult::UncertainError(e) => {
+            // For admin sweep, uncertain error means we should STOP and check manually.
+            // Do NOT automatically retry or rollback, as the funds might have moved.
+            Err(format!("CRITICAL: Uncertain transfer status. Check ledger manually! Error: {}", e))
+        }
     }
 }
 
@@ -532,7 +557,7 @@ pub(crate) async fn transfer_to_user(user: Principal, amount: u64) -> Result<(),
 }
 
 #[update]
-pub async fn refresh_canister_balance() -> u64 {
+pub async fn refresh_canister_balance() -> Result<u64, String> {
     let ledger = MAINNET_LEDGER_CANISTER_ID;
     let result: Result<(Tokens,), _> = ic_cdk::call(ledger, "account_balance", (AccountBalanceArgs {
         account: AccountIdentifier::new(&ic_cdk::id(), &DEFAULT_SUBACCOUNT)
@@ -544,10 +569,11 @@ pub async fn refresh_canister_balance() -> u64 {
             CACHED_CANISTER_BALANCE.with(|cache| {
                 *cache.borrow_mut() = balance_u64;
             });
-            balance_u64
+            Ok(balance_u64)
         }
-        Err(_e) => {
-            CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow())
+        Err((code, msg)) => {
+            // FIX H2: Do not return stale cache on error
+            Err(format!("Failed to refresh balance: {:?} {}", code, msg))
         }
     }
 }
