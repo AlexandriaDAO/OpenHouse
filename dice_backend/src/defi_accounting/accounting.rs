@@ -462,7 +462,7 @@ pub(crate) async fn transfer_to_user(user: Principal, amount: u64) -> Result<(),
         fee: Tokens::from_e8s(ICP_TRANSFER_FEE),
         from_subaccount: None,
         to: AccountIdentifier::new(&user, &DEFAULT_SUBACCOUNT),
-        created_at_time: None, // No idempotency for this internal helper yet? Should we?
+        created_at_time: None, // Idempotency not required: used for best-effort internal transfers/fees only
     };
 
     match ic_ledger_types::transfer(MAINNET_LEDGER_CANISTER_ID, &args).await {
