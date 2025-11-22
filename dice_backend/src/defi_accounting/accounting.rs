@@ -379,6 +379,65 @@ async fn process_single_withdrawal(user: Principal) -> Result<(), String> {
 
 
 // =============================================================================
+// GHOST FUNDS RECOVERY
+// =============================================================================
+
+fn calculate_total_pending_withdrawals() -> u64 {
+    PENDING_WITHDRAWALS.with(|p| {
+        p.borrow()
+            .iter()
+            .map(|entry| {
+                match entry.value().withdrawal_type {
+                     WithdrawalType::User { amount } => amount,
+                     WithdrawalType::LP { amount, .. } => amount,
+                }
+            })
+            .sum()
+    })
+}
+
+#[update]
+pub async fn sweep_orphaned_fees() -> Result<u64, String> {
+    let caller = ic_cdk::caller();
+    // HARDCODED ADMIN - For V1 Safety
+    let admin = Principal::from_text("56kka-oe6xl-acccy-6cc5r-odus2-insgr-kk5ch-3d5i5-rwoit-3juc3-jqe")
+        .expect("Invalid admin principal");
+
+    if caller != admin {
+        return Err("Unauthorized".to_string());
+    }
+
+    // 1. Get Truth (Actual ICP in Canister)
+    let canister_balance = refresh_canister_balance().await;
+
+    // 2. Calculate Liabilities (What we owe)
+    let total_deposits = calculate_total_deposits();
+    let pool_reserve = liquidity_pool::get_pool_reserve();
+    let pending_withdrawals = calculate_total_pending_withdrawals();
+
+    let total_liabilities = total_deposits + pool_reserve + pending_withdrawals;
+
+    // 3. Verify Surplus
+    if canister_balance <= total_liabilities {
+        return Err(format!("No surplus. Balance: {}, Liabilities: {}", canister_balance, total_liabilities));
+    }
+
+    let surplus = canister_balance - total_liabilities;
+
+    // 4. Sweep
+    log_audit(AuditEvent::SystemError {
+        error: format!("Sweeping orphaned fees: {} e8s", surplus)
+    });
+
+    // Use internal helper (idempotency not critical for admin sweep)
+    match transfer_to_user(caller, surplus).await {
+        Ok(_) => Ok(surplus),
+        Err(e) => Err(format!("Transfer failed: {}", e)),
+    }
+}
+
+
+// =============================================================================
 // PUBLIC QUERIES & UTILS
 // =============================================================================
 
