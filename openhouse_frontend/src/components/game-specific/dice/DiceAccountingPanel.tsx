@@ -175,47 +175,46 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
           </div>
         </div>
 
-        {/* Simple Button Row */}
-        <div className="flex gap-2 mb-2">
+        {/* Compact Button Row with Icon Refresh */}
+        <div className="flex gap-2">
           <button
             onClick={() => setShowDepositModal(true)}
             disabled={isDepositing}
-            className={`flex-1 px-4 py-2 bg-purple-600/80 hover:bg-purple-600 rounded text-sm font-bold disabled:opacity-50 transition ${
+            className={`flex-1 px-3 py-2 bg-dfinity-turquoise/90 hover:bg-dfinity-turquoise rounded text-sm font-bold text-pure-black disabled:opacity-50 transition ${
               showDepositAnimation ? 'animate-pulse ring-4 ring-purple-400 ring-opacity-75' : ''
             }`}
             title="Deposit ICP to Dice Game"
           >
-            {depositStep === 'approving' ? '🔐 Approving...' : depositStep === 'depositing' ? '↓ Depositing...' : '↓ Deposit'}
+            {depositStep === 'approving' ? 'Approving...' : depositStep === 'depositing' ? 'Depositing...' : 'Deposit'}
           </button>
 
           <button
             onClick={handleWithdrawAll}
             disabled={isWithdrawing || gameBalance === BigInt(0)}
-            className="flex-1 px-4 py-2 bg-green-600/80 hover:bg-green-600 rounded text-sm font-bold disabled:opacity-50 transition"
+            className="flex-1 px-3 py-2 bg-dfinity-turquoise/90 hover:bg-dfinity-turquoise rounded text-sm font-bold text-pure-black disabled:opacity-50 transition"
             title="Withdraw all ICP from Dice Game"
           >
-            {isWithdrawing ? '↑ Withdrawing...' : '↑ Withdraw All'}
+            {isWithdrawing ? 'Withdrawing...' : 'Withdraw'}
+          </button>
+
+          <button
+            onClick={async () => {
+              await refreshBalance();
+              onBalanceChange();
+            }}
+            className="px-3 py-2 bg-dfinity-turquoise/90 hover:bg-dfinity-turquoise rounded text-sm font-bold text-pure-black transition"
+            title="Refresh all balances from blockchain"
+          >
+            🔄
           </button>
         </div>
 
         {/* Attention text when animation active */}
         {showDepositAnimation && (
-          <p className="text-purple-400 animate-pulse font-semibold text-sm text-center mb-2">
+          <p className="text-purple-400 animate-pulse font-semibold text-xs text-center mt-2">
             ☝️ Deposit ICP here to start playing
           </p>
         )}
-
-        {/* Refresh Balances Button */}
-        <button
-          onClick={async () => {
-            await refreshBalance();
-            onBalanceChange();
-          }}
-          className="w-full px-3 py-1.5 bg-blue-600/80 hover:bg-blue-600 rounded text-xs font-bold transition flex items-center justify-center gap-2"
-          title="Refresh all balances from blockchain"
-        >
-          🔄 Refresh Balances
-        </button>
 
         {/* Compact Messages */}
         {error && (
@@ -259,16 +258,16 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
               <button
                 onClick={() => setShowDepositModal(false)}
                 disabled={isDepositing}
-                className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded font-bold disabled:opacity-50 transition"
+                className="flex-1 px-4 py-3 font-mono font-bold border-2 bg-transparent border-pure-white/20 text-pure-white/60 hover:bg-pure-white/10 disabled:opacity-50 transition"
               >
                 Cancel
               </button>
               <button
                 onClick={handleDeposit}
                 disabled={isDepositing}
-                className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded font-bold disabled:opacity-50 transition"
+                className="flex-1 px-4 py-3 font-mono font-bold border-2 bg-transparent border-dfinity-turquoise text-dfinity-turquoise hover:bg-dfinity-turquoise hover:text-pure-black disabled:border-pure-white/20 disabled:text-pure-white/20 transition"
               >
-                {depositStep === 'approving' ? '🔐 Approving...' : depositStep === 'depositing' ? '↓ Depositing...' : 'Confirm Deposit'}
+                {depositStep === 'approving' ? '🔐 Approving...' : depositStep === 'depositing' ? '↓ Depositing...' : 'Confirm'}
               </button>
             </div>
           </div>

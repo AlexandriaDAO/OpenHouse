@@ -362,15 +362,36 @@ export function DiceGame() {
           disabled={gameState.isPlaying}
         />
 
-        <GameStats stats={stats} />
-
-        {/* Help text explaining simplified odds */}
-        <div className="text-xs text-gray-400 text-center mt-2 p-2 bg-gray-800/50 rounded">
-          💡 <strong>How it works:</strong> Choose a target number and direction.
-          If you roll exactly on the target, the house wins (0.99% edge).
-          Otherwise, standard over/under rules apply.
-          Clean multiplier: {multiplier.toFixed(2)}x = 100 ÷ {direction === 'Over' ? (100 - targetNumber) : targetNumber} winning numbers.
+        {/* Compact Stats Row */}
+        <div className="grid grid-cols-4 gap-2 mb-3 text-center text-xs">
+          <div className="bg-gray-800/50 rounded p-2">
+            <div className="text-gray-400">Chance</div>
+            <div className="font-bold text-yellow-400">{winChance.toFixed(1)}%</div>
+          </div>
+          <div className="bg-gray-800/50 rounded p-2">
+            <div className="text-gray-400">Multi</div>
+            <div className="font-bold text-green-400">{multiplier.toFixed(2)}x</div>
+          </div>
+          <div className="bg-gray-800/50 rounded p-2">
+            <div className="text-gray-400">Max</div>
+            <div className="font-bold text-blue-400">{maxBet.toFixed(2)}</div>
+          </div>
+          <div className="bg-gray-800/50 rounded p-2">
+            <div className="text-gray-400">Win</div>
+            <div className="font-bold text-dfinity-turquoise">{(gameState.betAmount * multiplier).toFixed(2)}</div>
+          </div>
         </div>
+
+        {/* Collapsible How It Works */}
+        <details className="mb-3">
+          <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-300 text-center">
+            💡 How it works
+          </summary>
+          <div className="text-xs text-gray-400 mt-2 p-2 bg-gray-800/50 rounded">
+            Choose a target number and direction. If you roll exactly on the target, the house wins (0.99% edge).
+            Otherwise, standard over/under rules apply. Clean multiplier: {multiplier.toFixed(2)}x = 100 ÷ {direction === 'Over' ? (100 - targetNumber) : targetNumber} winning numbers.
+          </div>
+        </details>
 
         <GameButton
           onClick={rollDice}

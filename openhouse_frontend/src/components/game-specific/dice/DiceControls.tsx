@@ -18,10 +18,10 @@ export const DiceControls: React.FC<DiceControlsProps> = ({
   disabled = false,
 }) => {
   return (
-    <>
-      {/* Target Number Slider */}
-      <div className="mb-4">
-        <label className="block text-sm text-pure-white/60 mb-2 font-mono">
+    <div className="mb-3">
+      {/* Compact Row: Target + Direction */}
+      <div className="flex items-center gap-2 mb-2">
+        <label className="text-xs text-pure-white/60 font-mono whitespace-nowrap">
           Target: {targetNumber}
         </label>
         <input
@@ -30,38 +30,36 @@ export const DiceControls: React.FC<DiceControlsProps> = ({
           max="99"
           value={targetNumber}
           onChange={(e) => onTargetChange(parseInt(e.target.value))}
-          className="w-full slider-turquoise"
+          className="flex-1 slider-turquoise"
           disabled={disabled}
         />
       </div>
 
-      {/* Direction - Over/Under */}
-      <div className="mb-4">
-        <div className="flex gap-2">
-          <button
-            onClick={() => onDirectionChange('Over')}
-            disabled={disabled}
-            className={`flex-1 py-3 font-mono font-bold border-2 transition ${
-              direction === 'Over'
-                ? 'bg-dfinity-green border-dfinity-green text-pure-black'
-                : 'bg-transparent border-dfinity-green text-dfinity-green'
-            }`}
-          >
-            OVER {targetNumber}
-          </button>
-          <button
-            onClick={() => onDirectionChange('Under')}
-            disabled={disabled}
-            className={`flex-1 py-3 font-mono font-bold border-2 transition ${
-              direction === 'Under'
-                ? 'bg-dfinity-red border-dfinity-red text-pure-black'
-                : 'bg-transparent border-dfinity-red text-dfinity-red'
-            }`}
-          >
-            UNDER {targetNumber}
-          </button>
-        </div>
+      {/* Compact Direction Buttons */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => onDirectionChange('Over')}
+          disabled={disabled}
+          className={`flex-1 py-2 text-sm font-mono font-bold rounded transition ${
+            direction === 'Over'
+              ? 'bg-dfinity-turquoise text-pure-black'
+              : 'bg-dfinity-turquoise/20 text-dfinity-turquoise hover:bg-dfinity-turquoise/40'
+          }`}
+        >
+          Over {targetNumber}
+        </button>
+        <button
+          onClick={() => onDirectionChange('Under')}
+          disabled={disabled}
+          className={`flex-1 py-2 text-sm font-mono font-bold rounded transition ${
+            direction === 'Under'
+              ? 'bg-dfinity-turquoise text-pure-black'
+              : 'bg-dfinity-turquoise/20 text-dfinity-turquoise hover:bg-dfinity-turquoise/40'
+          }`}
+        >
+          Under {targetNumber}
+        </button>
       </div>
-    </>
+    </div>
   );
 };
