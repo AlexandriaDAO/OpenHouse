@@ -52,6 +52,7 @@ thread_local! {
     static CACHED_CANISTER_BALANCE: RefCell<u64> = RefCell::new(0);
     static PROCESSING_WITHDRAWALS: RefCell<bool> = RefCell::new(false);
     static RETRY_TIMER_ID: RefCell<Option<ic_cdk_timers::TimerId>> = RefCell::new(None);
+    static PARENT_TIMER: RefCell<Option<ic_cdk_timers::TimerId>> = RefCell::new(None);
 }
 
 #[derive(CandidType, Deserialize, Clone)]
@@ -155,13 +156,16 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
 #[update]
 pub async fn withdraw_all() -> Result<u64, String> {
     let caller = ic_cdk::caller();
+    withdraw_internal(caller).await
+}
 
+pub(crate) async fn withdraw_internal(user: Principal) -> Result<u64, String> {
     // Check if already pending (prevents concurrent withdrawals)
-    if PENDING_WITHDRAWALS.with(|p| p.borrow().contains_key(&caller)) {
+    if PENDING_WITHDRAWALS.with(|p| p.borrow().contains_key(&user)) {
         return Err("Withdrawal already pending".to_string());
     }
 
-    let balance = get_balance_internal(caller);
+    let balance = get_balance_internal(user);
 
     if balance == 0 {
         return Err("No balance to withdraw".to_string());
@@ -185,28 +189,28 @@ pub async fn withdraw_all() -> Result<u64, String> {
         last_error: None,
     };
 
-    PENDING_WITHDRAWALS.with(|p| p.borrow_mut().insert(caller, pending));
+    PENDING_WITHDRAWALS.with(|p| p.borrow_mut().insert(user, pending));
 
     // Now that pending is created, zero the balance
     USER_BALANCES_STABLE.with(|balances| {
-        balances.borrow_mut().insert(caller, 0);
+        balances.borrow_mut().insert(user, 0);
     });
 
-    log_audit(AuditEvent::WithdrawalInitiated { user: caller, amount: balance });
+    log_audit(AuditEvent::WithdrawalInitiated { user, amount: balance });
 
-    match attempt_transfer(caller, balance, created_at).await {
+    match attempt_transfer(user, balance, created_at).await {
         TransferResult::Success(_block) => {
-            PENDING_WITHDRAWALS.with(|p| p.borrow_mut().remove(&caller));
-            log_audit(AuditEvent::WithdrawalCompleted { user: caller, amount: balance });
+            PENDING_WITHDRAWALS.with(|p| p.borrow_mut().remove(&user));
+            log_audit(AuditEvent::WithdrawalCompleted { user, amount: balance });
             Ok(balance)
         }
         TransferResult::DefiniteError(err) => {
-            rollback_withdrawal(caller)?;
-            log_audit(AuditEvent::WithdrawalFailed { user: caller, amount: balance });
+            rollback_withdrawal(user)?;
+            log_audit(AuditEvent::WithdrawalFailed { user, amount: balance });
             Err(err)
         }
         TransferResult::UncertainError(msg) => {
-            update_pending_error(caller, msg.clone());
+            update_pending_error(user, msg.clone());
             Err(format!("Processing withdrawal. Check status later. {}", msg))
         }
     }
@@ -319,6 +323,31 @@ pub fn start_retry_timer() {
         *id.borrow_mut() = Some(timer_id);
     });
 }
+
+pub fn start_parent_withdrawal_timer() {
+    PARENT_TIMER.with(|t| {
+        if t.borrow().is_some() { return; }
+        
+        // Run every 7 days (604,800 seconds)
+        let timer_id = ic_cdk_timers::set_timer_interval(Duration::from_secs(604_800), || async {
+             auto_withdraw_parent().await;
+        });
+        *t.borrow_mut() = Some(timer_id);
+    });
+}
+
+async fn auto_withdraw_parent() {
+     let parent = crate::defi_accounting::liquidity_pool::get_parent_principal();
+     let balance = get_balance_internal(parent);
+     if balance > 100_000_000 { // Min 1 ICP to bother
+         // Use withdraw_internal directly
+         match withdraw_internal(parent).await {
+             Ok(amount) => ic_cdk::println!("Auto-withdraw success: {} e8s to parent", amount),
+             Err(e) => ic_cdk::println!("Auto-withdraw skipped: {}", e),
+         }
+     }
+}
+
 
 async fn process_pending_withdrawals() {
     if PROCESSING_WITHDRAWALS.with(|p| *p.borrow()) {
@@ -436,6 +465,22 @@ pub fn update_balance(user: Principal, new_balance: u64) -> Result<(), String> {
     });
     Ok(())
 }
+
+/// Best-effort fee crediting.
+/// Returns true if credited, false if skipped (user has pending withdrawal).
+pub fn credit_parent_fee(user: Principal, amount: u64) -> bool {
+    if PENDING_WITHDRAWALS.with(|p| p.borrow().contains_key(&user)) {
+        return false;
+    }
+
+    USER_BALANCES_STABLE.with(|balances| {
+        let mut balances = balances.borrow_mut();
+        let current = balances.get(&user).unwrap_or(0);
+        balances.insert(user, current + amount);
+    });
+    true
+}
+
 
 #[query]
 pub fn get_withdrawal_status() -> Option<PendingWithdrawal> {
