@@ -9,7 +9,7 @@ import { Crash } from './pages/Crash';
 import { Plinko } from './pages/Plinko';
 import { PlinkoMotoko } from './pages/PlinkoMotoko';
 import { Mines } from './pages/Mines';
-import { Dice } from './pages/Dice';
+import { DiceLayout, DiceGame, DiceLiquidity } from './pages/dice';
 
 function App() {
   return (
@@ -25,7 +25,10 @@ function App() {
                   <Route path="/plinko" element={<Plinko />} />
                   <Route path="/plinko-motoko" element={<PlinkoMotoko />} />
                   <Route path="/mines" element={<Mines />} />
-                  <Route path="/dice" element={<Dice />} />
+                  <Route path="/dice" element={<DiceLayout />}>
+                    <Route index element={<DiceGame />} />
+                    <Route path="liquidity" element={<DiceLiquidity />} />
+                  </Route>
                 </Routes>
               </Layout>
             </GameBalanceProvider>
