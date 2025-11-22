@@ -63,6 +63,7 @@ pub enum AuditEvent {
     SystemError { error: String },
     ParentFeeCredited { amount: u64 },
     ParentFeeFallback { amount: u64, reason: String },
+    SystemInfo { message: String },
 }
 
 impl Storable for AuditEntry {

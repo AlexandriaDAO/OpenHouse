@@ -332,6 +332,9 @@ pub fn start_parent_withdrawal_timer() {
         if t.borrow().is_some() { return; }
         
         // Run every 7 days (604,800 seconds)
+        // Note: set_timer_interval expects a Future-returning closure.
+        // We use || async { ... } which satisfies the trait bound and allows the library
+        // to poll the future. Wrapping in spawn() here is redundant or incorrect for v1.0.0.
         let timer_id = ic_cdk_timers::set_timer_interval(Duration::from_secs(604_800), || async {
              auto_withdraw_parent().await;
         });
@@ -353,7 +356,9 @@ async fn auto_withdraw_parent() {
          match withdraw_internal(parent).await {
              Ok(amount) => {
                  ic_cdk::println!("Auto-withdraw success: {} e8s to parent", amount);
-                 // Note: Successful withdrawal already logs WithdrawalCompleted audit event in withdraw_internal
+                 log_audit(AuditEvent::SystemInfo {
+                     message: format!("Auto-withdrawal success: {} e8s", amount)
+                 });
              },
              Err(e) => {
                  ic_cdk::println!("Auto-withdraw skipped: {}", e);
