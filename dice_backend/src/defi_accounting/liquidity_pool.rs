@@ -524,6 +524,7 @@ async fn transfer_from_user(user: Principal, amount: u64) -> Result<(), String> 
             subaccount: None,
         },
         amount: Nat::from(amount),
+        // Explicitly charge fee to sender to prevent protocol loss
         fee: Some(Nat::from(TRANSFER_FEE)),
         memo: None,
         created_at_time: None,

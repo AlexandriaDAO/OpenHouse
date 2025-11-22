@@ -113,6 +113,9 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
         from: Account::from(caller),
         to: Account::from(ic_cdk::api::canister_self()),
         amount: amount.into(),
+        // Explicitly charge the fee to the sender.
+        // This prevents the protocol from "eating" the fee (insolvency risk).
+        // If the ledger creates a surplus from this, it is Protocol Profit (safe).
         fee: Some(Nat::from(ICP_TRANSFER_FEE)), 
         memo: None,
         created_at_time: None,
@@ -125,28 +128,25 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
 
     match result {
         Ok(block_index) => {
-            // Credit user with full amount
-            // ✅ VERIFIED: ICRC-2 transfer_from fee accounting
+            // Credit user with amount + fee
+            // ICRC-2 transfer_from behavior:
+            // - User approves: amount + fee (e.g., 100.0001 ICP)
+            // - Canister receives: amount + fee (full approved amount arrives)
+            // - We must credit: amount + fee (to match what actually arrived)
             //
-            // Research confirms that ICRC-2's transfer_from charges the transfer fee to the
-            // sender separately. The recipient (this canister) receives exactly the `amount`
-            // specified in the transfer_from call.
-            //
-            // This is different from ICRC-1's transfer() where the fee is deducted from the
-            // amount being sent. Here, if a user calls deposit(100_000_000), the canister
-            // receives exactly 100,000,000 e8s, and the user is charged 100,010,000 e8s total
-            // (amount + fee).
-            //
-            // Therefore, crediting the full `amount` to the user's balance is correct.
+            // The fee is paid by the sender but arrives at the canister along with
+            // the amount. We need to track the full received balance.
+            let amount_received = amount + ICP_TRANSFER_FEE;
+
             let new_balance = USER_BALANCES_STABLE.with(|balances| {
                 let mut balances = balances.borrow_mut();
                 let current = balances.get(&caller).unwrap_or(0);
-                let new_bal = current + amount;  // Correct: credits exactly what canister received
+                let new_bal = current + amount_received;
                 balances.insert(caller, new_bal);
                 new_bal
             });
 
-            ic_cdk::println!("Deposit successful: {} deposited {} e8s at block {}", caller, amount, block_index);
+            ic_cdk::println!("Deposit successful: {} deposited {} e8s at block {}", caller, amount_received, block_index);
             Ok(new_balance)
         }
         Err(e) => Err(format!("Transfer failed: {:?}", e)),

@@ -22,7 +22,12 @@
       "type": "rust",
       "package": "dice_backend",
       "candid": "dice_backend/dice_backend.did",
-      "specified_id": "whchi-hyaaa-aaaao-a4ruq-cai"
+      "specified_id": "whchi-hyaaa-aaaao-a4ruq-cai",
+      "metadata": [
+        {
+          "name": "candid:service"
+        }
+      ]
     },
     "openhouse_frontend": {
       "type": "assets",
