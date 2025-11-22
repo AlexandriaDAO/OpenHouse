@@ -24,6 +24,7 @@ const PENDING_WITHDRAWALS_MEMORY_ID: u8 = 20;
 const AUDIT_LOG_MEMORY_ID: u8 = 21;
 const MAX_PAYOUT_PERCENTAGE: f64 = 0.10;
 const MAX_RETRIES: u8 = 10;
+const PARENT_AUTO_WITHDRAW_THRESHOLD: u64 = 100_000_000; // 1 ICP
 
 thread_local! {
     static USER_BALANCES_STABLE: RefCell<StableBTreeMap<Principal, u64, Memory>> = RefCell::new(
@@ -318,9 +319,7 @@ pub fn start_retry_timer() {
              return;
         }
         let timer_id = ic_cdk_timers::set_timer_interval(Duration::from_secs(300), || async {
-            ic_cdk::spawn(async {
-                process_pending_withdrawals().await;
-            });
+            process_pending_withdrawals().await;
         });
         *id.borrow_mut() = Some(timer_id);
     });
@@ -332,9 +331,7 @@ pub fn start_parent_withdrawal_timer() {
         
         // Run every 7 days (604,800 seconds)
         let timer_id = ic_cdk_timers::set_timer_interval(Duration::from_secs(604_800), || async {
-             ic_cdk::spawn(async {
-                 auto_withdraw_parent().await;
-             });
+             auto_withdraw_parent().await;
         });
         *t.borrow_mut() = Some(timer_id);
     });
@@ -343,7 +340,7 @@ pub fn start_parent_withdrawal_timer() {
 async fn auto_withdraw_parent() {
      let parent = crate::defi_accounting::liquidity_pool::get_parent_principal();
      let balance = get_balance_internal(parent);
-     if balance > 100_000_000 { // Min 1 ICP to bother
+     if balance > PARENT_AUTO_WITHDRAW_THRESHOLD {
          // Use withdraw_internal directly
          match withdraw_internal(parent).await {
              Ok(amount) => ic_cdk::println!("Auto-withdraw success: {} e8s to parent", amount),

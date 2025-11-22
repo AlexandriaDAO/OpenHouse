@@ -277,6 +277,8 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         Ok(_) => {
             // SAFE ACCOUNTING: Credit parent internally
             // No ledger transfer needed, so we save the TRANSFER_FEE.
+            // PROTOCOL BENEFIT: Since no ledger transfer occurs, the saved TRANSFER_FEE
+            // is retained as protocol revenue.
             if fee_amount > 0 {
                  let parent = get_parent_principal();
                  if !accounting::credit_parent_fee(parent, fee_amount) {
