@@ -354,12 +354,12 @@ export function DiceGame() {
       maxWin={10}
       houseEdge={0.99}
     >
-      {/* UNIFIED GAME CARD - Everything consolidated */}
-      <div className="card max-w-2xl mx-auto">
-        {/* ACCOUNTING PANEL - Balances and Fund Management */}
-        <div className="mb-4 pb-4 border-b border-gray-700">
+      {/* UNIFIED GAME CARD - Single panel design */}
+      <div className="card max-w-5xl mx-auto">
+        {/* INLINE BALANCE BAR - Compact horizontal layout */}
+        <div className="mb-4 pb-3 border-b border-gray-700">
           {!isAuthenticated ? (
-            <p className="text-center text-gray-400 text-sm">Please log in to manage funds</p>
+            <p className="text-center text-gray-400 text-sm">Please log in to play</p>
           ) : (
             <DiceAccountingPanel
               gameBalance={balance.game}
@@ -369,181 +369,188 @@ export function DiceGame() {
           )}
         </div>
 
-        {/* BETTING CONTROLS */}
-        <BetAmountInput
-          value={gameState.betAmount}
-          onChange={gameState.setBetAmount}
-          min={0.01}
-          max={maxBet}
-          disabled={gameState.isPlaying}
-          isPracticeMode={gameMode.isPracticeMode}
-          error={gameState.betError}
-          variant="slider"
-        />
+        {/* SIDE-BY-SIDE MAIN AREA */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-        <DiceControls
-          targetNumber={targetNumber}
-          onTargetChange={setTargetNumber}
-          direction={direction}
-          onDirectionChange={setDirection}
-          disabled={gameState.isPlaying}
-        />
+          {/* LEFT COLUMN: GAME CONTROLS */}
+          <div className="space-y-4">
+            {/* Bet Amount Input */}
+            <BetAmountInput
+              value={gameState.betAmount}
+              onChange={gameState.setBetAmount}
+              min={0.01}
+              max={maxBet}
+              disabled={gameState.isPlaying}
+              isPracticeMode={gameMode.isPracticeMode}
+              error={gameState.betError}
+              variant="slider"
+            />
 
-        {/* Compact Stats Row */}
-        <div className="grid grid-cols-4 gap-2 mb-3 text-center text-xs">
-          <div className="bg-gray-800/50 rounded p-2">
-            <div className="text-gray-400">Chance</div>
-            <div className="font-bold text-yellow-400">{winChance.toFixed(1)}%</div>
-          </div>
-          <div className="bg-gray-800/50 rounded p-2">
-            <div className="text-gray-400">Multi</div>
-            <div className="font-bold text-green-400">{multiplier.toFixed(2)}x</div>
-          </div>
-          <div className="bg-gray-800/50 rounded p-2">
-            <div className="text-gray-400">Max</div>
-            <div className="font-bold text-blue-400">{maxBet.toFixed(2)}</div>
-          </div>
-          <div className="bg-gray-800/50 rounded p-2">
-            <div className="text-gray-400">Win</div>
-            <div className="font-bold text-dfinity-turquoise">{(gameState.betAmount * multiplier).toFixed(2)}</div>
-          </div>
-        </div>
+            {/* Dice Controls (Target + Direction) */}
+            <DiceControls
+              targetNumber={targetNumber}
+              onTargetChange={setTargetNumber}
+              direction={direction}
+              onDirectionChange={setDirection}
+              disabled={gameState.isPlaying}
+            />
 
-        {/* House Balance Status Indicator */}
-        {(() => {
-          const houseBalanceICP = Number(balance.house) / E8S_PER_ICP;
-          const maxAllowedPayout = houseBalanceICP * 0.1; // 10% of house balance
-          const currentPotentialPayout = gameState.betAmount * multiplier;
-          const utilizationPct = maxAllowedPayout > 0 ? (currentPotentialPayout / maxAllowedPayout) * 100 : 0;
-
-          // Color coding based on utilization
-          let statusColor = 'text-green-400';
-          let bgColor = 'bg-green-900/20 border-green-500/30';
-          let statusText = 'Healthy';
-
-          if (utilizationPct > 90) {
-            statusColor = 'text-red-400';
-            bgColor = 'bg-red-900/20 border-red-500/30';
-            statusText = 'At Limit';
-          } else if (utilizationPct > 70) {
-            statusColor = 'text-yellow-400';
-            bgColor = 'bg-yellow-900/20 border-yellow-500/30';
-            statusText = 'Near Limit';
-          }
-
-          return (
-            <div className={`mb-3 p-2 border rounded text-xs ${bgColor}`}>
-              <div className="flex justify-between items-center mb-1">
-                <span className="text-gray-400">House Status</span>
-                <span className={`font-bold ${statusColor}`}>{statusText}</span>
+            {/* Inline Stats Display */}
+            <div className="bg-gray-800/30 rounded-lg p-4 space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Win Chance</span>
+                <span className="font-bold text-yellow-400">{winChance.toFixed(1)}%</span>
               </div>
-              <div className="flex justify-between text-gray-300">
-                <span>Balance: {houseBalanceICP.toFixed(4)} ICP</span>
-                <span>Max Payout: {maxAllowedPayout.toFixed(4)} ICP</span>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Multiplier</span>
+                <span className="font-bold text-green-400">{multiplier.toFixed(2)}x</span>
               </div>
-              {utilizationPct > 70 && (
-                <div className={`mt-1 text-center ${statusColor} font-semibold`}>
-                  ⚠️ Your bet is using {utilizationPct.toFixed(0)}% of house limit
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Max Bet</span>
+                <span className="font-bold text-blue-400">{maxBet.toFixed(2)} ICP</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Potential Win</span>
+                <span className="font-bold text-dfinity-turquoise">{(gameState.betAmount * multiplier).toFixed(2)} ICP</span>
+              </div>
+            </div>
+
+            {/* House Status (Compact) */}
+            {(() => {
+              const houseBalanceICP = Number(balance.house) / E8S_PER_ICP;
+              const maxAllowedPayout = houseBalanceICP * 0.1;
+              const currentPotentialPayout = gameState.betAmount * multiplier;
+              const utilizationPct = maxAllowedPayout > 0 ? (currentPotentialPayout / maxAllowedPayout) * 100 : 0;
+
+              let statusColor = 'text-green-400';
+              let statusText = 'Healthy';
+
+              if (utilizationPct > 90) {
+                statusColor = 'text-red-400';
+                statusText = 'At Limit';
+              } else if (utilizationPct > 70) {
+                statusColor = 'text-yellow-400';
+                statusText = 'Near Limit';
+              }
+
+              return (
+                <div className="text-xs text-gray-400 bg-gray-800/30 rounded p-2">
+                  <div className="flex justify-between items-center">
+                    <span>House Status</span>
+                    <span className={`font-bold ${statusColor}`}>{statusText}</span>
+                  </div>
+                  {utilizationPct > 70 && (
+                    <div className={`text-center mt-1 ${statusColor}`}>
+                      ⚠️ Using {utilizationPct.toFixed(0)}% of house limit
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          );
-        })()}
+              );
+            })()}
 
-        {/* Collapsible How It Works */}
-        <details className="mb-3">
-          <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-300 text-center">
-            💡 How it works
-          </summary>
-          <div className="text-xs text-gray-400 mt-2 p-2 bg-gray-800/50 rounded">
-            Choose a target number and direction. If you roll exactly on the target, the house wins (0.99% edge).
-            Otherwise, standard over/under rules apply. Clean multiplier: {multiplier.toFixed(2)}x = 100 ÷ {direction === 'Over' ? (100 - targetNumber) : targetNumber} winning numbers.
-          </div>
-        </details>
+            {/* Roll Button */}
+            <GameButton
+              onClick={rollDice}
+              disabled={!actor}
+              loading={gameState.isPlaying}
+              label="ROLL DICE"
+              loadingLabel="Rolling..."
+              icon="🎲"
+            />
 
-        <GameButton
-          onClick={rollDice}
-          disabled={!actor}
-          loading={gameState.isPlaying}
-          label="ROLL"
-          loadingLabel="Rolling..."
-          icon="🎲"
-        />
-
-        {gameState.gameError && (
-          <div className="mt-4 p-4 bg-red-900/30 border border-red-500/50 rounded text-red-400 text-sm">
-            {gameState.gameError.split('\n').map((line, i) => (
-              <div key={i} className={i === 0 ? 'font-bold text-center mb-2' : 'text-left'}>
-                {line}
+            {/* Error Messages */}
+            {gameState.gameError && (
+              <div className="p-3 bg-red-900/30 border border-red-500/50 rounded text-red-400 text-sm">
+                {gameState.gameError.split('\n').map((line, i) => (
+                  <div key={i} className={i === 0 ? 'font-bold text-center mb-2' : 'text-left'}>
+                    {line}
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
-        )}
-      </div>
 
-      {/* Dice Animation */}
-      <div className="card max-w-2xl mx-auto">
-        <DiceAnimation
-          targetNumber={animatingResult}
-          isRolling={gameState.isPlaying}
-          onAnimationComplete={handleAnimationComplete}
-        />
+          {/* RIGHT COLUMN: DICE ANIMATION */}
+          <div className="flex flex-col items-center justify-center">
+            {/* Dice Animation Component */}
+            <DiceAnimation
+              targetNumber={animatingResult}
+              isRolling={gameState.isPlaying}
+              onAnimationComplete={handleAnimationComplete}
+            />
 
-        {/* Win/Loss message */}
-        {gameState.lastResult && !gameState.isPlaying && (
-          <div className={`text-center mt-6 ${
-            gameState.lastResult.is_win ? 'text-green-400' : 'text-red-400'
-          }`}>
-            <div className="text-3xl font-bold mb-2">
-              {gameState.lastResult.is_win ? '🎉 WIN!' : '😢 LOSE'}
-            </div>
+            {/* Win/Loss Result Display */}
+            {gameState.lastResult && !gameState.isPlaying && (
+              <div className={`text-center mt-6 ${
+                gameState.lastResult.is_win ? 'text-green-400' : 'text-red-400'
+              }`}>
+                <div className="text-4xl font-bold mb-2">
+                  {gameState.lastResult.is_win ? '🎉 WIN!' : '😢 LOSE'}
+                </div>
 
-            {/* Show exact hit message */}
-            {!gameState.lastResult.is_win && gameState.lastResult.is_house_hit && (
-              <div className="text-lg text-yellow-400 mb-2">
-                🎯 Exact Hit! (House Wins)
+                {/* Exact hit indicator */}
+                {!gameState.lastResult.is_win && gameState.lastResult.is_house_hit && (
+                  <div className="text-lg text-yellow-400 mb-2">
+                    🎯 Exact Hit! (House Wins)
+                  </div>
+                )}
+
+                {/* Payout amount */}
+                {gameState.lastResult.is_win && (
+                  <div className="text-2xl font-bold">
+                    +{(Number(gameState.lastResult.payout) / E8S_PER_ICP).toFixed(4)} ICP
+                  </div>
+                )}
+
+                {/* Roll details */}
+                <div className="text-sm text-gray-400 mt-2">
+                  Rolled: {gameState.lastResult.rolled_number} |
+                  Target: {gameState.lastResult.target_number} |
+                  Direction: {'Over' in gameState.lastResult.direction ? 'Over' : 'Under'}
+                </div>
               </div>
             )}
 
-            {/* Show payout for wins */}
-            {gameState.lastResult.is_win && (
-              <div className="text-xl">
-                +{(Number(gameState.lastResult.payout) / 100_000_000).toFixed(4)} ICP
+            {/* How It Works (collapsible) */}
+            <details className="mt-4 w-full">
+              <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-300 text-center">
+                💡 How it works
+              </summary>
+              <div className="text-xs text-gray-400 mt-2 p-3 bg-gray-800/50 rounded">
+                Choose a target number and direction. If you roll exactly on the target,
+                the house wins (0.99% edge). Otherwise, standard over/under rules apply.
               </div>
-            )}
-
-            {/* Show roll details */}
-            <div className="text-sm text-gray-400 mt-2">
-              Rolled: {gameState.lastResult.rolled_number} |
-              Target: {gameState.lastResult.target_number} |
-              Direction: {'Over' in gameState.lastResult.direction ? 'Over' : 'Under'}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Game History Section */}
-      <div className="card max-w-4xl mx-auto">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-xl font-bold">Game History</h3>
-          <div className="flex gap-2">
-            <button
-              className="btn btn-sm"
-              onClick={() => setShowDetailedView(!showDetailedView)}
-            >
-              {showDetailedView ? 'Simple' : 'Detailed'} View
-            </button>
-            <button
-              className="btn btn-sm"
-              onClick={() => {
-                navigator.clipboard.writeText(csvExport);
-                alert('History copied to clipboard!');
-              }}
-            >
-              Copy CSV
-            </button>
+            </details>
           </div>
         </div>
+      </div>
+
+      {/* GAME HISTORY - Collapsible section at bottom */}
+      <div className="card max-w-5xl mx-auto mt-4">
+        <details open>
+          <summary className="text-xl font-bold cursor-pointer mb-4">
+            Game History
+          </summary>
+
+          <div className="flex justify-between items-center mb-4">
+            <div className="flex gap-2">
+              <button
+                className="btn btn-sm"
+                onClick={() => setShowDetailedView(!showDetailedView)}
+              >
+                {showDetailedView ? 'Simple' : 'Detailed'} View
+              </button>
+              <button
+                className="btn btn-sm"
+                onClick={() => {
+                  navigator.clipboard.writeText(csvExport);
+                  alert('History copied to clipboard!');
+                }}
+              >
+                Copy CSV
+              </button>
+            </div>
+          </div>
 
         {showDetailedView ? (
           // Detailed table view
@@ -605,20 +612,21 @@ export function DiceGame() {
           />
         )}
 
-        {/* Copy-pasteable text area for analysis */}
-        {showDetailedView && (
-          <details className="mt-4">
-            <summary className="cursor-pointer text-sm text-gray-400">
-              Raw Data for Analysis (Click to expand)
-            </summary>
-            <textarea
-              className="w-full h-32 mt-2 p-2 bg-gray-900 text-xs font-mono"
-              readOnly
-              value={csvExport}
-              onClick={(e) => e.currentTarget.select()}
-            />
-          </details>
-        )}
+          {/* Copy-pasteable text area for analysis */}
+          {showDetailedView && (
+            <details className="mt-4">
+              <summary className="cursor-pointer text-sm text-gray-400">
+                Raw Data for Analysis (Click to expand)
+              </summary>
+              <textarea
+                className="w-full h-32 mt-2 p-2 bg-gray-900 text-xs font-mono"
+                readOnly
+                value={csvExport}
+                onClick={(e) => e.currentTarget.select()}
+              />
+            </details>
+          )}
+        </details>
       </div>
     </GameLayout>
   );
