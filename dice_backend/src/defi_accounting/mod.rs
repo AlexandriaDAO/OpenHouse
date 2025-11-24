@@ -13,3 +13,6 @@ pub use query::{
     get_balance,
     get_max_allowed_payout,
 };
+
+#[cfg(test)]
+mod tests;

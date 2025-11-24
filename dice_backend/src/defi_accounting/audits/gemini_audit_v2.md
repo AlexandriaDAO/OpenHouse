@@ -1,3 +1,11 @@
+# 1. Medium, fixed in https://github.com/AlexandriaDAO/OpenHouse/pull/89/files
+
+
+
+
+
+
+
 # Gemini Audit V2 - Findings & Remediation
 
 **Auditor:** Gemini (Model 2.5)

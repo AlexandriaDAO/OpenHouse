@@ -128,15 +128,12 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
 
     match result {
         Ok(block_index) => {
-            // Credit user with amount + fee
+            // Credit user with amount
             // ICRC-2 transfer_from behavior:
-            // - User approves: amount + fee (e.g., 100.0001 ICP)
-            // - Canister receives: amount + fee (full approved amount arrives)
-            // - We must credit: amount + fee (to match what actually arrived)
-            //
-            // The fee is paid by the sender but arrives at the canister along with
-            // the amount. We need to track the full received balance.
-            let amount_received = amount + ICP_TRANSFER_FEE;
+            // - User pays: amount + fee
+            // - Canister receives: amount
+            // - Fee is burned/collected by the Ledger
+            let amount_received = amount;
 
             let new_balance = USER_BALANCES_STABLE.with(|balances| {
                 let mut balances = balances.borrow_mut();
