@@ -3,7 +3,7 @@ export type GameType = 'dice' | 'crash' | 'plinko' | 'mines';
 
 // Balance information for a single game
 export interface GameBalance {
-  wallet: bigint;  // User's ICP wallet balance
+  wallet: bigint;  // User's USDT wallet balance
   game: bigint;    // User's balance in the specific game canister
   house: bigint;   // House pot balance for the game
 }
@@ -82,4 +82,12 @@ export class BalanceFetchError extends Error {
     super(message || `Failed to fetch balance for ${game}: ${originalError.message}`);
     this.name = 'BalanceFetchError';
   }
+}
+
+export const DECIMALS_PER_CKUSDT = 1_000_000;
+export const TRANSFER_FEE = 2;
+
+export function formatUSDT(amount: bigint): string {
+  const usdt = Number(amount) / DECIMALS_PER_CKUSDT;
+  return `$${usdt.toFixed(2)}`;
 }
