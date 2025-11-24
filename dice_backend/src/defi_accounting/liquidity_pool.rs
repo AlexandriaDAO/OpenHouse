@@ -138,6 +138,36 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
     let caller = ic_cdk::api::msg_caller();
     let amount_nat = Nat::from(amount);
 
+    // Pre-Flight Check: Calculate projected shares BEFORE transfer
+    // This prevents "dust loss" where users send funds but get 0 shares.
+    let projected_shares = POOL_STATE.with(|state| {
+        let pool_state = state.borrow().get().clone();
+        let current_reserve = pool_state.reserve.clone();
+        let total_shares = calculate_total_supply();
+
+        if total_shares == Nat::from(0u64) {
+            // Initial deposit logic (simulation)
+            let initial_shares = amount_nat.clone();
+            let burned_shares = Nat::from(MINIMUM_LIQUIDITY);
+            
+            if initial_shares < burned_shares {
+                return Ok::<Nat, String>(Nat::from(0u64));
+            }
+            Ok::<Nat, String>(initial_shares - burned_shares)
+        } else {
+            // Standard logic (simulation)
+            let numerator = amount_nat.clone() * total_shares;
+            if current_reserve == Nat::from(0u64) {
+                 return Ok::<Nat, String>(Nat::from(0u64));
+            }
+            Ok::<Nat, String>(numerator / current_reserve)
+        }
+    })?;
+
+    if projected_shares == Nat::from(0u64) {
+        return Err("Deposit too small: results in 0 shares".to_string());
+    }
+
     // Transfer from user (requires prior ICRC-2 approval)
     match transfer_from_user(caller, amount).await {
         Err(e) => return Err(format!("Transfer failed: {}", e)),
