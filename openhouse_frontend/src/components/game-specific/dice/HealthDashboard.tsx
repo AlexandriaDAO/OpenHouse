@@ -1,35 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import useDiceActor from '../../../hooks/actors/useDiceActor';
-
-interface AccountingStats {
-  total_user_deposits: bigint;
-  unique_depositors: bigint;
-  house_balance: bigint;
-  canister_balance: bigint;
-}
-
-interface PoolStats {
-  total_shares: bigint;
-  pool_reserve: bigint;
-  share_price: bigint;
-  total_liquidity_providers: bigint;
-  minimum_liquidity_burned: bigint;
-  is_initialized: boolean;
-}
-
-interface GameStats {
-  total_games: bigint;
-  total_volume: bigint;
-  house_profit: bigint;
-  games_won: bigint;
-  games_lost: bigint;
-}
+import { AccountingStats, PoolStats, GameStats } from '../../../types/dice-backend';
 
 export const HealthDashboard: React.FC = () => {
   const { actor: diceActor } = useDiceActor();
 
   const [showHealthCheck, setShowHealthCheck] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const [accounting, setAccounting] = useState<AccountingStats | null>(null);
   const [poolStats, setPoolStats] = useState<PoolStats | null>(null);
@@ -37,10 +16,26 @@ export const HealthDashboard: React.FC = () => {
   const [auditStatus, setAuditStatus] = useState<string>('');
   const [canAcceptBets, setCanAcceptBets] = useState<boolean | null>(null);
 
+  // Auto-refresh effect
+  useEffect(() => {
+    if (showHealthCheck && !accounting) {
+      fetchHealthMetrics();
+    }
+
+    if (showHealthCheck) {
+      const interval = setInterval(fetchHealthMetrics, 30000); // Auto-refresh every 30 seconds
+      return () => clearInterval(interval);
+    }
+  }, [showHealthCheck, diceActor]);
+
   const fetchHealthMetrics = async () => {
-    if (!diceActor) return;
+    if (!diceActor) {
+      setError('Actor not available. Please ensure you are connected.');
+      return;
+    }
 
     setIsLoading(true);
+    setError(null);
 
     try {
       // Fetch all stats in parallel
@@ -57,8 +52,12 @@ export const HealthDashboard: React.FC = () => {
       setGameStats(gameResult);
       setAuditStatus('Ok' in auditResult ? auditResult.Ok : auditResult.Err);
       setCanAcceptBets(betsResult);
-    } catch (err) {
+      setLastUpdated(new Date());
+      setError(null);
+    } catch (err: any) {
       console.error('Failed to fetch health metrics:', err);
+      const errorMessage = err?.message || 'Unknown error occurred';
+      setError(`Failed to fetch stats: ${errorMessage}`);
       setAuditStatus('Error fetching metrics');
     } finally {
       setIsLoading(false);
@@ -95,17 +94,19 @@ export const HealthDashboard: React.FC = () => {
     return { excess: excess.toString(), excessICP, orphanedFees, isHealthy };
   };
 
+  const formatLastUpdated = () => {
+    if (!lastUpdated) return 'Never';
+    return lastUpdated.toLocaleTimeString();
+  };
+
   return (
-    <div className="card p-4 mt-6">
+    <div className="card p-4 mt-6 bg-gray-900/30 border border-gray-700">
       {/* Toggle Button */}
       <button
         onClick={() => {
           setShowHealthCheck(!showHealthCheck);
-          if (!showHealthCheck && !accounting) {
-            fetchHealthMetrics();
-          }
         }}
-        className="w-full px-4 py-2 bg-purple-600/80 hover:bg-purple-600 rounded text-sm font-bold flex items-center justify-center gap-2"
+        className="w-full px-4 py-2 bg-purple-600/80 hover:bg-purple-600 rounded text-sm font-bold flex items-center justify-center gap-2 transition-colors"
       >
         <span>📊</span>
         <span>{showHealthCheck ? 'Hide' : 'Show'} System Health Check</span>
@@ -114,14 +115,26 @@ export const HealthDashboard: React.FC = () => {
       {/* Health Dashboard */}
       {showHealthCheck && (
         <div className="mt-4 space-y-4">
-          {/* Refresh Button */}
-          <button
-            onClick={fetchHealthMetrics}
-            disabled={isLoading}
-            className="w-full px-3 py-1.5 bg-blue-600/80 hover:bg-blue-600 rounded text-xs font-bold disabled:opacity-50"
-          >
-            {isLoading ? '⏳ Loading...' : '🔄 Refresh Stats'}
-          </button>
+          {/* Error Display */}
+          {error && (
+            <div className="p-3 bg-red-900/30 border border-red-500/50 rounded text-red-400 text-sm">
+              <strong>⚠️ Error:</strong> {error}
+            </div>
+          )}
+
+          {/* Refresh Button with Last Updated */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={fetchHealthMetrics}
+              disabled={isLoading}
+              className="flex-1 px-3 py-1.5 bg-blue-600/80 hover:bg-blue-600 rounded text-xs font-bold disabled:opacity-50 transition-colors"
+            >
+              {isLoading ? '⏳ Loading...' : '🔄 Refresh Stats'}
+            </button>
+            <span className="text-xs text-gray-400">
+              Last updated: {formatLastUpdated()}
+            </span>
+          </div>
 
           {accounting && poolStats && gameStats && (
             <div className="space-y-4">
@@ -240,14 +253,14 @@ export const HealthDashboard: React.FC = () => {
               {/* Info */}
               <div className="text-xs text-gray-400 p-2 bg-gray-800/30 rounded">
                 💡 <strong>Health Check:</strong> This dashboard shows real-time system metrics for LP owners.
-                Refresh periodically to monitor pool performance and accounting integrity.
+                Stats auto-refresh every 30 seconds while visible.
               </div>
             </div>
           )}
 
-          {!accounting && !isLoading && (
+          {!accounting && !isLoading && !error && (
             <div className="text-center text-gray-400 text-sm py-4">
-              Click "Refresh Stats" to load health metrics
+              Loading health metrics...
             </div>
           )}
         </div>
