@@ -47,10 +47,6 @@ export interface GameStats {
   total_payouts: bigint;
   /** House profit/loss (in e8s) */
   house_profit: bigint;
-  /** Number of games won by players */
-  games_won: bigint;
-  /** Number of games lost by players */
-  games_lost: bigint;
 }
 
 /**

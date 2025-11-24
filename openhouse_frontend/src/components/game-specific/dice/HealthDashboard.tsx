@@ -72,10 +72,10 @@ export const HealthDashboard: React.FC = () => {
     return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   };
 
-  const calculateWinRate = () => {
-    if (!gameStats || gameStats.total_games === BigInt(0)) return '0.00';
-    const winRate = (Number(gameStats.games_won) / Number(gameStats.total_games)) * 100;
-    return winRate.toFixed(2);
+  const calculateHouseEdge = () => {
+    if (!gameStats || gameStats.total_volume === BigInt(0)) return '0.00';
+    const houseEdge = (Number(gameStats.house_profit) / Number(gameStats.total_volume)) * 100;
+    return houseEdge.toFixed(2);
   };
 
   const calculateExcess = () => {
@@ -231,22 +231,18 @@ export const HealthDashboard: React.FC = () => {
                     <span className="font-mono text-white">{formatICP(gameStats.total_volume)} ICP</span>
                   </div>
                   <div className="flex flex-col">
+                    <span className="text-gray-400">Total Payouts</span>
+                    <span className="font-mono text-white">{formatICP(gameStats.total_payouts)} ICP</span>
+                  </div>
+                  <div className="flex flex-col">
                     <span className="text-gray-400">House Profit</span>
                     <span className={`font-mono ${Number(gameStats.house_profit) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                       {formatICP(gameStats.house_profit)} ICP
                     </span>
                   </div>
                   <div className="flex flex-col">
-                    <span className="text-gray-400">Player Win Rate</span>
-                    <span className="font-mono text-white">{calculateWinRate()}%</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-gray-400">Games Won</span>
-                    <span className="font-mono text-green-400">{formatNumber(gameStats.games_won)}</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-gray-400">Games Lost</span>
-                    <span className="font-mono text-red-400">{formatNumber(gameStats.games_lost)}</span>
+                    <span className="text-gray-400">House Edge</span>
+                    <span className="font-mono text-white">{calculateHouseEdge()}%</span>
                   </div>
                 </div>
               </section>
