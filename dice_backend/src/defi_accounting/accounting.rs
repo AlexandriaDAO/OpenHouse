@@ -8,7 +8,7 @@ use ic_ledger_types::{
     AccountIdentifier, TransferArgs, Tokens, DEFAULT_SUBACCOUNT,
     MAINNET_LEDGER_CANISTER_ID, Memo, AccountBalanceArgs, BlockIndex, Timestamp,
 };
-use crate::types::{Account, TransferFromArgs, TransferFromError, TransferArg, TransferError, CKUSDT_CANISTER_ID};
+use crate::types::{Account, TransferFromArgs, TransferFromError, TransferArg, TransferError, CKUSDT_CANISTER_ID, TransferHistoryEntry};
 
 use crate::{MEMORY_MANAGER, Memory};
 use super::liquidity_pool;
@@ -426,6 +426,109 @@ async fn process_single_withdrawal(user: Principal) -> Result<(), String> {
     Ok(())
 }
 
+
+// =============================================================================
+// TRANSFER TO EXTERNAL WALLET
+// =============================================================================
+
+// Add transfer to external wallet (not just withdraw_all)
+#[update]
+pub async fn transfer_to_wallet(amount: u64, recipient: Principal) -> Result<u64, String> {
+    let caller = ic_cdk::api::msg_caller();
+
+    // Validate amount
+    if amount < MIN_WITHDRAW {
+        return Err(format!("Minimum transfer is {} USDT", MIN_WITHDRAW / 1_000_000));
+    }
+
+    // Check balance
+    let balance = get_balance_internal(caller);
+    if amount > balance {
+        return Err("Insufficient balance".to_string());
+    }
+
+    // Deduct from user balance
+    USER_BALANCES_STABLE.with(|balances| {
+        let mut balances = balances.borrow_mut();
+        let new_balance = balance - amount;
+        balances.insert(caller, new_balance);
+    });
+
+    // Execute transfer to recipient
+    match execute_ckusdt_transfer(recipient, amount).await {
+        Ok(block_index) => {
+            log_audit(AuditEvent::TransferToWallet {
+                from: caller,
+                to: recipient,
+                amount
+            });
+            Ok(block_index)
+        }
+        Err(e) => {
+            // Rollback balance on failure
+            USER_BALANCES_STABLE.with(|balances| {
+                balances.borrow_mut().insert(caller, balance);
+            });
+            Err(e)
+        }
+    }
+}
+
+// Helper function for ckUSDT transfers
+async fn execute_ckusdt_transfer(recipient: Principal, amount: u64) -> Result<u64, String> {
+    let ck_usdt_principal = Principal::from_text(CKUSDT_CANISTER_ID)
+        .expect("Invalid ckUSDT canister ID");
+
+    let transfer_args = TransferArg {
+        to: Account::from(recipient),
+        amount: Nat::from(amount - CKUSDT_TRANSFER_FEE),
+        fee: Some(Nat::from(CKUSDT_TRANSFER_FEE)),
+        memo: None,
+        from_subaccount: None,
+        created_at_time: Some(ic_cdk::api::time()),
+    };
+
+    let (result,): (Result<Nat, TransferError>,) =
+        ic_cdk::api::call::call(ck_usdt_principal, "icrc1_transfer", (transfer_args,))
+        .await
+        .map_err(|(code, msg)| format!("Transfer call failed: {:?} {}", code, msg))?;
+
+    match result {
+        Ok(block_index) => {
+            let block = block_index.0.try_into()
+                .map_err(|_| "Block index conversion error".to_string())?;
+            Ok(block)
+        }
+        Err(e) => Err(format!("Transfer failed: {:?}", e))
+    }
+}
+
+// Get transfer history
+#[query]
+pub fn get_transfer_history(limit: u32) -> Vec<TransferHistoryEntry> {
+    let caller = ic_cdk::api::msg_caller();
+
+    AUDIT_LOG.with(|log| {
+        log.borrow()
+            .iter()
+            .filter_map(|entry| {
+                match &entry.event {
+                    AuditEvent::TransferToWallet { from, to, amount } if from == &caller => {
+                        Some(TransferHistoryEntry {
+                            timestamp: entry.timestamp,
+                            recipient: *to,
+                            amount: *amount,
+                            block_index: 0, // Would need to store this in AuditEntry if needed, currently 0 as per plan
+                        })
+                    }
+                    _ => None
+                }
+            })
+            .rev() // Newest first
+            .take(limit as usize)
+            .collect()
+    })
+}
 
 // =============================================================================
 // PUBLIC QUERIES & UTILS

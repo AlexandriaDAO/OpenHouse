@@ -35,10 +35,29 @@ export type ApproveError =
 
 export type ApproveResult = { Ok: bigint } | { Err: ApproveError };
 
+export interface TransferArg {
+  to: Account;
+  amount: bigint;
+  fee: [] | [bigint];
+  memo: [] | [Uint8Array];
+  from_subaccount: [] | [Uint8Array];
+  created_at_time: [] | [bigint];
+}
+
+export type TransferError =
+  | { BadFee: { expected_fee: bigint } }
+  | { InsufficientFunds: { balance: bigint } }
+  | { TooOld: null }
+  | { CreatedInFuture: { ledger_time: bigint } }
+  | { Duplicate: { duplicate_of: bigint } }
+  | { TemporarilyUnavailable: null }
+  | { GenericError: { error_code: bigint; message: string } };
+
 // ICP Ledger Service Interface (minimal, just what we need)
 export interface ICPLedgerService {
   // ICRC-1 standard method
   icrc1_balance_of: (account: Account) => Promise<bigint>;
+  icrc1_transfer: (args: TransferArg) => Promise<{ Ok: bigint } | { Err: TransferError }>;
 
   // ICRC-2 standard method
   icrc2_approve: (args: ApproveArgs) => Promise<ApproveResult>;

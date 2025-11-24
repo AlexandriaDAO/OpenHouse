@@ -18,11 +18,14 @@
     "ic-use-actor": "^0.3.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.22.0"
+    "react-redux": "^9.1.0",
+    "react-router-dom": "^6.22.0",
+    "@reduxjs/toolkit": "^2.0.1"
   },
   "devDependencies": {
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.0",
+    "@types/react-redux": "^7.1.33",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.18",
     "postcss": "^8.4.35",

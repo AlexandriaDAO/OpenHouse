@@ -155,6 +155,14 @@ pub struct DetailedGameHistory {
 // ICRC-2 TYPES
 // =============================================================================
 
+#[derive(CandidType, Deserialize, Clone)]
+pub struct TransferHistoryEntry {
+    pub timestamp: u64,
+    pub recipient: Principal,
+    pub amount: u64,
+    pub block_index: u64,
+}
+
 #[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
 pub struct Account {
     pub owner: Principal,

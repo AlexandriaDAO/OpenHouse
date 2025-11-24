@@ -8,6 +8,9 @@ import useDiceActor from '../../../hooks/actors/useDiceActor';
 import useLedgerActor from '../../../hooks/actors/useLedgerActor';
 import { ApproveArgs } from '../../../types/ledger';
 import { DECIMALS_PER_CKUSDT, formatUSDT, TRANSFER_FEE } from '../../../types/balance';
+import { TransferModal } from '../../TransferModal';
+import { TransferHistory } from '../../TransferHistory';
+import { useAppSelector } from '../../../store/hooks';
 
 interface DiceAccountingPanelProps {
   gameBalance: bigint;  // Now required, not nullable
@@ -24,6 +27,9 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
   const { balance: walletBalance, refreshBalance } = useBalance();
   const { actor } = useDiceActor();
   const { actor: ledgerActor } = useLedgerActor();
+  
+  // Add Redux state (though mostly used by children, good to have context if needed)
+  const transferState = useAppSelector(state => state.transfer);
 
   // Get house balance from global state
   const gameBalanceContext = useGameBalance('dice');
@@ -31,6 +37,8 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
 
   const [depositAmount, setDepositAmount] = useState('10');
   const [showDepositModal, setShowDepositModal] = useState(false);
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [isDepositing, setIsDepositing] = useState(false);
   const [depositStep, setDepositStep] = useState<'idle' | 'approving' | 'depositing'>('idle');
   const [isWithdrawing, setIsWithdrawing] = useState(false);
@@ -204,6 +212,29 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
           </button>
         </div>
 
+        {/* Transfer Button */}
+        <button
+          onClick={() => setShowTransferModal(true)}
+          className="w-full bg-purple-600 text-white py-2 px-4 rounded hover:bg-purple-700 mt-3"
+        >
+          💸 Send to Wallet
+        </button>
+
+        {/* Transfer History Toggle */}
+        <button
+          onClick={() => setShowHistory(!showHistory)}
+          className="w-full border border-gray-500 py-2 px-4 rounded hover:bg-gray-700 mt-2 text-sm"
+        >
+          📜 {showHistory ? 'Hide' : 'Show'} Transfer History
+        </button>
+
+        {/* Transfer History Panel */}
+        {showHistory && (
+          <div className="mt-4">
+            <TransferHistory />
+          </div>
+        )}
+
         {/* Attention text when animation active */}
         {showDepositAnimation && (
           <p className="text-yellow-400 animate-pulse font-semibold text-xs text-center mt-2">
@@ -224,12 +255,24 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
         )}
       </div>
 
+      {/* Transfer Modal */}
+      <TransferModal
+        isOpen={showTransferModal}
+        onClose={() => setShowTransferModal(false)}
+        gameBalance={gameBalance}
+        onTransferComplete={() => {
+          onBalanceChange();
+          setShowTransferModal(false);
+        }}
+      />
+
       {/* Deposit Modal */}
       {showDepositModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowDepositModal(false)}>
           <div className="bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4 border border-gray-700" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-xl font-bold text-white mb-4">💰 Buy Chips</h3>
-
+            
+            {/* Existing Deposit Modal Content */}
             <div className="mb-4">
               <label className="block text-sm text-gray-400 mb-2">Amount (USDT)</label>
               <input

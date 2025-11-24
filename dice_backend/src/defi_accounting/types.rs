@@ -68,6 +68,7 @@ pub enum AuditEvent {
     ParentFeeCredited { amount: u64 },
     ParentFeeFallback { amount: u64, reason: String },
     SystemInfo { message: String },
+    TransferToWallet { from: Principal, to: Principal, amount: u64 },
 }
 
 impl Storable for AuditEntry {
