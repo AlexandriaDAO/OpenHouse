@@ -85,7 +85,7 @@ export class BalanceFetchError extends Error {
 }
 
 export const DECIMALS_PER_CKUSDT = 1_000_000;
-export const TRANSFER_FEE = 2;
+export const TRANSFER_FEE = 10_000;
 
 export function formatUSDT(amount: bigint): string {
   const usdt = Number(amount) / DECIMALS_PER_CKUSDT;

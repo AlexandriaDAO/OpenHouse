@@ -3,6 +3,7 @@ import { Principal } from '@dfinity/principal';
 import { useAuth } from '../../../providers/AuthProvider';
 import useDiceActor from '../../../hooks/actors/useDiceActor';
 import useLedgerActor from '../../../hooks/actors/useLedgerActor';
+import { DECIMALS_PER_CKUSDT, TRANSFER_FEE, formatUSDT } from '../../../types/balance';
 
 interface PoolStats {
   total_shares: bigint;
@@ -27,7 +28,7 @@ export const DiceLiquidityPanel: React.FC = () => {
   // State
   const [poolStats, setPoolStats] = useState<PoolStats | null>(null);
   const [myPosition, setMyPosition] = useState<LPPosition | null>(null);
-  const [depositAmount, setDepositAmount] = useState('1.0');
+  const [depositAmount, setDepositAmount] = useState('10');
   const [isDepositing, setIsDepositing] = useState(false);
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,14 +68,11 @@ export const DiceLiquidityPanel: React.FC = () => {
     setSuccess(null);
 
     try {
-      // ICRC-2 standard transfer fee
-      const TRANSFER_FEE = 10_000; // 0.0001 ICP
+      const amount = BigInt(Math.floor(parseFloat(depositAmount) * DECIMALS_PER_CKUSDT));
 
-      const amountE8s = BigInt(Math.floor(parseFloat(depositAmount) * 100_000_000));
-
-      // Validate
-      if (amountE8s < BigInt(100_000_000)) {
-        setError('Minimum deposit is 1 ICP');
+      // Validate (Min 10 USDT)
+      if (amount < BigInt(10_000_000)) {
+        setError('Minimum deposit is 10 USDT');
         setIsDepositing(false);
         return;
       }
@@ -85,7 +83,7 @@ export const DiceLiquidityPanel: React.FC = () => {
       const diceBackendPrincipal = Principal.fromText('whchi-hyaaa-aaaao-a4ruq-cai');
 
       // Approve amount + fee (not just amount)
-      const approvalAmount = amountE8s + BigInt(TRANSFER_FEE);
+      const approvalAmount = amount + BigInt(TRANSFER_FEE);
 
       const approveArgs = {
         spender: {
@@ -108,12 +106,12 @@ export const DiceLiquidityPanel: React.FC = () => {
       }
 
       // Step 2: Call deposit_liquidity (uses transfer_from internally)
-      const result = await diceActor.deposit_liquidity(amountE8s);
+      const result = await diceActor.deposit_liquidity(amount);
 
       if ('Ok' in result) {
         const shares = result.Ok;
-        setSuccess(`Deposited ${depositAmount} ICP! Received ${shares.toString()} shares`);
-        setDepositAmount('1.0');
+        setSuccess(`Deposited ${depositAmount} USDT! Received ${shares.toString()} shares`);
+        setDepositAmount('10');
 
         // Refresh stats
         const stats = await diceActor.get_pool_stats();
@@ -142,9 +140,9 @@ export const DiceLiquidityPanel: React.FC = () => {
       const result = await diceActor.withdraw_all_liquidity();
 
       if ('Ok' in result) {
-        const amountE8s = result.Ok;
-        const amountICP = Number(amountE8s) / 100_000_000;
-        setSuccess(`Withdrew ${amountICP.toFixed(4)} ICP!`);
+        const amount = result.Ok;
+        const amountUSDT = Number(amount) / DECIMALS_PER_CKUSDT;
+        setSuccess(`Withdrew ${amountUSDT.toFixed(2)} USDT!`);
 
         // Refresh stats
         const stats = await diceActor.get_pool_stats();
@@ -160,6 +158,11 @@ export const DiceLiquidityPanel: React.FC = () => {
     }
   };
 
+  // Helper for formatting USDT values
+  const formatValue = (val: bigint) => {
+      return (Number(val) / DECIMALS_PER_CKUSDT).toFixed(2);
+  };
+
   // Render UI
   return (
     <div className="card max-w-2xl mx-auto p-4 mb-4">
@@ -171,13 +174,14 @@ export const DiceLiquidityPanel: React.FC = () => {
           <div className="bg-blue-900/10 p-2 rounded border border-blue-500/20">
             <p className="text-xs text-gray-400">Total Pool Reserve</p>
             <p className="text-sm font-bold text-blue-400">
-              {(Number(poolStats.pool_reserve) / 100_000_000).toFixed(4)} ICP
+              {formatValue(poolStats.pool_reserve)} USDT
             </p>
           </div>
           <div className="bg-purple-900/10 p-2 rounded border border-purple-500/20">
             <p className="text-xs text-gray-400">Share Price</p>
             <p className="text-sm font-bold text-purple-400">
-              {(Number(poolStats.share_price) / 100_000_000).toFixed(8)} ICP
+              {/* Share price needs high precision */}
+              {(Number(poolStats.share_price) / DECIMALS_PER_CKUSDT).toFixed(6)} USDT
             </p>
           </div>
           <div className="bg-green-900/10 p-2 rounded border border-green-500/20">
@@ -207,7 +211,7 @@ export const DiceLiquidityPanel: React.FC = () => {
             <div>
               <span className="text-gray-400">Redeemable:</span>
               <span className="ml-2 text-white font-mono">
-                {(Number(myPosition.redeemable_icp) / 100_000_000).toFixed(4)} ICP
+                {formatValue(myPosition.redeemable_icp)} USDT
               </span>
             </div>
           </div>
@@ -224,9 +228,9 @@ export const DiceLiquidityPanel: React.FC = () => {
               value={depositAmount}
               onChange={(e) => setDepositAmount(e.target.value)}
               className="flex-1 bg-gray-900/50 border border-gray-700 rounded px-3 py-2 text-sm"
-              placeholder="Amount (ICP)"
-              min="1.0"
-              step="0.1"
+              placeholder="Amount (USDT)"
+              min="10"
+              step="1"
               disabled={isDepositing}
             />
             <button
@@ -265,7 +269,7 @@ export const DiceLiquidityPanel: React.FC = () => {
 
       {/* Info */}
       <div className="text-xs text-gray-400 mt-3 p-2 bg-gray-800/50 rounded">
-        <strong>How it works:</strong> Deposit ICP to earn from house profits.
+        <strong>How it works:</strong> Deposit USDT to earn from house profits.
         You receive shares representing your pool ownership. Withdraw anytime (1% fee).
         ICRC-2 approval required before deposit.
       </div>

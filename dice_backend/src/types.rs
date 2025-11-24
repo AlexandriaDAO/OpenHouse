@@ -11,7 +11,7 @@ pub const DECIMALS_PER_CKUSDT: u64 = 1_000_000; // 1 ckUSDT = 1,000,000 decimals
 pub const MIN_BET: u64 = 10_000; // 0.01 USDT
 pub const MAX_NUMBER: u8 = 100; // Dice rolls 0-100
 pub const CKUSDT_CANISTER_ID: &str = "cngnf-vqaaa-aaaar-qag4q-cai";
-pub const CKUSDT_TRANSFER_FEE: u64 = 2;
+pub const CKUSDT_TRANSFER_FEE: u64 = 10_000;
 
 // =============================================================================
 // ENUMS

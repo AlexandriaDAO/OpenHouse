@@ -7,7 +7,7 @@ use std::borrow::Cow;
 use num_traits::ToPrimitive;
 use ic_ledger_types::MAINNET_LEDGER_CANISTER_ID;
 
-use crate::types::{Account, TransferFromArgs, TransferFromError, CKUSDT_CANISTER_ID};
+use crate::types::{Account, TransferFromArgs, TransferFromError, CKUSDT_CANISTER_ID, CKUSDT_TRANSFER_FEE};
 use super::accounting;
 
 // Constants
@@ -16,7 +16,6 @@ const MINIMUM_LIQUIDITY: u64 = 1000;
 const MIN_DEPOSIT: u64 = 1_000_000; // 1 USDT minimum for LP (lower than regular deposits to encourage liquidity)
 const MIN_WITHDRAWAL: u64 = 100_000; // 0.1 USDT
 const MIN_OPERATING_BALANCE: u64 = 100_000_000; // 100 USDT to operate games
-const TRANSFER_FEE: u64 = 2; // 0.000002 USDT
 const PARENT_STAKER_CANISTER: &str = "e454q-riaaa-aaaap-qqcyq-cai";
 const LP_WITHDRAWAL_FEE_BPS: u64 = 100; // 1%
 
@@ -164,7 +163,13 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
     }
 
     let caller = ic_cdk::api::msg_caller();
-    let amount_nat = Nat::from(amount);
+    
+    // Deduct fee from deposit to prevent insolvency (Canister pays fee)
+    if amount <= CKUSDT_TRANSFER_FEE {
+        return Err("Deposit too small to cover fees".to_string());
+    }
+    let net_amount = amount - CKUSDT_TRANSFER_FEE;
+    let amount_nat = Nat::from(net_amount);
 
     // Pre-Flight Check: Calculate projected shares BEFORE transfer
     // This prevents "dust loss" where users send funds but get 0 shares.
@@ -519,7 +524,7 @@ async fn transfer_from_user(user: Principal, amount: u64) -> Result<(), String> 
         },
         amount: Nat::from(amount),
         // Explicitly charge fee to sender to prevent protocol loss
-        fee: Some(Nat::from(TRANSFER_FEE)),
+        fee: Some(Nat::from(CKUSDT_TRANSFER_FEE)),
         memo: None,
         created_at_time: None,
         spender_subaccount: None,

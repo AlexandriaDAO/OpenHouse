@@ -8,14 +8,13 @@ use ic_ledger_types::{
     AccountIdentifier, TransferArgs, Tokens, DEFAULT_SUBACCOUNT,
     MAINNET_LEDGER_CANISTER_ID, Memo, AccountBalanceArgs, BlockIndex, Timestamp,
 };
-use crate::types::{Account, TransferFromArgs, TransferFromError, TransferArg, TransferError, CKUSDT_CANISTER_ID};
+use crate::types::{Account, TransferFromArgs, TransferFromError, TransferArg, TransferError, CKUSDT_CANISTER_ID, CKUSDT_TRANSFER_FEE};
 
 use crate::{MEMORY_MANAGER, Memory};
 use super::liquidity_pool;
 use super::types::{PendingWithdrawal, WithdrawalType, AuditEntry, AuditEvent};
 
 // Constants
-const CKUSDT_TRANSFER_FEE: u64 = 2; // 0.000002 USDT
 const MIN_DEPOSIT: u64 = 10_000_000; // 10 USDT
 const MIN_WITHDRAW: u64 = 1_000_000; // 1 USDT
 const USER_BALANCES_MEMORY_ID: u8 = 10;
@@ -129,12 +128,19 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
 
     match result {
         Ok(block_index) => {
-            // Credit user with amount
+            // Credit user with amount minus fee
             // ICRC-2 transfer_from behavior:
-            // - User pays: amount + fee
+            // - User pays: amount
+            // - Spender (Canister) pays: fee
             // - Canister receives: amount
-            // - Fee is burned/collected by the Ledger
-            let amount_received = amount;
+            // Net Canister Balance: +amount - fee
+            // User Balance Credit: amount - fee
+
+            // Safety check (though MIN_DEPOSIT should cover this)
+            if amount <= CKUSDT_TRANSFER_FEE {
+                return Err(format!("Deposit amount {} too small to cover fee {}", amount, CKUSDT_TRANSFER_FEE));
+            }
+            let amount_received = amount - CKUSDT_TRANSFER_FEE;
 
             let new_balance = USER_BALANCES_STABLE.with(|balances| {
                 let mut balances = balances.borrow_mut();
