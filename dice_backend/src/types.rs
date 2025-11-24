@@ -137,8 +137,8 @@ pub struct GameStats {
 pub struct DetailedGameHistory {
     pub game_id: u64,
     pub player: String,
-    pub bet_icp: f64,
-    pub won_icp: f64,
+    pub bet_usdt: f64,
+    pub won_usdt: f64,
     pub target_number: u8,
     pub direction: String,
     pub rolled_number: u8,
@@ -146,8 +146,8 @@ pub struct DetailedGameHistory {
     pub multiplier: f64,
     pub is_win: bool,
     pub timestamp: u64,
-    pub profit_loss: i64,  // e8s
-    pub expected_value: f64,  // e8s
+    pub profit_loss: i64,  // decimals (6-decimal precision)
+    pub expected_value: f64,  // decimals
     pub house_edge_actual: f64,  // percentage
 }
 

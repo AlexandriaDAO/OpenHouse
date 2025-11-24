@@ -8,14 +8,13 @@ use ic_ledger_types::{
     AccountIdentifier, TransferArgs, Tokens, DEFAULT_SUBACCOUNT,
     MAINNET_LEDGER_CANISTER_ID, Memo, AccountBalanceArgs, BlockIndex, Timestamp,
 };
-use crate::types::{Account, TransferFromArgs, TransferFromError, TransferArg, TransferError};
+use crate::types::{Account, TransferFromArgs, TransferFromError, TransferArg, TransferError, CKUSDT_CANISTER_ID};
 
 use crate::{MEMORY_MANAGER, Memory};
 use super::liquidity_pool;
 use super::types::{PendingWithdrawal, WithdrawalType, AuditEntry, AuditEvent};
 
 // Constants
-const CKUSDT_CANISTER_ID: Principal = Principal::from_slice(&[0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x3c, 0x01, 0x01]); // cngnf-vqaaa-aaaar-qag4q-cai
 const CKUSDT_TRANSFER_FEE: u64 = 2; // 0.000002 USDT
 const MIN_DEPOSIT: u64 = 10_000_000; // 10 USDT
 const MIN_WITHDRAW: u64 = 1_000_000; // 1 USDT
@@ -108,6 +107,7 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
     }
 
     let caller = ic_cdk::api::msg_caller();
+    let ck_usdt_principal = Principal::from_text(CKUSDT_CANISTER_ID).expect("Invalid principal constant");
 
     let args = TransferFromArgs {
         spender_subaccount: None,
@@ -123,7 +123,7 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
     };
 
     let (result,): (Result<Nat, TransferFromError>,) =
-        ic_cdk::api::call::call(CKUSDT_CANISTER_ID, "icrc2_transfer_from", (args,))
+        ic_cdk::api::call::call(ck_usdt_principal, "icrc2_transfer_from", (args,))
         .await
         .map_err(|(code, msg)| format!("Call failed: {:?} {}", code, msg))?;
 
@@ -251,6 +251,8 @@ pub fn schedule_lp_withdrawal(user: Principal, shares: Nat, reserve: Nat, amount
 // =============================================================================
 
 async fn attempt_transfer(user: Principal, amount: u64, created_at: u64) -> TransferResult {
+    let ck_usdt_principal = Principal::from_text(CKUSDT_CANISTER_ID).expect("Invalid principal constant");
+
     let args = TransferArg {
         from_subaccount: None,
         to: Account { owner: user, subaccount: None },
@@ -261,7 +263,7 @@ async fn attempt_transfer(user: Principal, amount: u64, created_at: u64) -> Tran
     };
 
     let call_result: Result<(Result<Nat, TransferError>,), _> = 
-        ic_cdk::api::call::call(CKUSDT_CANISTER_ID, "icrc1_transfer", (args,)).await;
+        ic_cdk::api::call::call(ck_usdt_principal, "icrc1_transfer", (args,)).await;
 
     match call_result {
         Ok((Ok(block_index),)) => {
@@ -531,16 +533,21 @@ pub fn get_audit_log(offset: usize, limit: usize) -> Vec<AuditEntry> {
 #[update]
 #[allow(deprecated)]
 pub async fn refresh_canister_balance() -> u64 {
+    let ck_usdt_principal = Principal::from_text(CKUSDT_CANISTER_ID).expect("Invalid principal constant");
+
     let account = Account {
         owner: ic_cdk::api::canister_self(),
         subaccount: None,
     };
 
-    let result: Result<(Nat,), _> = ic_cdk::api::call::call(CKUSDT_CANISTER_ID, "icrc1_balance_of", (account,)).await;
+    let result: Result<(Nat,), _> = ic_cdk::api::call::call(ck_usdt_principal, "icrc1_balance_of", (account,)).await;
 
     match result {
         Ok((balance,)) => {
-            let balance_u64 = balance.0.try_into().unwrap_or(0);
+            let balance_u64 = balance.0.try_into().unwrap_or_else(|_| {
+                ic_cdk::println!("CRITICAL: Balance exceeds u64::MAX");
+                u64::MAX
+            });
             CACHED_CANISTER_BALANCE.with(|cache| {
                 *cache.borrow_mut() = balance_u64;
             });
@@ -555,12 +562,14 @@ pub async fn refresh_canister_balance() -> u64 {
 #[update]
 #[allow(deprecated)]
 pub async fn get_canister_balance() -> u64 {
+    let ck_usdt_principal = Principal::from_text(CKUSDT_CANISTER_ID).expect("Invalid principal constant");
+
     let account = Account {
         owner: ic_cdk::api::canister_self(),
         subaccount: None,
     };
 
-    let result: Result<(Nat,), _> = ic_cdk::api::call::call(CKUSDT_CANISTER_ID, "icrc1_balance_of", (account,)).await;
+    let result: Result<(Nat,), _> = ic_cdk::api::call::call(ck_usdt_principal, "icrc1_balance_of", (account,)).await;
 
     match result {
         Ok((balance,)) => {

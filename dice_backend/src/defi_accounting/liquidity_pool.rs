@@ -13,7 +13,7 @@ use super::accounting;
 // Constants
 
 const MINIMUM_LIQUIDITY: u64 = 1000;
-const MIN_DEPOSIT: u64 = 1_000_000; // 1 USDT minimum for all deposits
+const MIN_DEPOSIT: u64 = 1_000_000; // 1 USDT minimum for LP (lower than regular deposits to encourage liquidity)
 const MIN_WITHDRAWAL: u64 = 100_000; // 0.1 USDT
 const MIN_OPERATING_BALANCE: u64 = 100_000_000; // 100 USDT to operate games
 const TRANSFER_FEE: u64 = 2; // 0.000002 USDT
@@ -505,7 +505,7 @@ pub fn restore_lp_position(user: Principal, shares: Nat, reserve_amount: Nat) {
 async fn transfer_from_user(user: Principal, amount: u64) -> Result<(), String> {
     // Frontend must call icrc2_approve first
     // Then we use transfer_from
-    let ledger = Principal::from_text(CKUSDT_CANISTER_ID).unwrap();
+    let ledger = Principal::from_text(CKUSDT_CANISTER_ID).expect("Invalid ckUSDT canister ID");
     let canister_id = ic_cdk::api::canister_self();
 
     let args = TransferFromArgs {

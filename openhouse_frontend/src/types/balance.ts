@@ -3,7 +3,7 @@ export type GameType = 'dice' | 'crash' | 'plinko' | 'mines';
 
 // Balance information for a single game
 export interface GameBalance {
-  wallet: bigint;  // User's ICP wallet balance
+  wallet: bigint;  // User's USDT wallet balance
   game: bigint;    // User's balance in the specific game canister
   house: bigint;   // House pot balance for the game
 }

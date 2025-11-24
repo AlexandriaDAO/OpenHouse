@@ -18,8 +18,8 @@ pub fn get_detailed_history(limit: u32) -> Vec<DetailedGameHistory> {
                 DetailedGameHistory {
                     game_id,
                     player: game.player.to_text(),
-                    bet_icp: (game.bet_amount as f64 / DECIMALS_PER_CKUSDT as f64),
-                    won_icp: if game.is_win { game.payout as f64 / DECIMALS_PER_CKUSDT as f64 } else { 0.0 },
+                    bet_usdt: (game.bet_amount as f64 / DECIMALS_PER_CKUSDT as f64),
+                    won_usdt: if game.is_win { game.payout as f64 / DECIMALS_PER_CKUSDT as f64 } else { 0.0 },
                     target_number: game.target_number,
                     direction: match game.direction {
                         RollDirection::Over => "Over".to_string(),
@@ -59,8 +59,8 @@ pub fn export_history_csv(limit: u32) -> String {
             "{},{},{:.4},{:.4},{},{},{},{:.2},{:.2},{},{},{}\n",
             game.game_id,
             game.player,
-            game.bet_icp,
-            game.won_icp,
+            game.bet_usdt,
+            game.won_usdt,
             game.target_number,
             game.direction,
             game.rolled_number,
