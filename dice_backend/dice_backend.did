@@ -30,6 +30,13 @@ type AccountingStats = record {
   unique_depositors: nat64;
 };
 
+type TransferHistoryEntry = record {
+  timestamp: nat64;
+  recipient: principal;
+  amount: nat64;
+  block_index: nat64;
+};
+
 type DetailedGameHistory = record {
   game_id: nat64;
   player: text;
@@ -82,6 +89,8 @@ service : {
   // Accounting methods
   deposit: (nat64) -> (variant { Ok: nat64; Err: text });
   withdraw_all: () -> (variant { Ok: nat64; Err: text });
+  transfer_to_wallet: (nat64, principal) -> (variant { Ok: nat64; Err: text });
+  get_transfer_history: (nat32) -> (vec TransferHistoryEntry) query;
   get_balance: (principal) -> (nat64) query;
   get_my_balance: () -> (nat64) query;
   get_house_balance: () -> (nat64) query;

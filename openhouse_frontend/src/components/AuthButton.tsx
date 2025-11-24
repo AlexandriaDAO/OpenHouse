@@ -2,11 +2,13 @@ import React, { useState } from 'react';
 import { useAuth } from '../providers/AuthProvider';
 import { useBalance } from '../providers/BalanceProvider';
 import { formatIcp } from '../types/ledger';
+import { WalletModal } from './WalletModal';
 
 export const AuthButton: React.FC = () => {
   const { isAuthenticated, principal, login, logout, isInitializing } = useAuth();
   const { balance, isLoading: balanceLoading, refreshBalance } = useBalance();
   const [copied, setCopied] = useState(false);
+  const [showWallet, setShowWallet] = useState(false);
 
   const handleCopyPrincipal = async () => {
     if (!principal) return;
@@ -100,10 +102,21 @@ export const AuthButton: React.FC = () => {
           </button>
         </div>
 
+        {/* Wallet Button */}
+        <button
+          onClick={() => setShowWallet(true)}
+          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors"
+          title="Manage Game Wallets"
+        >
+          <span>👛 Wallet</span>
+        </button>
+
         {/* Logout Button */}
         <button onClick={logout} className="btn-secondary">
           Logout
         </button>
+
+        <WalletModal isOpen={showWallet} onClose={() => setShowWallet(false)} />
       </div>
     );
   }

@@ -1,5 +1,5 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { transferCkUSDT } from '../thunks/transferThunks';
+import { transferFromGame, fetchGameTransferHistory } from '../thunks/transferThunks';
 
 export interface TransferState {
   isTransferring: boolean;
@@ -7,6 +7,7 @@ export interface TransferState {
   transferError: string | null;
   lastTransferId: bigint | null;
   recentTransfers: TransferRecord[];
+  isLoadingHistory: boolean;
 }
 
 export interface TransferRecord {
@@ -25,6 +26,7 @@ const initialState: TransferState = {
   transferError: null,
   lastTransferId: null,
   recentTransfers: [],
+  isLoadingHistory: false,
 };
 
 const transferSlice = createSlice({
@@ -46,12 +48,13 @@ const transferSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
-      .addCase(transferCkUSDT.pending, (state) => {
+      // Execute Transfer
+      .addCase(transferFromGame.pending, (state) => {
         state.isTransferring = true;
         state.transferError = null;
         state.transferSuccess = false;
       })
-      .addCase(transferCkUSDT.fulfilled, (state, action) => {
+      .addCase(transferFromGame.fulfilled, (state, action) => {
         state.isTransferring = false;
         state.transferSuccess = true;
         state.lastTransferId = action.payload.blockIndex;
@@ -60,25 +63,26 @@ const transferSlice = createSlice({
           id: action.payload.blockIndex.toString(),
           recipient: action.meta.arg.recipient,
           amount: action.meta.arg.amount,
-          fee: BigInt(2), // ckUSDT fee
+          fee: BigInt(2), // ckUSDT fee (approx)
           blockIndex: action.payload.blockIndex,
           timestamp: new Date(),
           status: 'success',
         });
       })
-      .addCase(transferCkUSDT.rejected, (state, action) => {
+      .addCase(transferFromGame.rejected, (state, action) => {
         state.isTransferring = false;
         state.transferError = action.payload || 'Transfer failed';
-        // Add failed transfer to history
-        state.recentTransfers.unshift({
-          id: `failed-${Date.now()}`,
-          recipient: action.meta.arg.recipient,
-          amount: action.meta.arg.amount,
-          fee: BigInt(2),
-          blockIndex: BigInt(0),
-          timestamp: new Date(),
-          status: 'failed',
-        });
+      })
+      // Fetch History
+      .addCase(fetchGameTransferHistory.pending, (state) => {
+        state.isLoadingHistory = true;
+      })
+      .addCase(fetchGameTransferHistory.fulfilled, (state, action) => {
+        state.isLoadingHistory = false;
+        state.recentTransfers = action.payload;
+      })
+      .addCase(fetchGameTransferHistory.rejected, (state) => {
+        state.isLoadingHistory = false;
       });
   },
 });

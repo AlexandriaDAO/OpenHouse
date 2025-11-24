@@ -1,132 +1,123 @@
-/**
- * Type definitions for Dice Backend API
- * These types match the backend canister's query function responses
- */
+import type { Principal } from '@dfinity/principal';
+import type { ActorMethod } from '@dfinity/agent';
+import type { IDL } from '@dfinity/candid';
 
-/**
- * Accounting statistics from get_accounting_stats()
- */
 export interface AccountingStats {
-  /** Total ICP deposited by all users (in e8s) */
-  total_user_deposits: bigint;
-  /** Number of unique users who have deposited */
-  unique_depositors: bigint;
-  /** House/pool balance (in e8s) */
-  house_balance: bigint;
-  /** Actual canister balance (in e8s) */
-  canister_balance: bigint;
+  'total_user_deposits' : bigint,
+  'unique_depositors' : bigint,
+  'house_balance' : bigint,
+  'canister_balance' : bigint,
 }
-
-/**
- * Liquidity pool statistics from get_pool_stats()
- */
-export interface PoolStats {
-  /** Total LP shares issued */
-  total_shares: bigint;
-  /** Pool reserve amount (in e8s) */
-  pool_reserve: bigint;
-  /** Current share price (in e8s) */
-  share_price: bigint;
-  /** Number of liquidity providers */
-  total_liquidity_providers: bigint;
-  /** Minimum liquidity burned on pool initialization */
-  minimum_liquidity_burned: bigint;
-  /** Whether pool has been initialized */
-  is_initialized: boolean;
+export interface DetailedGameHistory {
+  'multiplier' : number,
+  'expected_value' : number,
+  'direction' : string,
+  'player' : string,
+  'won_icp' : number,
+  'bet_icp' : number,
+  'is_win' : boolean,
+  'target_number' : number,
+  'game_id' : bigint,
+  'win_chance' : number,
+  'timestamp' : bigint,
+  'profit_loss' : bigint,
+  'rolled_number' : number,
+  'house_edge_actual' : number,
 }
-
-/**
- * Game performance statistics from get_stats()
- */
-export interface GameStats {
-  /** Total number of games played */
-  total_games: bigint;
-  /** Total betting volume (in e8s) */
-  total_volume: bigint;
-  /** Total payouts to winners (in e8s) */
-  total_payouts: bigint;
-  /** House profit/loss (in e8s) */
-  house_profit: bigint;
-}
-
-/**
- * LP position information from get_lp_position() or get_my_lp_position()
- */
-export interface LPPosition {
-  /** Number of LP shares owned */
-  shares: bigint;
-  /** Current value of shares (in e8s) */
-  value: bigint;
-}
-
-/**
- * Pending withdrawal information from get_withdrawal_status()
- */
-export interface PendingWithdrawal {
-  /** Amount being withdrawn (in e8s) */
-  amount: bigint;
-  /** Timestamp when withdrawal was initiated */
-  timestamp: bigint;
-  /** User's principal */
-  user: string;
-}
-
-/**
- * Audit log entry from get_audit_log()
- */
-export interface AuditEntry {
-  /** Timestamp of the event */
-  timestamp: bigint;
-  /** Type of event (deposit, withdrawal, bet, etc.) */
-  event_type: string;
-  /** User involved in the event */
-  user: string;
-  /** Amount involved (in e8s) */
-  amount: bigint;
-  /** Additional details */
-  details: string;
-}
-
-/**
- * Dice game result from play_dice(), get_game(), or get_recent_games()
- */
 export interface DiceResult {
-  /** Unique game ID */
-  game_id: bigint;
-  /** Player's principal */
-  player: string;
-  /** Bet amount (in e8s) */
-  bet_amount: bigint;
-  /** Target number (0-100) */
-  target_number: number;
-  /** Roll direction (Over or Under) */
-  direction: RollDirection;
-  /** Actual roll result (0-100) */
-  roll: number;
-  /** Whether player won */
-  won: boolean;
-  /** Payout amount (in e8s), 0 if lost */
-  payout: bigint;
-  /** Timestamp of the game */
-  timestamp: bigint;
+  'multiplier' : number,
+  'bet_amount' : bigint,
+  'direction' : RollDirection,
+  'player' : Principal,
+  'is_win' : boolean,
+  'target_number' : number,
+  'win_chance' : number,
+  'timestamp' : bigint,
+  'rolled_number' : number,
+  'payout' : bigint,
 }
-
-/**
- * Roll direction for dice game
- */
-export enum RollDirection {
-  Over = 'Over',
-  Under = 'Under'
+export interface GameStats {
+  'total_games' : bigint,
+  'total_payouts' : bigint,
+  'total_volume' : bigint,
+  'house_profit' : bigint,
 }
-
-/**
- * Result type for operations that can fail
- */
-export type Result<T, E> =
-  | { Ok: T }
-  | { Err: E };
-
-/**
- * Audit balance check result from audit_balances()
- */
-export type AuditResult = Result<string, string>;
+export interface LPPosition {
+  'shares' : bigint,
+  'redeemable_icp' : bigint,
+  'pool_ownership_percent' : number,
+}
+export interface PoolStats {
+  'total_shares' : bigint,
+  'share_price' : bigint,
+  'pool_reserve' : bigint,
+  'total_liquidity_providers' : bigint,
+  'is_initialized' : boolean,
+  'minimum_liquidity_burned' : bigint,
+}
+export type RollDirection = { 'Over' : null } |
+  { 'Under' : null };
+export interface TransferHistoryEntry {
+  'block_index' : bigint,
+  'recipient' : Principal,
+  'timestamp' : bigint,
+  'amount' : bigint,
+}
+export interface _SERVICE {
+  'audit_balances' : ActorMethod<[], { 'Ok' : string } | { 'Err' : string }>,
+  'calculate_payout_info' : ActorMethod<
+    [number, RollDirection],
+    { 'Ok' : [number, number] } |
+      { 'Err' : string }
+  >,
+  'can_accept_bets' : ActorMethod<[], boolean>,
+  'deposit' : ActorMethod<[bigint], { 'Ok' : bigint } | { 'Err' : string }>,
+  'deposit_liquidity' : ActorMethod<
+    [bigint],
+    { 'Ok' : bigint } |
+      { 'Err' : string }
+  >,
+  'export_history_csv' : ActorMethod<[number], string>,
+  'get_accounting_stats' : ActorMethod<[], AccountingStats>,
+  'get_balance' : ActorMethod<[Principal], bigint>,
+  'get_canister_balance' : ActorMethod<[], bigint>,
+  'get_current_seed_hash' : ActorMethod<[], string>,
+  'get_detailed_history' : ActorMethod<[number], Array<DetailedGameHistory>>,
+  'get_game' : ActorMethod<[bigint], [] | [DiceResult]>,
+  'get_house_balance' : ActorMethod<[], bigint>,
+  'get_house_mode' : ActorMethod<[], string>,
+  'get_lp_position' : ActorMethod<[Principal], LPPosition>,
+  'get_max_allowed_payout' : ActorMethod<[], bigint>,
+  'get_my_balance' : ActorMethod<[], bigint>,
+  'get_my_lp_position' : ActorMethod<[], LPPosition>,
+  'get_pool_stats' : ActorMethod<[], PoolStats>,
+  'get_recent_games' : ActorMethod<[number], Array<DiceResult>>,
+  'get_seed_info' : ActorMethod<[], [string, bigint, bigint]>,
+  'get_stats' : ActorMethod<[], GameStats>,
+  'get_transfer_history' : ActorMethod<[number], Array<TransferHistoryEntry>>,
+  'greet' : ActorMethod<[string], string>,
+  'play_dice' : ActorMethod<
+    [bigint, number, RollDirection, string],
+    { 'Ok' : DiceResult } |
+      { 'Err' : string }
+  >,
+  'refresh_canister_balance' : ActorMethod<[], bigint>,
+  'transfer_to_wallet' : ActorMethod<
+    [bigint, Principal],
+    { 'Ok' : bigint } |
+      { 'Err' : string }
+  >,
+  'verify_game_result' : ActorMethod<
+    [Uint8Array | number[], string, bigint, number],
+    { 'Ok' : boolean } |
+      { 'Err' : string }
+  >,
+  'withdraw_all' : ActorMethod<[], { 'Ok' : bigint } | { 'Err' : string }>,
+  'withdraw_all_liquidity' : ActorMethod<
+    [],
+    { 'Ok' : bigint } |
+      { 'Err' : string }
+  >,
+}
+export declare const idlFactory: IDL.InterfaceFactory;
+export declare const init: (args: { IDL: typeof IDL }) => IDL.Type[];

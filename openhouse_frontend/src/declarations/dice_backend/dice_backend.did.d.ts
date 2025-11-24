@@ -57,6 +57,12 @@ export interface PoolStats {
 }
 export type RollDirection = { 'Over' : null } |
   { 'Under' : null };
+export interface TransferHistoryEntry {
+  'block_index' : bigint,
+  'recipient' : Principal,
+  'timestamp' : bigint,
+  'amount' : bigint,
+}
 export interface _SERVICE {
   'audit_balances' : ActorMethod<[], { 'Ok' : string } | { 'Err' : string }>,
   'calculate_payout_info' : ActorMethod<
@@ -88,6 +94,7 @@ export interface _SERVICE {
   'get_recent_games' : ActorMethod<[number], Array<DiceResult>>,
   'get_seed_info' : ActorMethod<[], [string, bigint, bigint]>,
   'get_stats' : ActorMethod<[], GameStats>,
+  'get_transfer_history' : ActorMethod<[number], Array<TransferHistoryEntry>>,
   'greet' : ActorMethod<[string], string>,
   'play_dice' : ActorMethod<
     [bigint, number, RollDirection, string],
@@ -95,6 +102,11 @@ export interface _SERVICE {
       { 'Err' : string }
   >,
   'refresh_canister_balance' : ActorMethod<[], bigint>,
+  'transfer_to_wallet' : ActorMethod<
+    [bigint, Principal],
+    { 'Ok' : bigint } |
+      { 'Err' : string }
+  >,
   'verify_game_result' : ActorMethod<
     [Uint8Array | number[], string, bigint, number],
     { 'Ok' : boolean } |

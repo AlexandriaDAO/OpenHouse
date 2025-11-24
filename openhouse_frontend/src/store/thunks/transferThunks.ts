@@ -1,29 +1,32 @@
 import { createAsyncThunk } from '@reduxjs/toolkit';
-import { ActorSubclass } from '@dfinity/agent';
 import { Principal } from '@dfinity/principal';
-import { ICPLedgerService, TransferArg } from '../../types/ledger';
 import { TransferRecord } from '../slices/transferSlice';
+import { _SERVICE as DiceActor } from '../../types/dice-backend';
 
-interface TransferCkUSDTArgs {
-  actor: ActorSubclass<ICPLedgerService>;
+// We need a generic way to pass the game actor
+// For now, we only support Dice, so we type it as DiceActor
+// In future, we can use a union type or interface that all game backends implement
+type GameActor = DiceActor;
+
+interface TransferFromGameArgs {
+  actor: GameActor;
+  gameType: 'dice'; // Add other games later
   amount: bigint;
   recipient: string;
-  memo?: Uint8Array;
 }
 
 interface TransferResult {
   blockIndex: bigint;
-  fee: bigint;
   timestamp: bigint;
 }
 
-export const transferCkUSDT = createAsyncThunk<
+export const transferFromGame = createAsyncThunk<
   TransferResult,
-  TransferCkUSDTArgs,
+  TransferFromGameArgs,
   { rejectValue: string }
 >(
-  'transfer/executeCkUSDTTransfer',
-  async ({ actor, amount, recipient, memo }, { rejectWithValue }) => {
+  'transfer/executeFromGame',
+  async ({ actor, amount, recipient }, { rejectWithValue }) => {
     try {
       // Validate recipient principal
       let recipientPrincipal: Principal;
@@ -33,50 +36,20 @@ export const transferCkUSDT = createAsyncThunk<
         return rejectWithValue('Invalid recipient principal ID');
       }
 
-      // Validate amount (minimum 1 USDT)
-      if (amount < BigInt(1_000_000)) {
-        return rejectWithValue('Minimum transfer is 1 USDT');
-      }
-
-      // Build ICRC-1 transfer args
-      const transferArgs: TransferArg = {
-        to: {
-          owner: recipientPrincipal,
-          subaccount: [],
-        },
-        amount: amount,
-        fee: [], // Uses default fee
-        memo: memo ? [Array.from(memo)] : [],
-        from_subaccount: [],
-        created_at_time: [],
-      };
-
-      // Execute transfer
-      const result = await actor.icrc1_transfer(transferArgs);
+      // Execute transfer on backend
+      // The backend handles amount validation and balance checks
+      const result = await actor.transfer_to_wallet(amount, recipientPrincipal);
 
       if ('Ok' in result) {
         return {
           blockIndex: result.Ok,
-          fee: BigInt(2), // ckUSDT fee
-          timestamp: BigInt(Date.now() * 1_000_000), // Nanoseconds
+          timestamp: BigInt(Date.now()), // Backend doesn't return timestamp in result, but it logs it
         };
       } else {
-        // Handle specific error types
-        const error = result.Err;
-        if ('InsufficientFunds' in error) {
-          return rejectWithValue(`Insufficient funds. Balance: ${error.InsufficientFunds.balance}`);
-        } else if ('BadFee' in error) {
-          return rejectWithValue(`Invalid fee. Expected: ${error.BadFee.expected_fee}`);
-        } else if ('TooOld' in error) {
-          return rejectWithValue('Transaction too old');
-        } else if ('Duplicate' in error) {
-          return rejectWithValue(`Duplicate transaction: ${error.Duplicate.duplicate_of}`);
-        } else {
-          return rejectWithValue('Transfer failed: Unknown error');
-        }
+        return rejectWithValue(result.Err);
       }
     } catch (error) {
-      console.error('Transfer error:', error);
+      console.error('Game transfer error:', error);
       if (error instanceof Error) {
         return rejectWithValue(error.message);
       }
@@ -85,23 +58,22 @@ export const transferCkUSDT = createAsyncThunk<
   }
 );
 
-// Get transfer history from backend
-export const fetchTransferHistory = createAsyncThunk<
+export const fetchGameTransferHistory = createAsyncThunk<
   TransferRecord[],
-  { actor: ActorSubclass<any> },
+  { actor: GameActor },
   { rejectValue: string }
 >(
-  'transfer/fetchHistory',
+  'transfer/fetchGameHistory',
   async ({ actor }, { rejectWithValue }) => {
     try {
       const history = await actor.get_transfer_history(20);
-      return history.map((record: any) => ({
-        id: record.block_index.toString(),
-        recipient: record.to.toString(),
+      return history.map((record) => ({
+        id: record.block_index.toString(), // Use block index as ID
+        recipient: record.recipient.toString(),
         amount: record.amount,
-        fee: record.fee,
+        fee: BigInt(0), // Fee is internal/deducted
         blockIndex: record.block_index,
-        timestamp: new Date(Number(record.timestamp) / 1_000_000),
+        timestamp: new Date(Number(record.timestamp) / 1_000_000), // Convert nanoseconds to Date
         status: 'success' as const,
       }));
     } catch (error) {
@@ -110,4 +82,3 @@ export const fetchTransferHistory = createAsyncThunk<
     }
   }
 );
-

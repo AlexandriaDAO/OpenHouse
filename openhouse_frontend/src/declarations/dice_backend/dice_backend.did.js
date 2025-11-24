@@ -53,6 +53,12 @@ export const idlFactory = ({ IDL }) => {
     'total_volume' : IDL.Nat64,
     'house_profit' : IDL.Int64,
   });
+  const TransferHistoryEntry = IDL.Record({
+    'block_index' : IDL.Nat64,
+    'recipient' : IDL.Principal,
+    'timestamp' : IDL.Nat64,
+    'amount' : IDL.Nat64,
+  });
   return IDL.Service({
     'audit_balances' : IDL.Func(
         [],
@@ -105,6 +111,11 @@ export const idlFactory = ({ IDL }) => {
       ),
     'get_seed_info' : IDL.Func([], [IDL.Text, IDL.Nat64, IDL.Nat64], ['query']),
     'get_stats' : IDL.Func([], [GameStats], ['query']),
+    'get_transfer_history' : IDL.Func(
+        [IDL.Nat32],
+        [IDL.Vec(TransferHistoryEntry)],
+        ['query'],
+      ),
     'greet' : IDL.Func([IDL.Text], [IDL.Text], ['query']),
     'play_dice' : IDL.Func(
         [IDL.Nat64, IDL.Nat8, RollDirection, IDL.Text],
@@ -112,6 +123,11 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'refresh_canister_balance' : IDL.Func([], [IDL.Nat64], []),
+    'transfer_to_wallet' : IDL.Func(
+        [IDL.Nat64, IDL.Principal],
+        [IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text })],
+        [],
+      ),
     'verify_game_result' : IDL.Func(
         [IDL.Vec(IDL.Nat8), IDL.Text, IDL.Nat64, IDL.Nat8],
         [IDL.Variant({ 'Ok' : IDL.Bool, 'Err' : IDL.Text })],
