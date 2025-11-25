@@ -1,5 +1,5 @@
 import React from 'react';
-import { DiceLiquidityPanel, HealthDashboard, DiceStatisticsSection } from '../../components/game-specific/dice';
+import { DiceLiquidityPanel, HealthDashboard, DiceStatistics } from '../../components/game-specific/dice';
 import { InfoTooltip } from '../../components/InfoTooltip';
 
 // Tooltip content constants
@@ -101,7 +101,7 @@ export function DiceLiquidity() {
       </div>
 
       {/* Statistics Section */}
-      <DiceStatisticsSection />
+      <DiceStatistics />
 
       {/* Main LP Panel */}
       <DiceLiquidityPanel />
