@@ -163,12 +163,12 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
 
     let caller = ic_cdk::api::msg_caller();
     
-    // Deduct fee from deposit to prevent insolvency (Canister pays fee)
-    if amount <= CKUSDT_TRANSFER_FEE {
-        return Err("Deposit too small to cover fees".to_string());
-    }
-    let net_amount = amount - CKUSDT_TRANSFER_FEE;
-    let amount_nat = Nat::from(net_amount);
+    // No fee deduction needed - user already paid fee to ledger
+    // ICRC-2 transfer_from behavior:
+    // - User pays: amount + fee (to ledger)
+    // - Canister receives: amount (full amount)
+    // - Fee burned by ledger
+    let amount_nat = Nat::from(amount);
 
     // Pre-Flight Check: Calculate projected shares BEFORE transfer
     // This prevents "dust loss" where users send funds but get 0 shares.

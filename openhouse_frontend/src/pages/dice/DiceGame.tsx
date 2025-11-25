@@ -150,6 +150,11 @@ export function DiceGame() {
         `The house doesn't have enough funds to cover this bet's potential payout. ` +
         `Try lowering your bet or changing odds.`;
     }
+    if (errorMsg.includes('Randomness seed initializing')) {
+      return `⏳ WARMING UP - PLEASE WAIT\n\n` +
+        `The randomness generator is initializing (happens once after updates). ` +
+        `Please try again in a few seconds. No funds were deducted.`;
+    }
     return errorMsg;
   };
 
@@ -344,7 +349,7 @@ export function DiceGame() {
     // Frontend limit check
     const maxPayout = BigInt(Math.floor(gameState.betAmount * multiplier * DECIMALS_PER_CKUSDT));
     const maxAllowedPayout = (balance.house * BigInt(10)) / BigInt(100);
-    if (maxPayout > maxAllowedAllowedPayout) {
+    if (maxPayout > maxAllowedPayout) {
       gameState.setGameError('Potential payout exceeds house limit.');
       return;
     }

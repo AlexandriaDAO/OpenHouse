@@ -131,29 +131,24 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
 
     match result {
         Ok(block_index) => {
-            // Credit user with amount minus fee
-            // ICRC-2 transfer_from behavior:
-            // - User pays: amount
-            // - Spender (Canister) pays: fee
-            // - Canister receives: amount
-            // Net Canister Balance: +amount - fee
-            // User Balance Credit: amount - fee
-
-            // Safety check (though MIN_DEPOSIT should cover this)
-            if amount <= CKUSDT_TRANSFER_FEE {
-                return Err(format!("Deposit amount {} too small to cover fee {}", amount, CKUSDT_TRANSFER_FEE));
-            }
-            let amount_received = amount - CKUSDT_TRANSFER_FEE;
+            // Credit user with the full amount
+            // ICRC-2 transfer_from ACTUAL behavior:
+            // - User pays: amount + fee (debited from user's account)
+            // - Canister receives: amount (full amount)
+            // - Fee is burned/collected by the ledger
+            //
+            // Net Canister Balance: +amount (user already paid the fee)
+            // User Balance Credit: amount (full amount received)
 
             let new_balance = USER_BALANCES_STABLE.with(|balances| {
                 let mut balances = balances.borrow_mut();
                 let current = balances.get(&caller).unwrap_or(0);
-                let new_bal = current + amount_received;
+                let new_bal = current + amount;
                 balances.insert(caller, new_bal);
                 new_bal
             });
 
-            ic_cdk::println!("Deposit successful: {} deposited {} decimals at block {}", caller, amount_received, block_index);
+            ic_cdk::println!("Deposit successful: {} deposited {} decimals at block {}", caller, amount, block_index);
             Ok(new_balance)
         }
         Err(e) => Err(format!("Transfer failed: {:?}", e)),
