@@ -344,7 +344,7 @@ export function DiceGame() {
     // Frontend limit check
     const maxPayout = BigInt(Math.floor(gameState.betAmount * multiplier * DECIMALS_PER_CKUSDT));
     const maxAllowedPayout = (balance.house * BigInt(10)) / BigInt(100);
-    if (maxPayout > maxAllowedAllowedPayout) {
+    if (maxPayout > maxAllowedPayout) {
       gameState.setGameError('Potential payout exceeds house limit.');
       return;
     }
