@@ -1,5 +1,5 @@
 import React from 'react';
-import { DiceLiquidityPanel, HealthDashboard } from '../../components/game-specific/dice';
+import { DiceLiquidityPanel, HealthDashboard, DiceStatisticsSection } from '../../components/game-specific/dice';
 import { InfoTooltip } from '../../components/InfoTooltip';
 
 // Tooltip content constants
@@ -99,6 +99,9 @@ export function DiceLiquidity() {
           they return to the pool as a bonus for remaining LPs!
         </p>
       </div>
+
+      {/* Statistics Section */}
+      <DiceStatisticsSection />
 
       {/* Main LP Panel */}
       <DiceLiquidityPanel />
