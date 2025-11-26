@@ -90,6 +90,8 @@ impl AccountingModel {
             Operation::LPDeposit { user, amount } => self.lp_deposit(user, amount),
             Operation::LPWithdraw { user } => self.lp_withdraw(user),
             Operation::WithdrawFees => self.withdraw_fees(),
+            Operation::SettleBet { user, bet_amount, payout_amount } =>
+                self.settle_bet(user, bet_amount, payout_amount),
         }
     }
 
@@ -171,6 +173,56 @@ impl AccountingModel {
             self.pool_reserve = self.pool_reserve.checked_add(amount).expect("Pool overflow");
         }
         
+        // total_system_funds unchanged (internal transfer between user and pool)
+        OpResult::Success
+    }
+
+    /// Generic bet settlement - mirrors liquidity_pool::settle_bet()
+    /// This handles all payout scenarios including partial payouts (Plinko 0.2x)
+    fn settle_bet(&mut self, user: u64, bet_amount: u64, payout_amount: u64) -> OpResult {
+        // Check user has sufficient balance for the bet
+        let balance = self.user_balances.entry(user).or_insert(0);
+        if *balance < bet_amount {
+            return OpResult::InsufficientBalance;
+        }
+
+        // Deduct bet from user balance
+        *balance = balance.checked_sub(bet_amount).unwrap();
+
+        // Calculate pool flow based on payout vs bet
+        if payout_amount > bet_amount {
+            // Player won: pool pays profit
+            let profit = payout_amount - bet_amount;
+
+            // Solvency check
+            if self.pool_reserve < profit {
+                // Rollback bet deduction
+                *balance = balance.checked_add(bet_amount).unwrap();
+                return OpResult::InsufficientPoolReserve;
+            }
+
+            // Credit payout to user
+            *balance = balance.checked_add(payout_amount).expect("User balance overflow");
+
+            // Pool pays profit
+            self.pool_reserve = self.pool_reserve.checked_sub(profit).unwrap();
+        } else if payout_amount < bet_amount {
+            // Player lost (partial or total): pool gains difference
+            // CRITICAL: This is the key fix for partial payouts!
+            // For Plinko 0.2x: bet=100, payout=20, pool gains 80 (NOT 100)
+            let pool_gain = bet_amount - payout_amount;
+
+            // Credit payout to user (could be 0 for total loss)
+            *balance = balance.checked_add(payout_amount).expect("User balance overflow");
+
+            // Pool gains the difference
+            self.pool_reserve = self.pool_reserve.checked_add(pool_gain).expect("Pool overflow");
+        } else {
+            // Push: payout == bet, no pool change
+            // Just return the bet to user
+            *balance = balance.checked_add(payout_amount).expect("User balance overflow");
+        }
+
         // total_system_funds unchanged (internal transfer between user and pool)
         OpResult::Success
     }

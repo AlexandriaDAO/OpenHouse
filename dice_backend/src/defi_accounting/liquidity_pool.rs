@@ -555,6 +555,66 @@ pub(crate) fn update_pool_on_loss(bet: u64) {
     });
 }
 
+/// Settle a bet with any payout amount.
+///
+/// This is the primary API for game integration. Games should call this
+/// after determining the bet outcome instead of directly calling
+/// update_pool_on_win/loss.
+///
+/// # Arguments
+/// * `bet_amount` - Original wager amount in e8s
+/// * `payout_amount` - Total payout to player in e8s (0 for total loss, bet for push, >bet for win)
+///
+/// # Returns
+/// * `Ok(())` on success
+/// * `Err(String)` if pool cannot afford the payout profit
+///
+/// # Pool Flow
+/// - `payout > bet`: Pool pays profit (payout - bet)
+/// - `payout < bet`: Pool gains loss (bet - payout)
+/// - `payout == bet`: No pool change (push)
+///
+/// # Examples
+/// ```ignore
+/// // Total loss: bet 100, get 0 back. Pool gains 100.
+/// settle_bet(100, 0)?;
+///
+/// // Partial loss (Plinko 0.2x): bet 100, get 20 back. Pool gains 80.
+/// settle_bet(100, 20)?;
+///
+/// // Push: bet 100, get 100 back. No pool change.
+/// settle_bet(100, 100)?;
+///
+/// // Win (2x): bet 100, get 200 back. Pool pays 100.
+/// settle_bet(100, 200)?;
+/// ```
+pub fn settle_bet(bet_amount: u64, payout_amount: u64) -> Result<(), String> {
+    if payout_amount > bet_amount {
+        // Player won: pool pays profit
+        let profit = payout_amount - bet_amount;
+
+        // Solvency check
+        let pool_reserve = get_pool_reserve();
+        if profit > pool_reserve {
+            return Err(format!(
+                "POOL_INSOLVENT|Profit {} e8s exceeds reserve {} e8s|Bet not settled",
+                profit, pool_reserve
+            ));
+        }
+
+        update_pool_on_win(profit);
+    } else if payout_amount < bet_amount {
+        // Player lost (partial or total): pool gains the difference
+        // IMPORTANT: This handles partial payouts correctly!
+        // For Plinko 0.2x: bet=100, payout=20, pool gains 80 (NOT 100)
+        let pool_gain = bet_amount - payout_amount;
+        update_pool_on_loss(pool_gain);
+    }
+    // payout == bet: push, no pool change
+
+    Ok(())
+}
+
 /// Restore LP position after failed withdrawal (called by accounting module)
 pub fn restore_lp_position(user: Principal, shares: Nat, reserve_amount: Nat) {
     // Restore user's LP shares
