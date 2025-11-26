@@ -554,6 +554,27 @@ pub fn update_balance(user: Principal, new_balance: u64) -> Result<(), String> {
     Ok(())
 }
 
+/// Credits amount to user's balance (adds to existing balance).
+/// Used for slippage protection refunds.
+pub fn credit_balance(user: Principal, amount: u64) -> Result<(), String> {
+    if PENDING_WITHDRAWALS.with(|p| p.borrow().contains_key(&user)) {
+        return Err("Cannot credit: withdrawal pending".to_string());
+    }
+
+    USER_BALANCES_STABLE.with(|balances| {
+        let mut balances = balances.borrow_mut();
+        let current = balances.get(&user).unwrap_or(0);
+        let new_balance = current.checked_add(amount)
+            .ok_or("Balance overflow")?;
+
+        balances.insert(user, new_balance);
+
+        log_audit(AuditEvent::BalanceCredited { user, amount, new_balance });
+
+        Ok(())
+    })
+}
+
 /// Best-effort fee crediting.
 /// Returns true if credited, false if skipped (user has pending withdrawal).
 pub fn credit_parent_fee(user: Principal, amount: u64) -> bool {

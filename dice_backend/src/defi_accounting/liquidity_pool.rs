@@ -155,7 +155,7 @@ fn calculate_shares_for_deposit(amount_nat: &Nat) -> Result<Nat, String> {
 // in `accounting.rs` which use the legacy `transfer` (ICRC-1) where the user sends
 // funds directly to the canister's subaccount.
 #[update]
-pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
+pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) -> Result<Nat, String> {
     // Validate
     if amount < MIN_DEPOSIT {
         return Err(format!("Minimum deposit is {} e8s", MIN_DEPOSIT));
@@ -191,6 +191,27 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
 
     // Calculate shares to mint (reuse shared logic)
     let shares_to_mint = calculate_shares_for_deposit(&amount_nat)?;
+
+    // Slippage protection: if shares below minimum, refund to betting balance
+    if let Some(min_shares) = min_shares_expected {
+        if shares_to_mint < min_shares {
+            // Log the slippage event
+            accounting::log_audit(crate::defi_accounting::types::AuditEvent::SlippageProtectionTriggered {
+                user: caller,
+                deposit_amount: amount,
+                expected_min_shares: min_shares.clone(),
+                actual_shares: shares_to_mint.clone(),
+            });
+
+            // Refund to user's betting balance (safe - they can withdraw normally)
+            accounting::credit_balance(caller, amount)?;
+
+            return Err(format!(
+                "Slippage exceeded: expected min {} shares, would receive {}. Amount refunded to betting balance.",
+                min_shares, shares_to_mint
+            ));
+        }
+    }
 
     // SAFETY: This should never trigger after pre-flight check, but kept as defensive check
     if shares_to_mint == Nat::from(0u64) {
@@ -562,4 +583,9 @@ async fn transfer_from_user(user: Principal, amount: u64) -> Result<(), String> 
         Ok(_) => Ok(()),
         Err(e) => Err(format!("Transfer failed: {:?}", e)),
     }
+}
+
+#[query]
+pub fn calculate_shares_preview(amount: u64) -> Result<Nat, String> {
+    calculate_shares_for_deposit(&Nat::from(amount))
 }

@@ -74,10 +74,11 @@ service : {
   refresh_canister_balance: () -> (nat64);
 
   // Liquidity Pool Management
-  deposit_liquidity : (nat64) -> (variant { Ok: nat; Err: text });
+  deposit_liquidity : (nat64, opt nat) -> (variant { Ok: nat; Err: text });
   withdraw_all_liquidity : () -> (variant { Ok: nat64; Err: text });
 
   // LP Queries
+  calculate_shares_preview : (nat64) -> (variant { Ok: nat; Err: text }) query;
   get_lp_position : (principal) -> (LPPosition) query;
   get_my_lp_position : () -> (LPPosition) query;
   get_pool_stats : () -> (PoolStats) query;
