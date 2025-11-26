@@ -342,7 +342,7 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
             });
             accounting::log_audit(crate::defi_accounting::types::AuditEvent::ParentFeeFallback {
                 amount: fee_amount,
-                reason: "Credit failed".to_string()
+                reason: crate::defi_accounting::types::sanitize_error("Credit failed")
             });
         }
     }

@@ -77,11 +77,11 @@ pub(crate) enum TransferResult {
 // =============================================================================
 
 pub(crate) fn log_audit(event: AuditEvent) {
-    // Get next counter value and increment
+    // Get next counter value and increment (saturating_add prevents overflow)
     let idx = AUDIT_LOG_COUNTER.with(|counter| {
         let mut cell = counter.borrow_mut();
-        let current = cell.get().clone();
-        cell.set(current + 1);
+        let current = *cell.get();
+        cell.set(current.saturating_add(1));
         current
     });
 
@@ -95,10 +95,10 @@ pub(crate) fn log_audit(event: AuditEvent) {
         log.borrow_mut().insert(idx, entry);
     });
 
-    // Prune if over limit
+    // Prune if over limit (using saturating_sub for safety)
     let len = AUDIT_LOG_MAP.with(|log| log.borrow().len());
     if len > MAX_AUDIT_ENTRIES {
-        prune_oldest_audit_entries(len - MAX_AUDIT_ENTRIES);
+        prune_oldest_audit_entries(len.saturating_sub(MAX_AUDIT_ENTRIES));
     }
 }
 
@@ -379,7 +379,7 @@ async fn auto_withdraw_parent() {
              Ok(amount) => {
                  ic_cdk::println!("Auto-withdraw success: {} e8s to parent", amount);
                  log_audit(AuditEvent::SystemInfo {
-                     message: format!("Auto-withdrawal success: {} e8s", amount)
+                     message: crate::defi_accounting::types::sanitize_error(&format!("Auto-withdrawal success: {} e8s", amount))
                  });
              },
              Err(e) => {
