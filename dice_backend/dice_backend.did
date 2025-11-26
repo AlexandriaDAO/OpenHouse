@@ -85,7 +85,7 @@ service : {
   // LP Queries
   // WARNING: This is a query call. Actual shares may differ due to concurrent 
   // state changes. ALWAYS use min_shares_expected parameter for slippage protection.
-  // Do NOT rely on this preview for exact share amounts.
+  // Do NOT rely on this preview for exact share amounts as state may change by the time your tx executes.
   calculate_shares_preview : (nat64) -> (variant { Ok: nat; Err: text }) query;
   get_lp_position : (principal) -> (LPPosition) query;
   get_my_lp_position : () -> (LPPosition) query;

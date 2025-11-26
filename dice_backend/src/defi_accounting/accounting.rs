@@ -565,7 +565,7 @@ pub fn credit_balance(user: Principal, amount: u64) -> Result<(), String> {
         let mut balances = balances.borrow_mut();
         let current = balances.get(&user).unwrap_or(0);
         let new_balance = current.checked_add(amount)
-            .ok_or("Balance overflow")?;
+            .ok_or(format!("Balance overflow: current {} + amount {}", current, amount))?;
 
         balances.insert(user, new_balance);
 
