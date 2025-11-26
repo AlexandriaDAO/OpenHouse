@@ -168,6 +168,13 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
         return Err("Anonymous principal cannot deposit".to_string());
     }
 
+    // CRITICAL SAFETY CHECK: Ensure no pending withdrawals
+    // If we don't check this, a slippage refund could fail (because credit_balance checks this),
+    // leaving funds trapped in the canister (orphaned).
+    if accounting::get_withdrawal_status().is_some() {
+        return Err("Cannot deposit while withdrawal is pending. Please complete or abandon your pending withdrawal first.".to_string());
+    }
+
     // No fee deduction needed - user already paid fee to ledger
     // ICRC-2 transfer_from behavior:
     // - User pays: amount + fee (to ledger)
