@@ -17,9 +17,8 @@ const MIN_DEPOSIT: u64 = 10_000_000; // 10 USDT
 const MIN_WITHDRAW: u64 = 1_000_000; // 1 USDT
 const USER_BALANCES_MEMORY_ID: u8 = 10;
 const PENDING_WITHDRAWALS_MEMORY_ID: u8 = 20;
-const AUDIT_LOG_MEMORY_ID: u8 = 21; // Deprecated - old StableVec implementation
-const AUDIT_LOG_MAP_MEMORY_ID: u8 = 22; // New: BTreeMap for audit entries
-const AUDIT_LOG_COUNTER_MEMORY_ID: u8 = 23; // New: Counter for sequential keys
+const AUDIT_LOG_MAP_MEMORY_ID: u8 = 22;
+const AUDIT_LOG_COUNTER_MEMORY_ID: u8 = 23;
 const MAX_AUDIT_ENTRIES: u64 = 1000; // Retention limit
 /// Minimum balance before triggering automatic weekly withdrawal to parent canister.
 /// Set to 100 USDT to minimize gas costs while ensuring timely fee collection.
