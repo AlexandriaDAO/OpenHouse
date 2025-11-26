@@ -1,7 +1,7 @@
 use candid::{CandidType, Deserialize, Principal, Nat};
 use ic_cdk::{query, update};
 use ic_stable_structures::memory_manager::MemoryId;
-use ic_stable_structures::{StableBTreeMap, StableVec};
+use ic_stable_structures::{StableBTreeMap, StableCell};
 use std::cell::RefCell;
 use std::time::Duration;
 // Note: This module now uses ckUSDT (ICRC-2), not ICP ledger
@@ -17,7 +17,9 @@ const MIN_DEPOSIT: u64 = 10_000_000; // 10 USDT
 const MIN_WITHDRAW: u64 = 1_000_000; // 1 USDT
 const USER_BALANCES_MEMORY_ID: u8 = 10;
 const PENDING_WITHDRAWALS_MEMORY_ID: u8 = 20;
-const AUDIT_LOG_MEMORY_ID: u8 = 21;
+const AUDIT_LOG_MAP_MEMORY_ID: u8 = 22;
+const AUDIT_LOG_COUNTER_MEMORY_ID: u8 = 23;
+const MAX_AUDIT_ENTRIES: u64 = 1000; // Retention limit
 /// Minimum balance before triggering automatic weekly withdrawal to parent canister.
 /// Set to 100 USDT to minimize gas costs while ensuring timely fee collection.
 const PARENT_AUTO_WITHDRAW_THRESHOLD: u64 = 100_000_000; // 100 USDT
@@ -35,14 +37,19 @@ thread_local! {
         )
     );
 
-    // Audit trail (unbounded - monitor size periodically)
-    // Growth estimate: ~500 bytes/entry
-    // At 1000 entries/day: ~182MB/year
-    // At 100k entries total: ~50MB stable storage
-    // Recommendation: Monitor via canister status and archive/prune if exceeds 100k entries
-    static AUDIT_LOG: RefCell<StableVec<AuditEntry, Memory>> = RefCell::new(
-        StableVec::init(
-            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(AUDIT_LOG_MEMORY_ID)))
+    // Audit trail with automatic pruning
+    // Stores up to 1,000 entries using BTreeMap with sequential keys
+    // Oldest entries are automatically removed when limit is exceeded
+    static AUDIT_LOG_MAP: RefCell<StableBTreeMap<u64, AuditEntry, Memory>> = RefCell::new(
+        StableBTreeMap::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(AUDIT_LOG_MAP_MEMORY_ID)))
+        )
+    );
+
+    static AUDIT_LOG_COUNTER: RefCell<StableCell<u64, Memory>> = RefCell::new(
+        StableCell::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(AUDIT_LOG_COUNTER_MEMORY_ID))),
+            0u64
         )
     );
 
@@ -69,12 +76,42 @@ pub(crate) enum TransferResult {
 // =============================================================================
 
 pub(crate) fn log_audit(event: AuditEvent) {
-    AUDIT_LOG.with(|log| {
-        let entry = AuditEntry {
-            timestamp: ic_cdk::api::time(),
-            event: event.clone(),
-        };
-        log.borrow_mut().push(&entry);
+    // Get next counter value and increment (saturating_add prevents overflow)
+    let idx = AUDIT_LOG_COUNTER.with(|counter| {
+        let mut cell = counter.borrow_mut();
+        let current = *cell.get();
+        cell.set(current.saturating_add(1));
+        current
+    });
+
+    // Create and insert entry
+    let entry = AuditEntry {
+        timestamp: ic_cdk::api::time(),
+        event,
+    };
+
+    AUDIT_LOG_MAP.with(|log| {
+        log.borrow_mut().insert(idx, entry);
+    });
+
+    // Prune if over limit (using saturating_sub for safety)
+    let len = AUDIT_LOG_MAP.with(|log| log.borrow().len());
+    if len > MAX_AUDIT_ENTRIES {
+        prune_oldest_audit_entries(len.saturating_sub(MAX_AUDIT_ENTRIES));
+    }
+}
+
+fn prune_oldest_audit_entries(count: u64) {
+    AUDIT_LOG_MAP.with(|log| {
+        let mut log = log.borrow_mut();
+        // BTreeMap iterates in key order (oldest first since keys are sequential)
+        let keys_to_remove: Vec<u64> = log.iter()
+            .take(count as usize)
+            .map(|entry| entry.key().clone())
+            .collect();
+        for key in keys_to_remove {
+            log.remove(&key);
+        }
     });
 }
 
@@ -341,7 +378,7 @@ async fn auto_withdraw_parent() {
              Ok(amount) => {
                  ic_cdk::println!("Auto-withdraw success: {} e8s to parent", amount);
                  log_audit(AuditEvent::SystemInfo {
-                     message: format!("Auto-withdrawal success: {} e8s", amount)
+                     message: crate::defi_accounting::types::sanitize_error(&format!("Auto-withdrawal success: {} e8s", amount))
                  });
              },
              Err(e) => {
@@ -552,11 +589,13 @@ pub fn get_withdrawal_status() -> Option<PendingWithdrawal> {
 
 #[query]
 pub fn get_audit_log(offset: usize, limit: usize) -> Vec<AuditEntry> {
-    AUDIT_LOG.with(|log| {
+    AUDIT_LOG_MAP.with(|log| {
         let log = log.borrow();
+        // BTreeMap iterates in key order (sequential = chronological)
         log.iter()
             .skip(offset)
             .take(limit)
+            .map(|entry| entry.value())
             .collect()
     })
 }

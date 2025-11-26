@@ -60,10 +60,7 @@ impl Storable for PendingWithdrawal {
         )
     }
 
-    const BOUND: Bound = Bound::Bounded {
-        max_size: 2048, // Increased from 1000
-        is_fixed_size: false,
-    };
+    const BOUND: Bound = Bound::Unbounded;
 }
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
@@ -113,8 +110,5 @@ impl Storable for AuditEntry {
         )
     }
 
-    const BOUND: Bound = Bound::Bounded {
-        max_size: 2048, // Increased from 500
-        is_fixed_size: false,
-    };
+    const BOUND: Bound = Bound::Unbounded;
 }
