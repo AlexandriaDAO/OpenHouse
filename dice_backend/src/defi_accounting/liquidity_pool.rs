@@ -194,14 +194,6 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
                  min_shares, projected_shares
              ));
         }
-        
-        // P0 FIX: Check slippage BEFORE transfer to save user fees
-        if &projected_shares < min_shares {
-             return Err(format!(
-                "Slippage exceeded (Pre-Flight): expected min {} shares but would receive {} based on current pool state. Transaction cancelled to save transfer fees.",
-                min_shares, projected_shares
-            ));
-        }
     }
 
     // Transfer from user (requires prior ICRC-2 approval)
@@ -214,7 +206,10 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
     // Note: State could have changed during await above
     let shares_to_mint = calculate_shares_for_deposit(&amount_nat)?;
 
-    // Slippage protection (Post-Transfer): if shares below minimum, refund to betting balance
+    // Slippage protection (Post-Transfer)
+    // Even though we checked pre-flight, we must check again because state could have changed
+    // during the async transfer. If slippage occurs here, we MUST refund because
+    // the transfer already happened.
     if let Some(min_shares) = min_shares_expected {
         if shares_to_mint < min_shares {
             // Log the slippage event
