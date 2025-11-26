@@ -1,3 +1,12 @@
+Status: Completed
+
+- Fixed #1 in https://github.com/AlexandriaDAO/OpenHouse/pull/99/files
+- Fixed #2 in https://github.com/AlexandriaDAO/OpenHouse/pull/100/files
+- #3 is not a real set of issues. It is a false positive.
+
+
+
+
 # Comprehensive Audit Report: `defi_accounting` Module
 
 **Date:** November 25, 2025

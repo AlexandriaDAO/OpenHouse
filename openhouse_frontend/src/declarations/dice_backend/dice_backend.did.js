@@ -39,6 +39,11 @@ export const idlFactory = ({ IDL }) => {
     'payout' : IDL.Nat64,
   });
   return IDL.Service({
+    'abandon_withdrawal' : IDL.Func(
+        [],
+        [IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text })],
+        [],
+      ),
     'audit_balances' : IDL.Func(
         [],
         [IDL.Variant({ 'Ok' : IDL.Text, 'Err' : IDL.Text })],
@@ -96,6 +101,11 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'refresh_canister_balance' : IDL.Func([], [IDL.Nat64], []),
+    'retry_withdrawal' : IDL.Func(
+        [],
+        [IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text })],
+        [],
+      ),
     'verify_game_result' : IDL.Func(
         [IDL.Vec(IDL.Nat8), IDL.Text, IDL.Nat64, IDL.Nat8],
         [IDL.Variant({ 'Ok' : IDL.Bool, 'Err' : IDL.Text })],

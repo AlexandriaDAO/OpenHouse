@@ -1,3 +1,23 @@
+Status
+
+- Fixed crit-1 in https://github.com/AlexandriaDAO/OpenHouse/pull/99/files
+
+
+- High-1 is real
+- High-3 is real
+- crit 3 is real
+
+
+
+
+
+
+
+
+
+
+
+
 # DeFi Accounting Module - Comprehensive Security Audit
 
 **Version:** 1.0
@@ -116,7 +136,7 @@ This audit examines the DeFi accounting module designed to handle ckUSDT-based c
 ---
 
 ## CRITICAL Vulnerabilities
-
+<!-- 
 ### CRIT-1: Permanent Fund Lockup After MAX_RETRIES
 
 **Location:** `accounting.rs:392-397`
@@ -149,7 +169,7 @@ if pending.retries >= MAX_RETRIES {
 - Or implement exponential backoff with unlimited retries for uncertain errors
 - Or add user-callable function to cancel pending withdrawal and restore balance
 
----
+--- -->
 
 ### CRIT-2: LP Share Dilution via Concurrent Deposit Race Condition
 

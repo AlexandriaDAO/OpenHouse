@@ -43,6 +43,11 @@ export interface PoolStats {
 export type RollDirection = { 'Over' : null } |
   { 'Under' : null };
 export interface _SERVICE {
+  'abandon_withdrawal' : ActorMethod<
+    [],
+    { 'Ok' : bigint } |
+      { 'Err' : string }
+  >,
   'audit_balances' : ActorMethod<[], { 'Ok' : string } | { 'Err' : string }>,
   'calculate_payout_info' : ActorMethod<
     [number, RollDirection],
@@ -79,6 +84,7 @@ export interface _SERVICE {
       { 'Err' : string }
   >,
   'refresh_canister_balance' : ActorMethod<[], bigint>,
+  'retry_withdrawal' : ActorMethod<[], { 'Ok' : bigint } | { 'Err' : string }>,
   'verify_game_result' : ActorMethod<
     [Uint8Array | number[], string, bigint, number],
     { 'Ok' : boolean } |

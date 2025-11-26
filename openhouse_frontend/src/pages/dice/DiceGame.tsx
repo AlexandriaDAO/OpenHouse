@@ -93,6 +93,7 @@ export function DiceGame() {
   const [multiplier, setMultiplier] = useState(0);
   const [animatingResult, setAnimatingResult] = useState<number | null>(null);
   const [showDepositAnimation, setShowDepositAnimation] = useState(false);
+  const [showOddsExplainer, setShowOddsExplainer] = useState(false);
 
   // Accounting State
   const [depositAmount, setDepositAmount] = useState('10');
@@ -457,25 +458,114 @@ export function DiceGame() {
               disabled={isPlaying}
             />
 
-            {/* Inline Stats */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-gray-800/30 rounded p-3 flex justify-between items-center">
-                <span className="text-gray-400 text-xs">Win Chance</span>
-                <span className="font-bold text-yellow-400">{winChance.toFixed(1)}%</span>
+            {/* Inline Stats with Help Button */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Payout Info</span>
+                <button
+                  onClick={() => setShowOddsExplainer(!showOddsExplainer)}
+                  className="w-5 h-5 rounded-full bg-dfinity-turquoise/20 text-dfinity-turquoise hover:bg-dfinity-turquoise/30 flex items-center justify-center text-xs font-bold transition"
+                  title="How odds work"
+                >
+                  ?
+                </button>
               </div>
-              <div className="bg-gray-800/30 rounded p-3 flex justify-between items-center">
-                <span className="text-gray-400 text-xs">Multiplier</span>
-                <span className="font-bold text-green-400">{multiplier.toFixed(2)}x</span>
-              </div>
-              <div className="bg-gray-800/30 rounded p-3 flex justify-between items-center">
-                <span className="text-gray-400 text-xs">Max Bet</span>
-                <span className="font-bold text-blue-400">{maxBet.toFixed(2)} USDT</span>
-              </div>
-              <div className="bg-gray-800/30 rounded p-3 flex justify-between items-center border border-dfinity-turquoise/20">
-                <span className="text-gray-400 text-xs">Potential Win</span>
-                <span className="font-bold text-dfinity-turquoise">{(betAmount * multiplier).toFixed(2)} USDT</span>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-gray-800/30 rounded p-3 flex justify-between items-center">
+                  <span className="text-gray-400 text-xs">Win Chance</span>
+                  <span className="font-bold text-yellow-400">{winChance.toFixed(1)}%</span>
+                </div>
+                <div className="bg-gray-800/30 rounded p-3 flex justify-between items-center">
+                  <span className="text-gray-400 text-xs">Multiplier</span>
+                  <span className="font-bold text-green-400">{multiplier.toFixed(2)}x</span>
+                </div>
+                <div className="bg-gray-800/30 rounded p-3 flex justify-between items-center">
+                  <span className="text-gray-400 text-xs">Max Bet</span>
+                  <span className="font-bold text-blue-400">{maxBet.toFixed(2)} USDT</span>
+                </div>
+                <div className="bg-gray-800/30 rounded p-3 flex justify-between items-center border border-dfinity-turquoise/20">
+                  <span className="text-gray-400 text-xs">Potential Win</span>
+                  <span className="font-bold text-dfinity-turquoise">{(betAmount * multiplier).toFixed(2)} USDT</span>
+                </div>
               </div>
             </div>
+
+            {/* Odds Explainer Modal/Overlay */}
+            {showOddsExplainer && (
+              <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowOddsExplainer(false)}>
+                <div className="bg-gray-900 rounded-xl p-6 max-w-lg w-full border border-gray-700 shadow-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-bold text-dfinity-turquoise">How Odds Work</h3>
+                    <button
+                      onClick={() => setShowOddsExplainer(false)}
+                      className="text-gray-400 hover:text-white text-2xl leading-none"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="text-xs text-gray-300 space-y-3">
+                    <div>
+                      <p className="font-semibold text-dfinity-turquoise mb-1">The Dice Roll (0-100)</p>
+                      <p>Every roll generates a random number from <span className="font-mono text-white">0</span> to <span className="font-mono text-white">100</span> — that's <span className="font-mono text-white">101</span> total possible outcomes.</p>
+                    </div>
+
+                    <div>
+                      <p className="font-semibold text-dfinity-turquoise mb-1">Pick Your Side</p>
+                      <p>
+                        Choose a target number and bet <span className="font-bold">Over</span> or <span className="font-bold">Under</span>:
+                      </p>
+                      <ul className="mt-1 ml-4 space-y-1 list-disc list-inside">
+                        <li><span className="font-bold text-green-400">Over {targetNumber}:</span> Win if roll is {targetNumber + 1}-100</li>
+                        <li><span className="font-bold text-blue-400">Under {targetNumber}:</span> Win if roll is 0-{targetNumber - 1}</li>
+                      </ul>
+                    </div>
+
+                    <div>
+                      <p className="font-semibold text-dfinity-turquoise mb-1">Exact Payouts</p>
+                      <p>
+                        You get <span className="font-bold text-yellow-400">exact fair odds</span> based on probability.
+                      </p>
+                      <div className="mt-2 bg-black/30 rounded p-2 font-mono text-xs">
+                        <p className="text-gray-400">Example: <span className="text-white">Under 1</span></p>
+                        <p className="mt-1">• Only <span className="text-white">0</span> wins (1 out of 101 outcomes)</p>
+                        <p>• Win chance: <span className="text-yellow-400">~0.99%</span></p>
+                        <p>• Fair payout: <span className="text-green-400">~100x</span></p>
+                        <p className="mt-1">Bet $1 → Win $100 💰</p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="font-semibold text-red-400 mb-1">The House Edge (0.99%)</p>
+                      <p>
+                        If you land <span className="font-bold text-red-400">exactly on {targetNumber}</span>, the <span className="font-bold">house wins</span> and takes your bet.
+                        This single outcome creates the transparent <span className="font-mono text-white">0.99%</span> house edge.
+                      </p>
+                      <div className="mt-2 bg-red-900/10 rounded p-2 border border-red-500/20">
+                        <p className="text-xs text-gray-400">
+                          Example at target <span className="text-white">50</span>:
+                        </p>
+                        <ul className="mt-1 ml-4 space-y-0.5 text-xs">
+                          <li>• <span className="text-green-400">Over 50:</span> 51-100 = 50 winning outcomes</li>
+                          <li>• <span className="text-red-400">Exactly 50:</span> House wins (1 outcome)</li>
+                          <li>• <span className="text-blue-400">Under 50:</span> 0-49 = 50 winning outcomes</li>
+                        </ul>
+                        <p className="mt-1 text-xs text-gray-300">
+                          That middle slot is how the house maintains its edge!
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-gray-700/30">
+                      <p className="text-xs text-gray-400 italic">
+                        All rolls use the Internet Computer's verifiable random function (VRF) for provably fair results.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <HouseStatusInline
               houseBalance={balance.house}
@@ -489,7 +579,6 @@ export function DiceGame() {
               loading={isPlaying}
               label="ROLL DICE"
               loadingLabel="Rolling..."
-              icon="D"
             />
 
             {gameError && (
