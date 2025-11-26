@@ -85,6 +85,17 @@ pub enum AuditEvent {
     ParentFeeCredited { amount: u64 },
     ParentFeeFallback { amount: u64, reason: String },
     SystemInfo { message: String },
+    BalanceCredited {
+        user: Principal,
+        amount: u64,
+        new_balance: u64,
+    },
+    SlippageProtectionTriggered {
+        user: Principal,
+        deposit_amount: u64,
+        expected_min_shares: Nat,
+        actual_shares: Nat,
+    },
 }
 
 impl Storable for AuditEntry {
