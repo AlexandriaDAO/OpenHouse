@@ -404,6 +404,196 @@ fn test_lp_withdrawal_insufficient_reserve() {
 }
 
 // ============================================
+// CATEGORY 4: SETTLE_BET SCENARIOS (Generic Payout API)
+// ============================================
+
+#[test]
+fn test_settle_bet_total_loss() {
+    let mut model = AccountingModel::with_initial_liquidity(100_000_000);
+    model.execute(Operation::UserDeposit { user: 1, amount: 10_000_000 });
+
+    let pool_before = model.pool_reserve;
+
+    // Bet 1 USDT, get 0 back (total loss - e.g., Dice wrong roll)
+    let result = model.execute(Operation::SettleBet {
+        user: 1,
+        bet_amount: 1_000_000,
+        payout_amount: 0,
+    });
+    assert_eq!(result, OpResult::Success);
+
+    // Pool should have gained exactly the bet amount (1 USDT)
+    assert_eq!(model.pool_reserve, pool_before + 1_000_000);
+    model.check_invariant().unwrap();
+}
+
+#[test]
+fn test_settle_bet_partial_loss_plinko_style() {
+    let mut model = AccountingModel::with_initial_liquidity(100_000_000);
+    model.execute(Operation::UserDeposit { user: 1, amount: 10_000_000 });
+
+    let pool_before = model.pool_reserve;
+    let balance_before = *model.user_balances.get(&1).unwrap();
+
+    // Bet 1 USDT, get 0.2 USDT back (Plinko 0.2x center multiplier)
+    // THIS IS THE KEY TEST - old API would incorrectly take full 1 USDT
+    let result = model.execute(Operation::SettleBet {
+        user: 1,
+        bet_amount: 1_000_000,  // 1 USDT
+        payout_amount: 200_000, // 0.2 USDT (0.2x multiplier)
+    });
+    assert_eq!(result, OpResult::Success);
+
+    // Pool should have gained 0.8 USDT (NOT full 1 USDT!)
+    assert_eq!(model.pool_reserve, pool_before + 800_000);
+
+    // User should have lost 0.8 USDT net (bet 1, got 0.2 back)
+    assert_eq!(*model.user_balances.get(&1).unwrap(), balance_before - 800_000);
+
+    model.check_invariant().unwrap();
+}
+
+#[test]
+fn test_settle_bet_push() {
+    let mut model = AccountingModel::with_initial_liquidity(100_000_000);
+    model.execute(Operation::UserDeposit { user: 1, amount: 10_000_000 });
+
+    let pool_before = model.pool_reserve;
+    let balance_before = *model.user_balances.get(&1).unwrap();
+
+    // Bet 1 USDT, get 1 USDT back (push/tie - e.g., Blackjack tie)
+    let result = model.execute(Operation::SettleBet {
+        user: 1,
+        bet_amount: 1_000_000,
+        payout_amount: 1_000_000,
+    });
+    assert_eq!(result, OpResult::Success);
+
+    // Pool should be unchanged
+    assert_eq!(model.pool_reserve, pool_before);
+
+    // User balance should be unchanged
+    assert_eq!(*model.user_balances.get(&1).unwrap(), balance_before);
+
+    model.check_invariant().unwrap();
+}
+
+#[test]
+fn test_settle_bet_win() {
+    let mut model = AccountingModel::with_initial_liquidity(100_000_000);
+    model.execute(Operation::UserDeposit { user: 1, amount: 10_000_000 });
+
+    let pool_before = model.pool_reserve;
+    let balance_before = *model.user_balances.get(&1).unwrap();
+
+    // Bet 1 USDT, get 2 USDT back (2x win - e.g., Dice correct guess)
+    let result = model.execute(Operation::SettleBet {
+        user: 1,
+        bet_amount: 1_000_000,
+        payout_amount: 2_000_000,
+    });
+    assert_eq!(result, OpResult::Success);
+
+    // Pool should have paid 1 USDT profit
+    assert_eq!(model.pool_reserve, pool_before - 1_000_000);
+
+    // User should have gained 1 USDT net
+    assert_eq!(*model.user_balances.get(&1).unwrap(), balance_before + 1_000_000);
+
+    model.check_invariant().unwrap();
+}
+
+#[test]
+fn test_settle_bet_big_win_exceeds_pool() {
+    let mut model = AccountingModel::with_initial_liquidity(10_000_000); // Small 10 USDT pool
+    model.execute(Operation::UserDeposit { user: 1, amount: 100_000_000 });
+
+    let balance_before = *model.user_balances.get(&1).unwrap();
+
+    // Bet 1 USDT, try to get 100 USDT back (100x)
+    // Profit = 99 USDT, but pool only has 10 USDT
+    let result = model.execute(Operation::SettleBet {
+        user: 1,
+        bet_amount: 1_000_000,
+        payout_amount: 100_000_000,
+    });
+    assert_eq!(result, OpResult::InsufficientPoolReserve);
+
+    // User balance should be unchanged (rollback)
+    assert_eq!(*model.user_balances.get(&1).unwrap(), balance_before);
+
+    model.check_invariant().unwrap();
+}
+
+#[test]
+fn test_settle_bet_insufficient_balance() {
+    let mut model = AccountingModel::with_initial_liquidity(100_000_000);
+    model.execute(Operation::UserDeposit { user: 1, amount: 1_000_000 }); // Only 1 USDT
+
+    // Try to bet 10 USDT
+    let result = model.execute(Operation::SettleBet {
+        user: 1,
+        bet_amount: 10_000_000,
+        payout_amount: 0,
+    });
+    assert_eq!(result, OpResult::InsufficientBalance);
+
+    model.check_invariant().unwrap();
+}
+
+#[test]
+fn test_settle_bet_stress_mixed_outcomes() {
+    let mut rng = ChaCha8Rng::seed_from_u64(42);
+    let mut model = AccountingModel::with_initial_liquidity(1_000_000_000_000);
+
+    // 100 users each deposit
+    for user in 1..=100 {
+        model.execute(Operation::UserDeposit { user, amount: 100_000_000 });
+    }
+
+    // 10,000 bets with random multipliers (0x to 10x)
+    for _ in 0..10_000 {
+        let user = rng.gen_range(1..=100);
+        let bet: u64 = rng.gen_range(100_000..1_000_000);
+
+        // Random multiplier from 0.0x to 10.0x (0 to 1000 in percentage points)
+        let multiplier_x100: u64 = rng.gen_range(0..1000);
+        let payout = bet * multiplier_x100 / 100;
+
+        let _ = model.execute(Operation::SettleBet {
+            user,
+            bet_amount: bet,
+            payout_amount: payout,
+        });
+    }
+
+    model.check_invariant().unwrap();
+    model.check_lp_invariant().unwrap();
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(500))]
+
+    #[test]
+    fn test_settle_bet_invariant_all_multipliers(
+        bet in 100_000u64..10_000_000u64,
+        multiplier_bps in 0u64..100_000u64  // 0x to 10x
+    ) {
+        let mut model = AccountingModel::with_initial_liquidity(1_000_000_000_000);
+        model.execute(Operation::UserDeposit { user: 1, amount: 1_000_000_000 });
+
+        let payout = (bet as u128 * multiplier_bps as u128 / 10_000) as u64;
+        let _ = model.execute(Operation::SettleBet {
+            user: 1,
+            bet_amount: bet,
+            payout_amount: payout,
+        });
+
+        model.check_invariant().map_err(TestCaseError::fail)?;
+    }
+}
+
+// ============================================
 // HELPER FUNCTIONS
 // ============================================
 

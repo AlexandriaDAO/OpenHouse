@@ -144,41 +144,31 @@ pub async fn play_dice(
         0
     };
 
-    // Update user balance based on game result
-    if is_win {
-        // Calculate profit to be deducted from pool
-        let profit = payout.saturating_sub(bet_amount);
-        let pool_reserve = liquidity_pool::get_pool_reserve();
+    // Credit payout to user (0 for loss, multiplied amount for win)
+    // This unified approach handles all scenarios: total loss, partial loss, push, win
+    let current_balance = accounting::get_balance(caller);
+    let new_balance = current_balance.checked_add(payout)
+        .ok_or("Balance overflow when adding winnings")?;
+    accounting::update_balance(caller, new_balance)?;
 
-        // Check if pool can afford the profit payout
-        if profit > pool_reserve {
-            // CRITICAL: Race condition hit. Pool was drained during game.
-            // ACTION: Refund bet, Log error, Return failure.
+    // Settle bet with pool using generic API
+    // settle_bet handles all payout scenarios mathematically:
+    // - payout > bet: pool pays profit
+    // - payout < bet: pool gains difference (handles partial payouts like Plinko 0.2x)
+    // - payout == bet: no pool change (push)
+    if let Err(e) = liquidity_pool::settle_bet(bet_amount, payout) {
+        // Pool couldn't afford payout - rollback user balance and refund bet
+        let refund_balance = current_balance.checked_add(bet_amount)
+            .ok_or("Balance overflow on refund")?;
+        accounting::update_balance(caller, refund_balance)?;
 
-            // Refund the bet that was deducted earlier
-            let current_balance = accounting::get_balance(caller);
-            let refund_balance = current_balance.checked_add(bet_amount)
-                .ok_or("Balance overflow on refund")?;
-            accounting::update_balance(caller, refund_balance)?;
+        ic_cdk::println!("CRITICAL: Payout failure. Refunded {} to {}", bet_amount, caller);
 
-            // Log
-            ic_cdk::println!("CRITICAL: Payout failure. Refunded {} to {}", bet_amount, caller);
-
-            return Err(format!(
-                "House cannot afford payout ({} USDT). Your bet of {} USDT has been REFUNDED. Pool was drained by concurrent games. Please try a smaller bet.",
-                profit as f64 / DECIMALS_PER_CKUSDT as f64,
-                bet_amount as f64 / DECIMALS_PER_CKUSDT as f64
-            ));
-        }
-
-        let current_balance = accounting::get_balance(caller);
-        let new_balance = current_balance.checked_add(payout)
-            .ok_or("Balance overflow when adding winnings")?;
-        accounting::update_balance(caller, new_balance)?;
-
-        liquidity_pool::update_pool_on_win(profit);
-    } else {
-        liquidity_pool::update_pool_on_loss(bet_amount);
+        return Err(format!(
+            "House cannot afford payout. Your bet of {} USDT has been REFUNDED. {}",
+            bet_amount as f64 / DECIMALS_PER_CKUSDT as f64,
+            e
+        ));
     }
 
     Ok(MinimalGameResult {
