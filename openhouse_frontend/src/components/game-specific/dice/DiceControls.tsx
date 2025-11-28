@@ -29,8 +29,8 @@ export const DiceControls: React.FC<DiceControlsProps> = ({
           disabled={disabled}
           className={`flex-1 py-3 text-sm font-bold rounded-lg transition ${
             direction === 'Over'
-              ? 'bg-green-500 text-black shadow-lg shadow-green-500/30'
-              : 'bg-gray-800/50 text-gray-400 hover:bg-gray-700/50 hover:text-white'
+              ? 'bg-white text-black'
+              : 'bg-transparent border border-gray-700 text-gray-500 hover:border-gray-500 hover:text-gray-300'
           }`}
         >
           OVER
@@ -40,8 +40,8 @@ export const DiceControls: React.FC<DiceControlsProps> = ({
           disabled={disabled}
           className={`flex-1 py-3 text-sm font-bold rounded-lg transition ${
             direction === 'Under'
-              ? 'bg-blue-500 text-black shadow-lg shadow-blue-500/30'
-              : 'bg-gray-800/50 text-gray-400 hover:bg-gray-700/50 hover:text-white'
+              ? 'border-2 border-white text-white'
+              : 'bg-transparent border border-gray-700 text-gray-500 hover:border-gray-500 hover:text-gray-300'
           }`}
         >
           UNDER
@@ -49,7 +49,7 @@ export const DiceControls: React.FC<DiceControlsProps> = ({
       </div>
 
       {/* Target Slider - Granular Control */}
-      <div className="bg-gray-800/30 p-3 rounded-lg border border-gray-700/30">
+      <div className="bg-black p-3 rounded-lg border border-gray-800">
         <div className="flex justify-between mb-2 text-xs text-gray-400 font-mono uppercase">
           <span>Target Number</span>
           <span className="text-white font-bold">{targetNumber}</span>
@@ -60,7 +60,7 @@ export const DiceControls: React.FC<DiceControlsProps> = ({
           max="98"
           value={targetNumber}
           onChange={(e) => onTargetChange(parseInt(e.target.value))}
-          className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-dfinity-turquoise"
+          className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-white"
           disabled={disabled}
         />
         <div className="flex justify-between mt-1 text-[10px] text-gray-600 font-mono">
@@ -80,8 +80,8 @@ export const DiceControls: React.FC<DiceControlsProps> = ({
               disabled={disabled}
               className={`flex-1 py-2 text-xs font-bold rounded transition ${
                 isActive
-                  ? 'bg-dfinity-turquoise text-black'
-                  : 'bg-gray-800/50 text-gray-400 hover:bg-gray-700/50 hover:text-white'
+                  ? 'bg-white text-black'
+                  : 'bg-transparent border border-gray-700 text-gray-500 hover:border-gray-500 hover:text-gray-300'
               }`}
             >
               {val}
