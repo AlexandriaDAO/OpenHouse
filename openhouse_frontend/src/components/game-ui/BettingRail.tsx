@@ -39,7 +39,6 @@ export function BettingRail({
   canisterId,
 }: BettingRailProps) {
   // === Internal State ===
-  const [chipHistory, setChipHistory] = useState<number[]>([]);
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [depositAmount, setDepositAmount] = useState('1');
   const [depositStep, setDepositStep] = useState<'idle' | 'approving' | 'depositing'>('idle');
@@ -65,23 +64,11 @@ export function BettingRail({
     if (!canAddChip(chip.value)) return;
 
     const newAmount = Math.round((betAmount + chip.value) * 100) / 100;
-    setChipHistory(prev => [...prev, chip.value]);
     onBetChange(newAmount);
   }, [betAmount, onBetChange, canAddChip]);
 
-  const undoLastChip = useCallback(() => {
-    if (chipHistory.length === 0 || disabled) return;
-
-    const lastChipValue = chipHistory[chipHistory.length - 1];
-    const newAmount = Math.round((betAmount - lastChipValue) * 100) / 100;
-
-    setChipHistory(prev => prev.slice(0, -1));
-    onBetChange(Math.max(0, newAmount));
-  }, [chipHistory, betAmount, onBetChange, disabled]);
-
   const clearBet = useCallback(() => {
     if (disabled) return;
-    setChipHistory([]);
     onBetChange(0);
   }, [onBetChange, disabled]);
 
@@ -188,10 +175,8 @@ export function BettingRail({
     return 'healthy';
   }, [houseBalance, betAmount, multiplier]);
 
-  // === Decompose bet for display ===
   const displayChips = useMemo(() => decomposeIntoChips(betAmount), [betAmount]);
 
-  // Pulse animation trigger
   useEffect(() => {
      if (gameBalance === 0n && !disabled) {
        setShowDepositAnimation(true);
@@ -209,10 +194,10 @@ export function BettingRail({
 
         {/* Main rail surface */}
         <div className="betting-rail">
-          <div className="container mx-auto px-4 py-3">
+          <div className="container mx-auto px-4 py-2">
 
             {/* Desktop Layout: 3 columns */}
-            <div className="hidden md:grid md:grid-cols-[auto_1fr_auto] gap-6 items-center">
+            <div className="hidden md:grid md:grid-cols-[auto_1fr_auto] gap-6 items-center h-[100px]">
 
               {/* Column 1: Chip Selector */}
               <div className="flex gap-2">
@@ -228,17 +213,12 @@ export function BettingRail({
                 ))}
               </div>
 
-              {/* Column 2: Chip Stack & Bet Amount */}
-              <div className="flex flex-col items-center justify-center relative -mt-4">
-                 
-                {/* The Chip Stack */}
-                <div 
-                  className="h-20 flex items-end justify-center cursor-pointer transition-opacity hover:opacity-90" 
-                  onClick={undoLastChip}
-                  title="Click to undo last chip"
-                >
+              {/* Column 2: Centerpiece - Large Chip Stack */}
+              <div className="flex items-end justify-center pb-2 h-full relative">
+                 {/* Big Stack */}
+                 <div className="transition-all duration-200 transform scale-110 origin-bottom">
                   {displayChips.length === 0 ? (
-                    <div className="text-white/20 text-sm font-bold border-2 border-dashed border-white/10 rounded-full w-16 h-16 flex items-center justify-center">
+                    <div className="opacity-20 font-bold text-white text-sm tracking-widest border-2 border-dashed border-white/20 rounded-full w-20 h-20 flex items-center justify-center mb-2">
                       BET
                     </div>
                   ) : (
@@ -246,59 +226,49 @@ export function BettingRail({
                       amount={betAmount} 
                       maxChipsShown={20} 
                       showValue={false} 
-                      size="md" 
+                      size="xl" 
                     />
                   )}
-                </div>
-
-                {/* Bet Amount Label */}
-                <div className="mt-1 flex flex-col items-center">
-                  <span className="font-mono text-2xl font-black text-white drop-shadow-md">
-                    ${betAmount.toFixed(2)}
-                  </span>
-                  <div className="flex items-center gap-2 text-xs text-gray-400">
-                    <span>max ${maxBet.toFixed(2)}</span>
-                    {betAmount > 0 && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); clearBet(); }}
-                        disabled={disabled}
-                        className="text-red-400 hover:text-red-300 underline"
-                      >
-                        Clear
-                      </button>
-                    )}
-                  </div>
-                </div>
+                 </div>
               </div>
 
-              {/* Column 3: Undo/Action placeholder */}
-              <div className="w-[200px] flex justify-end">
-                 <button 
-                   onClick={undoLastChip}
-                   disabled={chipHistory.length === 0 || disabled}
-                   className="text-gray-400 hover:text-white flex items-center gap-2 transition disabled:opacity-0"
-                 >
-                   <span>Undo</span>
-                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                     <path fillRule="evenodd" d="M8 3a5 5 0 1 1-4.546 2.914.5.5 0 0 0-.908-.417A6 6 0 1 0 8 2v1z"/>
-                     <path d="M8 4.466V.534a.25.25 0 0 0-.41-.192L5.23 2.308a.25.25 0 0 0 0 .384l2.36 1.966A.25.25 0 0 0 8 4.466z"/>
-                   </svg>
-                 </button>
+              {/* Column 3: Bet Info & Clear */}
+              <div className="w-[200px] flex flex-col items-end justify-center space-y-1">
+                 <div className="text-right">
+                    <div className="text-white font-mono font-black text-2xl leading-none">
+                      ${betAmount.toFixed(2)}
+                    </div>
+                    <div className="text-gray-500 text-xs">
+                      max ${maxBet.toFixed(2)}
+                    </div>
+                 </div>
+                 
+                 {betAmount > 0 && (
+                   <button 
+                     onClick={clearBet}
+                     disabled={disabled}
+                     className="text-red-400 hover:text-white text-xs uppercase font-bold tracking-wider hover:bg-red-500/20 px-2 py-1 rounded transition"
+                   >
+                     Clear Bet
+                   </button>
+                 )}
               </div>
 
             </div>
 
             {/* Mobile Layout */}
-            <div className="md:hidden flex flex-col items-center space-y-4">
-               {/* Chips & Bet */}
+            <div className="md:hidden flex flex-col items-center space-y-4 pt-2">
                <div className="flex items-end justify-between w-full px-2">
+                  {/* Left: Chips */}
                   <div className="flex gap-1">
                     {[CHIP_DENOMINATIONS[0], CHIP_DENOMINATIONS[1], CHIP_DENOMINATIONS[2]].map(chip => (
                         <button key={chip.color} onClick={() => addChip(chip)} disabled={disabled || !canAddChip(chip.value)} className="chip-button">
-                            <img src={chip.topImg} alt={chip.label} className="w-10 h-10 object-contain" />
+                            <img src={chip.topImg} alt={chip.label} className="w-12 h-12 object-contain" />
                         </button>
                     ))}
                   </div>
+                  
+                  {/* Right: Bet Info */}
                   <div className="text-right">
                      <div className="font-mono text-xl font-bold text-white">${betAmount.toFixed(2)}</div>
                      <button onClick={clearBet} disabled={betAmount===0} className="text-xs text-red-400">Clear</button>
@@ -306,8 +276,8 @@ export function BettingRail({
                </div>
             </div>
 
-            {/* Bottom Info Row - WITH BUTTONS */}
-            <div className="flex items-center justify-between text-xs mt-2 pt-2 border-t border-gray-800/50 text-gray-400 relative">
+            {/* Footer Row: Balances & Actions */}
+            <div className="flex items-center justify-between text-xs mt-1 pt-2 border-t border-gray-800/50 text-gray-400 relative">
               
               <div className="flex items-center gap-4 flex-1">
                   <div className="flex items-center gap-2">
@@ -336,7 +306,7 @@ export function BettingRail({
 
               {houseLimitStatus !== 'healthy' && (
                 <span className={houseLimitStatus === 'danger' ? 'text-red-400 font-bold' : 'text-yellow-400 font-bold'}>
-                  House limit {houseLimitStatus === 'danger' ? 'exceeded' : 'near'}
+                  Limit {houseLimitStatus === 'danger' ? 'exceeded' : 'near'}
                 </span>
               )}
             </div>
@@ -345,7 +315,7 @@ export function BettingRail({
         </div>
       </div>
 
-      {/* Deposit Modal (unchanged) */}
+      {/* Deposit Modal */}
       {showDepositModal && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={() => setShowDepositModal(false)}>
           <div className="bg-gray-900 border border-gray-700 rounded-lg p-6 max-w-sm w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>

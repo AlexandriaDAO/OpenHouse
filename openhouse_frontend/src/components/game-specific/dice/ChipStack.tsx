@@ -6,7 +6,7 @@ interface ChipStackProps {
   maxChipsShown?: number; // Max chips per pile
   onClick?: () => void;
   showValue?: boolean;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
   className?: string;
 }
 
@@ -22,9 +22,10 @@ export const ChipStack: React.FC<ChipStackProps> = ({
 
   // Size configurations - Tweaked for tighter stacking
   const sizeConfig = {
-    sm: { width: 36, height: 18, offset: -3 }, // Slightly smaller, tighter offset
+    sm: { width: 36, height: 18, offset: -3 },
     md: { width: 56, height: 28, offset: -5 },
     lg: { width: 72, height: 36, offset: -7 },
+    xl: { width: 96, height: 48, offset: -9 }, // New extra large size
   };
   const { width, height, offset } = sizeConfig[size];
 
@@ -46,11 +47,8 @@ export const ChipStack: React.FC<ChipStackProps> = ({
       onClick={onClick}
       style={{ cursor: onClick ? 'pointer' : 'default' }}
     >
-      {/* Piles Container - Reduced gap to -space-x-2 or similar for overlapping piles? 
-          Let's stick to small gap or 0 gap for "touching" piles.
-          User said: "move those closer together".
-      */}
-      <div className="flex flex-row items-end justify-center -space-x-1">
+      {/* Piles Container - Reduced gap for tight "touching" look */}
+      <div className="flex flex-row items-end justify-center -space-x-2">
         {chipCounts.map(({ chip, count }) => {
           const visibleCount = Math.min(count, maxChipsShown);
           const hasMore = count > maxChipsShown;
@@ -75,13 +73,12 @@ export const ChipStack: React.FC<ChipStackProps> = ({
                   key={index}
                   src={chip.sideImg}
                   alt={`${chip.color} chip`}
-                  className="absolute left-1/2 transform -translate-x-1/2 drop-shadow-sm"
+                  className="absolute left-1/2 transform -translate-x-1/2 drop-shadow-md"
                   style={{
                     width: '100%', // Fit container
                     height: 'auto',
                     bottom: index * Math.abs(offset),
                     zIndex: index,
-                    // Add slight randomness to rotation for realism? No, clean stack is better.
                   }}
                 />
               ))}
@@ -89,7 +86,7 @@ export const ChipStack: React.FC<ChipStackProps> = ({
               {/* "More" indicator */}
               {hasMore && (
                 <div
-                  className="absolute -top-3 -right-1 bg-dfinity-turquoise text-black text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center z-50 shadow-sm border border-white/20"
+                  className="absolute -top-3 -right-1 bg-dfinity-turquoise text-black text-[9px] font-bold rounded-full w-5 h-5 flex items-center justify-center z-50 shadow-sm border border-white/20"
                   style={{ bottom: stackHeight - 10 }}
                 >
                   +
