@@ -194,13 +194,10 @@ export function BettingRail({
 
         {/* Main rail surface */}
         <div className="betting-rail">
-          <div className="container mx-auto px-4 py-2">
+          <div className="container mx-auto px-4 py-2 h-[88px] flex items-center">
 
-            {/* Desktop Layout: 3 columns */}
-            <div className="hidden md:grid md:grid-cols-[auto_1fr_auto] gap-6 items-center h-[100px]">
-
-              {/* Column 1: Chip Selector */}
-              <div className="flex gap-2">
+            {/* Left: Chip Selector Buttons */}
+            <div className="flex gap-2 mr-8">
                 {CHIP_DENOMINATIONS.map(chip => (
                   <button
                     key={chip.color}
@@ -211,14 +208,14 @@ export function BettingRail({
                     <img src={chip.topImg} alt={chip.label} className="w-14 h-14 object-contain drop-shadow-lg" />
                   </button>
                 ))}
-              </div>
+            </div>
 
-              {/* Column 2: Centerpiece - Large Chip Stack */}
-              <div className="flex items-end justify-center pb-2 h-full relative">
+            {/* Center-Left: Large Chip Stack & Amount */}
+            <div className="flex items-center gap-6 flex-1">
                  {/* Big Stack */}
-                 <div className="transition-all duration-200 transform scale-110 origin-bottom">
+                 <div className="transition-all duration-200 transform scale-105 origin-bottom mb-[-10px]">
                   {displayChips.length === 0 ? (
-                    <div className="opacity-20 font-bold text-white text-sm tracking-widest border-2 border-dashed border-white/20 rounded-full w-20 h-20 flex items-center justify-center mb-2">
+                    <div className="opacity-10 font-bold text-white text-xs tracking-widest border-2 border-dashed border-white/20 rounded-full w-16 h-16 flex items-center justify-center">
                       BET
                     </div>
                   ) : (
@@ -230,85 +227,58 @@ export function BettingRail({
                     />
                   )}
                  </div>
-              </div>
 
-              {/* Column 3: Bet Info & Clear */}
-              <div className="w-[200px] flex flex-col items-end justify-center space-y-1">
-                 <div className="text-right">
-                    <div className="text-white font-mono font-black text-2xl leading-none">
+                 {/* Bet Amount Display */}
+                 <div className="flex flex-col">
+                    <div className="text-white font-mono font-black text-3xl leading-none drop-shadow-md">
                       ${betAmount.toFixed(2)}
                     </div>
-                    <div className="text-gray-500 text-xs">
-                      max ${maxBet.toFixed(2)}
+                    <div className="flex items-center gap-3 text-gray-500 text-xs mt-1">
+                      <span>max ${maxBet.toFixed(2)}</span>
+                      {betAmount > 0 && (
+                        <button 
+                           onClick={clearBet}
+                           disabled={disabled}
+                           className="text-red-400 hover:text-white uppercase font-bold text-[10px] tracking-wider hover:bg-red-500/20 px-1.5 py-0.5 rounded transition"
+                        >
+                           Clear
+                        </button>
+                      )}
                     </div>
                  </div>
-                 
-                 {betAmount > 0 && (
-                   <button 
-                     onClick={clearBet}
-                     disabled={disabled}
-                     className="text-red-400 hover:text-white text-xs uppercase font-bold tracking-wider hover:bg-red-500/20 px-2 py-1 rounded transition"
-                   >
-                     Clear Bet
-                   </button>
-                 )}
-              </div>
-
             </div>
 
-            {/* Mobile Layout */}
-            <div className="md:hidden flex flex-col items-center space-y-4 pt-2">
-               <div className="flex items-end justify-between w-full px-2">
-                  {/* Left: Chips */}
-                  <div className="flex gap-1">
-                    {[CHIP_DENOMINATIONS[0], CHIP_DENOMINATIONS[1], CHIP_DENOMINATIONS[2]].map(chip => (
-                        <button key={chip.color} onClick={() => addChip(chip)} disabled={disabled || !canAddChip(chip.value)} className="chip-button">
-                            <img src={chip.topImg} alt={chip.label} className="w-12 h-12 object-contain" />
-                        </button>
-                    ))}
-                  </div>
-                  
-                  {/* Right: Bet Info */}
-                  <div className="text-right">
-                     <div className="font-mono text-xl font-bold text-white">${betAmount.toFixed(2)}</div>
-                     <button onClick={clearBet} disabled={betAmount===0} className="text-xs text-red-400">Clear</button>
-                  </div>
-               </div>
-            </div>
-
-            {/* Footer Row: Balances & Actions */}
-            <div className="flex items-center justify-between text-xs mt-1 pt-2 border-t border-gray-800/50 text-gray-400 relative">
-              
-              <div className="flex items-center gap-4 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span>Chips: <span className="text-white font-mono font-bold">${formatUSDT(gameBalance)}</span></span>
+            {/* Right: Account/Balances */}
+            <div className="flex flex-col items-end gap-2 text-xs">
+                {/* Chips Row */}
+                <div className="flex items-center gap-3">
+                    <span className="text-gray-400">Chips: <span className="text-white font-mono font-bold text-sm">${formatUSDT(gameBalance)}</span></span>
                     <button 
                         onClick={() => setShowDepositModal(true)}
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider w-[70px] ${
                             showDepositAnimation ? 'bg-yellow-500 text-black deposit-button-pulse' : 'bg-green-600 text-white hover:bg-green-500'
                         }`}
                     >
                         + Buy
                     </button>
-                  </div>
-                  
-                  <div className="flex items-center gap-2">
-                    <span>Wallet: <span className="text-white font-mono">${formatUSDT(walletBalance)}</span></span>
+                </div>
+                {/* Wallet Row */}
+                <div className="flex items-center gap-3">
+                    <span className="text-gray-500">Wallet: <span className="text-gray-300 font-mono">${formatUSDT(walletBalance)}</span></span>
                     <button 
                         onClick={handleWithdrawAll}
                         disabled={isWithdrawing || gameBalance === 0n}
-                        className="px-2 py-0.5 rounded text-[10px] border border-gray-600 text-gray-300 hover:text-white hover:border-gray-400 disabled:opacity-30"
+                        className="px-2 py-0.5 rounded text-[10px] border border-gray-600 text-gray-400 hover:text-white hover:border-gray-400 disabled:opacity-30 w-[70px]"
                     >
                         Cash Out
                     </button>
-                  </div>
-              </div>
-
-              {houseLimitStatus !== 'healthy' && (
-                <span className={houseLimitStatus === 'danger' ? 'text-red-400 font-bold' : 'text-yellow-400 font-bold'}>
-                  Limit {houseLimitStatus === 'danger' ? 'exceeded' : 'near'}
-                </span>
-              )}
+                </div>
+                {/* Limit Warning (Absolute or integrated?) */}
+                {houseLimitStatus !== 'healthy' && (
+                   <div className={`text-[10px] font-bold ${houseLimitStatus === 'danger' ? 'text-red-500' : 'text-yellow-500'}`}>
+                      House Limit {houseLimitStatus === 'danger' ? 'Exceeded' : 'Near'}
+                   </div>
+                )}
             </div>
 
           </div>
