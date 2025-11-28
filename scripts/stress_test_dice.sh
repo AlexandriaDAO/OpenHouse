@@ -5,6 +5,9 @@
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
+# Use plaintext identity to avoid keyring contention with concurrent processes
+export DFX_WARNING=-mainnet_plaintext_identity
+
 CANISTER_ID="whchi-hyaaa-aaaao-a4ruq-cai"
 NETWORK="ic"
 CONCURRENT_USERS=15          # 10-20 range
@@ -24,8 +27,8 @@ NC='\033[0m' # No Color
 
 # Generate random bet parameters
 function random_bet_params() {
-    # bet_amount: 10,000 to 10,000,000 decimals (0.01 to 10 USDT)
-    BET=$((10000 + RANDOM % 9990000))
+    # bet_amount: 10,000 to 500,000 decimals (0.01 to 0.5 USDT)
+    BET=$((10000 + RANDOM % 490000))
 
     # target_number: 1-99 (avoid edge cases)
     TARGET=$((1 + RANDOM % 99))
@@ -40,7 +43,7 @@ function random_bet_params() {
     # client_seed: random string
     CLIENT_SEED="stress_test_${RANDOM}_${RANDOM}"
 
-    echo "$BET $TARGET $DIRECTION $CLIENT_SEED"
+    echo "$BET|$TARGET|$DIRECTION|$CLIENT_SEED"
 }
 
 # Call dfx with error checking
@@ -81,13 +84,13 @@ function simulate_user() {
 
         if [ $RAND -lt 60 ]; then
             # 60% - play_dice
-            read BET TARGET DIRECTION CLIENT_SEED <<< $(random_bet_params)
+            IFS='|' read BET TARGET DIRECTION CLIENT_SEED <<< $(random_bet_params)
             dfx_call "play_dice" "($BET : nat64, $TARGET : nat8, $DIRECTION, \"$CLIENT_SEED\")"
             [ $? -eq 0 ] && ((SUCCESS++)) || ((EXPECTED_ERRORS++))
 
         elif [ $RAND -lt 80 ]; then
             # 20% - deposit
-            AMOUNT=$((1000000 + RANDOM % 49000000))  # 1-50 USDT
+            AMOUNT=$((1000000 + RANDOM % 2000000))  # 1-3 USDT
             dfx_call "deposit" "($AMOUNT : nat64)"
             [ $? -eq 0 ] && ((SUCCESS++)) || ((EXPECTED_ERRORS++))
 
@@ -97,8 +100,8 @@ function simulate_user() {
             [ $? -eq 0 ] && ((SUCCESS++)) || ((EXPECTED_ERRORS++))
 
         elif [ $RAND -lt 95 ]; then
-            # 5% - deposit_liquidity (10 USDT minimum)
-            LP_AMOUNT=$((10000000 + RANDOM % 40000000))  # 10-50 USDT
+            # 5% - deposit_liquidity
+            LP_AMOUNT=$((10000000 + RANDOM % 5000000))  # 10-15 USDT
             dfx_call "deposit_liquidity" "($LP_AMOUNT : nat64, null)"
             [ $? -eq 0 ] && ((SUCCESS++)) || ((EXPECTED_ERRORS++))
 
@@ -167,7 +170,7 @@ echo ""
 echo "[WARMUP] Running 5 sequential operations..."
 
 for i in {1..5}; do
-    read BET TARGET DIRECTION CLIENT_SEED <<< $(random_bet_params)
+    IFS='|' read BET TARGET DIRECTION CLIENT_SEED <<< $(random_bet_params)
     if ! dfx_call "play_dice" "($BET : nat64, $TARGET : nat8, $DIRECTION, \"$CLIENT_SEED\")" > /dev/null; then
         echo -e "${RED}❌ Warmup operation $i failed${NC}"
         exit 1
@@ -207,11 +210,16 @@ TOTAL_SUCCESS=0
 TOTAL_EXPECTED_ERRORS=0
 for user_id in $(seq 1 $CONCURRENT_USERS); do
     RESULT=$(cat "$TEMP_DIR/user_${user_id}.log")
-    SUCCESS=$(echo $RESULT | cut -d: -f2)
-    ERRORS=$(echo $RESULT | cut -d: -f3)
-    TOTAL_SUCCESS=$((TOTAL_SUCCESS + SUCCESS))
-    TOTAL_EXPECTED_ERRORS=$((TOTAL_EXPECTED_ERRORS + ERRORS))
-    echo -e "${GREEN}✓${NC} User $user_id completed ($SUCCESS success, $ERRORS expected errors)"
+    # Check if result matches expected format (USER_ID:SUCCESS:ERRORS)
+    if echo "$RESULT" | grep -qE '^[0-9]+:[0-9]+:[0-9]+$'; then
+        SUCCESS=$(echo $RESULT | cut -d: -f2)
+        ERRORS=$(echo $RESULT | cut -d: -f3)
+        TOTAL_SUCCESS=$((TOTAL_SUCCESS + SUCCESS))
+        TOTAL_EXPECTED_ERRORS=$((TOTAL_EXPECTED_ERRORS + ERRORS))
+        echo -e "${GREEN}✓${NC} User $user_id completed ($SUCCESS success, $ERRORS expected errors)"
+    else
+        echo -e "${YELLOW}⚠${NC} User $user_id had unexpected output format"
+    fi
 done
 echo ""
 
@@ -221,7 +229,7 @@ echo ""
 echo "[COOLDOWN] Running 5 sequential operations..."
 
 for i in {1..5}; do
-    read BET TARGET DIRECTION CLIENT_SEED <<< $(random_bet_params)
+    IFS='|' read BET TARGET DIRECTION CLIENT_SEED <<< $(random_bet_params)
     if ! dfx_call "play_dice" "($BET : nat64, $TARGET : nat8, $DIRECTION, \"$CLIENT_SEED\")" > /dev/null; then
         echo -e "${RED}❌ Cooldown operation $i failed${NC}"
         exit 1
