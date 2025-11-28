@@ -86,10 +86,10 @@ export const ChipBetting: React.FC<ChipBettingProps> = ({
     ? 'border-red-500/70 shadow-lg shadow-red-500/20'
     : houseLimitStatus === 'warning'
     ? 'border-yellow-500/50'
-    : 'border-gray-700/50';
+    : 'border-gray-800';
 
   return (
-    <div className={`bg-gray-800/30 rounded-lg p-3 border ${borderClass} transition-all`}>
+    <div className={`bg-black rounded-lg p-3 border ${borderClass} transition-all`}>
       {/* House limit warning badge */}
       {houseLimitStatus !== 'healthy' && (
         <div className={`text-[10px] mb-2 px-2 py-0.5 rounded inline-block ${
@@ -132,11 +132,11 @@ export const ChipBetting: React.FC<ChipBettingProps> = ({
         </div>
 
         {/* Divider */}
-        <div className="w-px h-12 bg-gray-700/50"></div>
+        <div className="w-px h-12 bg-gray-800"></div>
 
         {/* Bet display - compact */}
         <div
-          className="flex-1 flex items-center justify-between cursor-pointer hover:bg-gray-700/20 rounded px-2 py-1 transition"
+          className="flex-1 flex items-center justify-between cursor-pointer hover:bg-gray-900 rounded px-2 py-1 transition"
           onClick={undoLastChip}
           title={betAmount > 0 ? "Click to undo" : ""}
         >

@@ -330,7 +330,7 @@ export function DiceGame() {
     <GameLayout minBet={0.01} maxWin={10} houseEdge={0.99}>
 
       {/* UNIFIED GAME CARD */}
-      <div className="card max-w-5xl mx-auto bg-gray-900/50 border border-gray-700/50">
+      <div className="card max-w-5xl mx-auto bg-black border border-gray-800">
 
         {/* COMPACT TOP BAR */}
         <div className="mb-4 flex items-center justify-between text-xs">
@@ -341,7 +341,7 @@ export function DiceGame() {
               {/* Compact balance display */}
               <div className="flex items-center gap-3 text-gray-400">
                 <span>
-                  Chips: <span className="font-mono text-blue-400">{formatUSDT(balance.game)}</span>
+                  Chips: <span className="font-mono text-white">{formatUSDT(balance.game)}</span>
                 </span>
                 <span className="text-gray-600">|</span>
                 <span>
@@ -355,8 +355,8 @@ export function DiceGame() {
                   onClick={() => setShowDepositModal(true)}
                   className={`px-3 py-1 text-xs font-bold rounded transition ${
                     showDepositAnimation
-                      ? 'bg-yellow-500 text-black animate-pulse'
-                      : 'bg-dfinity-turquoise/80 text-black hover:bg-dfinity-turquoise'
+                      ? 'bg-white text-black animate-pulse'
+                      : 'bg-white text-black hover:bg-gray-200'
                   }`}
                 >
                   + Chips
@@ -417,19 +417,19 @@ export function DiceGame() {
             <div className="flex items-center justify-between text-xs px-1">
               <div className="flex items-center gap-4 text-gray-400">
                 <span>
-                  <span className="text-yellow-400 font-bold">{winChance.toFixed(0)}%</span> chance
+                  <span className="text-gray-400 font-bold">{winChance.toFixed(0)}%</span> chance
                 </span>
                 <span>
-                  <span className="text-green-400 font-bold">{multiplier.toFixed(2)}x</span> payout
+                  <span className="text-white font-bold">{multiplier.toFixed(2)}x</span> payout
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-dfinity-turquoise font-mono font-bold">
+                <span className="text-white font-mono font-bold">
                   Win ${(betAmount * multiplier).toFixed(2)}
                 </span>
                 <button
                   onClick={() => setShowOddsExplainer(true)}
-                  className="text-gray-500 hover:text-dfinity-turquoise transition"
+                  className="text-gray-600 hover:text-white transition"
                   title="How odds work"
                 >
                   ?
@@ -442,7 +442,7 @@ export function DiceGame() {
               <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowOddsExplainer(false)}>
                 <div className="bg-gray-900 rounded-xl p-6 max-w-lg w-full border border-gray-700 shadow-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-bold text-dfinity-turquoise">How Odds Work</h3>
+                    <h3 className="text-lg font-bold text-white">How Odds Work</h3>
                     <button
                       onClick={() => setShowOddsExplainer(false)}
                       className="text-gray-400 hover:text-white text-2xl leading-none"
@@ -453,12 +453,12 @@ export function DiceGame() {
 
                   <div className="text-xs text-gray-300 space-y-3">
                     <div>
-                      <p className="font-semibold text-dfinity-turquoise mb-1">The Dice Roll (0-100)</p>
+                      <p className="font-semibold text-white mb-1">The Dice Roll (0-100)</p>
                       <p>Every roll generates a random number from <span className="font-mono text-white">0</span> to <span className="font-mono text-white">100</span> — that's <span className="font-mono text-white">101</span> total possible outcomes.</p>
                     </div>
 
                     <div>
-                      <p className="font-semibold text-dfinity-turquoise mb-1">Pick Your Side</p>
+                      <p className="font-semibold text-white mb-1">Pick Your Side</p>
                       <p>
                         Choose a target number and bet <span className="font-bold">Over</span> or <span className="font-bold">Under</span>:
                       </p>
@@ -469,11 +469,11 @@ export function DiceGame() {
                     </div>
 
                     <div>
-                      <p className="font-semibold text-dfinity-turquoise mb-1">Exact Payouts</p>
+                      <p className="font-semibold text-white mb-1">Exact Payouts</p>
                       <p>
                         You get <span className="font-bold text-yellow-400">exact fair odds</span> based on probability.
                       </p>
-                      <div className="mt-2 bg-black/30 rounded p-2 font-mono text-xs">
+                      <div className="mt-2 bg-gray-900 border border-gray-800 rounded p-2 font-mono text-xs">
                         <p className="text-gray-400">Example: <span className="text-white">Under 1</span></p>
                         <p className="mt-1">• Only <span className="text-white">0</span> wins (1 out of 101 outcomes)</p>
                         <p>• Win chance: <span className="text-yellow-400">~0.99%</span></p>
@@ -513,13 +513,17 @@ export function DiceGame() {
               </div>
             )}
 
-            <GameButton
+            <button
               onClick={rollDice}
-              disabled={!actor}
-              loading={isPlaying}
-              label="ROLL DICE"
-              loadingLabel="Rolling..."
-            />
+              disabled={!actor || isPlaying}
+              className="w-full font-mono font-bold py-4 text-xl border-2
+                         border-white text-white bg-transparent
+                         hover:bg-white hover:text-black
+                         disabled:border-gray-700 disabled:text-gray-700
+                         transition"
+            >
+              {isPlaying ? 'Rolling...' : 'ROLL DICE'}
+            </button>
 
             {gameError && (
               <div className="p-3 bg-red-900/20 border border-red-500/30 rounded text-red-400 text-sm whitespace-pre-wrap">
@@ -529,11 +533,10 @@ export function DiceGame() {
           </div>
 
           {/* RIGHT COLUMN: ANIMATION & RESULT */}
-          <div className="flex flex-col items-center justify-center min-h-[300px] bg-black/20 rounded-xl border border-gray-800/50 p-6 relative overflow-hidden">
+          <div className="flex flex-col items-center justify-center min-h-[300px] bg-black rounded-xl border border-gray-800 p-6 relative overflow-hidden">
 
-            {/* Ambient Background Glow */}
-            <div className="absolute inset-0 bg-gradient-to-br from-dfinity-turquoise/5 to-purple-900/10 pointer-events-none"></div>
-
+            {/* Ambient Background Glow - REMOVED */}
+            
             <div className="scale-125 mb-8 relative z-10">
               <DiceAnimation
                 targetNumber={animatingResult}
@@ -545,13 +548,13 @@ export function DiceGame() {
             {/* Result Display */}
             <div className="h-24 flex items-center justify-center w-full relative z-10">
               {lastResult && !isPlaying ? (
-                <div className={`text-center ${lastResult.is_win ? 'text-green-400' : 'text-red-400'} animate-in fade-in slide-in-from-bottom-4 duration-500`}>
+                <div className={`text-center ${lastResult.is_win ? 'text-white' : 'text-gray-500'} animate-in fade-in slide-in-from-bottom-4 duration-500`}>
                   <div className="text-4xl font-black tracking-tight mb-1">
                     {lastResult.is_win ? 'YOU WON!' : 'YOU LOST'}
                   </div>
 
                   {lastResult.is_win && (
-                    <div className="text-2xl font-mono text-dfinity-turquoise">
+                    <div className="text-2xl font-mono text-white">
                       +{formatUSDT(lastResult.payout)}
                     </div>
                   )}
@@ -576,7 +579,7 @@ export function DiceGame() {
       {/* DEPOSIT MODAL */}
       {showDepositModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowDepositModal(false)}>
-          <div className="bg-gray-900 rounded-xl p-6 max-w-md w-full mx-4 border border-gray-700 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-black rounded-xl p-6 max-w-md w-full mx-4 border border-gray-800 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
               <span>Buy Chips</span>
             </h3>
@@ -588,7 +591,7 @@ export function DiceGame() {
                   type="number"
                   value={depositAmount}
                   onChange={(e) => setDepositAmount(e.target.value)}
-                  className="w-full bg-black/50 border border-gray-600 rounded-lg px-4 py-3 text-white text-lg focus:border-dfinity-turquoise focus:outline-none transition"
+                  className="w-full bg-black/50 border border-gray-600 rounded-lg px-4 py-3 text-white text-lg focus:border-white focus:outline-none transition"
                   placeholder="1.0"
                   min="1"
                   step="1"
@@ -620,7 +623,7 @@ export function DiceGame() {
               <button
                 onClick={handleDeposit}
                 disabled={isDepositing}
-                className="flex-1 px-4 py-3 bg-dfinity-turquoise text-black font-bold rounded-lg hover:bg-dfinity-turquoise/90 disabled:opacity-50 disabled:cursor-not-allowed transition relative overflow-hidden"
+                className="flex-1 px-4 py-3 bg-white text-black font-bold rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition relative overflow-hidden"
               >
                 {isDepositing ? (
                   <span className="flex items-center justify-center gap-2">
