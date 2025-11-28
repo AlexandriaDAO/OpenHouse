@@ -43,9 +43,14 @@ echo "$AUDIT"
 echo ""
 
 # 3. Parse audit for excess calculation
-POOL=$(echo "$AUDIT" | grep -oP 'pool_reserve \(\K\d+' || echo "0")
-DEPOSITS=$(echo "$AUDIT" | grep -oP 'deposits \(\K\d+' || echo "0")
-CANISTER=$(echo "$AUDIT" | grep -oP 'canister \(\K\d+' || echo "0")
+POOL=$(echo "$AUDIT" | grep "pool_reserve" | awk -F'=' '{print $2}' | sed 's/[^0-9]//g' | head -n1)
+DEPOSITS=$(echo "$AUDIT" | grep "deposits" | awk -F'=' '{print $2}' | sed 's/[^0-9]//g' | head -n1)
+CANISTER=$(echo "$AUDIT" | grep "canister" | awk -F'=' '{print $2}' | sed 's/[^0-9]//g' | head -n1)
+
+# Fallback if parsing failed
+if [ -z "$POOL" ]; then POOL=0; fi
+if [ -z "$DEPOSITS" ]; then DEPOSITS=0; fi
+if [ -z "$CANISTER" ]; then CANISTER=0; fi
 
 if [ -n "$POOL" ] && [ -n "$DEPOSITS" ] && [ -n "$CANISTER" ]; then
     CALCULATED=$((POOL + DEPOSITS))
