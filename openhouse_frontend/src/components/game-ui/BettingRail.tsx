@@ -193,9 +193,6 @@ export function BettingRail({
     <>
       {/* Fixed bottom container - DESKTOP */}
       <div className="hidden md:block fixed bottom-0 left-0 right-0 z-40">
-        {/* Curved top edge */}
-        <div className="betting-rail-curve" />
-
         {/* Main rail surface */}
         <div className="betting-rail">
           <div className="container mx-auto px-6 py-3">
