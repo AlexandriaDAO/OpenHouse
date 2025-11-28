@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 
 export type DiceDirection = 'Over' | 'Under';
 
@@ -10,14 +10,8 @@ interface DiceControlsProps {
   disabled?: boolean;
 }
 
-// Preset win chances with their corresponding target numbers
-const WIN_PRESETS = [
-  { chance: 10, label: '10%', targetOver: 90, targetUnder: 10 },
-  { chance: 25, label: '25%', targetOver: 75, targetUnder: 25 },
-  { chance: 50, label: '50%', targetOver: 50, targetUnder: 50 },
-  { chance: 75, label: '75%', targetOver: 25, targetUnder: 75 },
-  { chance: 90, label: '90%', targetOver: 10, targetUnder: 90 },
-];
+// Target number presets (direct values 1-100)
+const TARGET_PRESETS = [10, 25, 50, 75, 90];
 
 export const DiceControls: React.FC<DiceControlsProps> = ({
   targetNumber,
@@ -26,22 +20,8 @@ export const DiceControls: React.FC<DiceControlsProps> = ({
   onDirectionChange,
   disabled = false,
 }) => {
-  const [showAdvanced, setShowAdvanced] = useState(false);
-
-  // Calculate current win chance based on direction and target
-  const winChance = direction === 'Over' ? 100 - targetNumber : targetNumber;
-
-  // Handle preset click - sets both target and direction optimally
-  const handlePresetClick = (preset: typeof WIN_PRESETS[0]) => {
-    if (direction === 'Over') {
-      onTargetChange(preset.targetOver);
-    } else {
-      onTargetChange(preset.targetUnder);
-    }
-  };
-
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {/* Direction toggle - big and clear */}
       <div className="flex gap-2">
         <button
@@ -53,7 +33,7 @@ export const DiceControls: React.FC<DiceControlsProps> = ({
               : 'bg-gray-800/50 text-gray-400 hover:bg-gray-700/50 hover:text-white'
           }`}
         >
-          ROLL HIGH
+          OVER
         </button>
         <button
           onClick={() => onDirectionChange('Under')}
@@ -64,18 +44,39 @@ export const DiceControls: React.FC<DiceControlsProps> = ({
               : 'bg-gray-800/50 text-gray-400 hover:bg-gray-700/50 hover:text-white'
           }`}
         >
-          ROLL LOW
+          UNDER
         </button>
       </div>
 
-      {/* Quick presets by win chance */}
+      {/* Target Slider - Granular Control */}
+      <div className="bg-gray-800/30 p-3 rounded-lg border border-gray-700/30">
+        <div className="flex justify-between mb-2 text-xs text-gray-400 font-mono uppercase">
+          <span>Target Number</span>
+          <span className="text-white font-bold">{targetNumber}</span>
+        </div>
+        <input
+          type="range"
+          min="2"
+          max="98"
+          value={targetNumber}
+          onChange={(e) => onTargetChange(parseInt(e.target.value))}
+          className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-dfinity-turquoise"
+          disabled={disabled}
+        />
+        <div className="flex justify-between mt-1 text-[10px] text-gray-600 font-mono">
+          <span>0</span>
+          <span>100</span>
+        </div>
+      </div>
+
+      {/* Quick presets by Target Number */}
       <div className="flex gap-1.5">
-        {WIN_PRESETS.map((preset) => {
-          const isActive = Math.abs(winChance - preset.chance) < 3;
+        {TARGET_PRESETS.map((val) => {
+          const isActive = targetNumber === val;
           return (
             <button
-              key={preset.chance}
-              onClick={() => handlePresetClick(preset)}
+              key={val}
+              onClick={() => onTargetChange(val)}
               disabled={disabled}
               className={`flex-1 py-2 text-xs font-bold rounded transition ${
                 isActive
@@ -83,42 +84,19 @@ export const DiceControls: React.FC<DiceControlsProps> = ({
                   : 'bg-gray-800/50 text-gray-400 hover:bg-gray-700/50 hover:text-white'
               }`}
             >
-              {preset.label}
+              {val}
             </button>
           );
         })}
       </div>
 
-      {/* Current selection display */}
-      <div className="flex items-center justify-between text-xs px-1">
-        <span className="text-gray-500">
-          {direction === 'Over' ? `Roll > ${targetNumber}` : `Roll < ${targetNumber}`}
-        </span>
-        <button
-          onClick={() => setShowAdvanced(!showAdvanced)}
-          className="text-gray-500 hover:text-dfinity-turquoise transition"
-        >
-          {showAdvanced ? 'Hide' : 'Custom'}
-        </button>
+      {/* Context help text */}
+      <div className="text-center text-xs text-gray-500 mt-1">
+        {direction === 'Over' 
+          ? `Win if roll is greater than ${targetNumber}` 
+          : `Win if roll is less than ${targetNumber}`
+        }
       </div>
-
-      {/* Advanced slider (hidden by default) */}
-      {showAdvanced && (
-        <div className="pt-2 border-t border-gray-700/30">
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-gray-500 w-8">{targetNumber}</span>
-            <input
-              type="range"
-              min="1"
-              max="99"
-              value={targetNumber}
-              onChange={(e) => onTargetChange(parseInt(e.target.value))}
-              className="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-dfinity-turquoise"
-              disabled={disabled}
-            />
-          </div>
-        </div>
-      )}
     </div>
   );
 };
