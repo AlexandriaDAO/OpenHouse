@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Principal } from '@dfinity/principal';
 import { CHIP_DENOMINATIONS, ChipDenomination, decomposeIntoChips } from '../game-specific/dice/chipConfig';
+import { ChipStack } from '../game-specific/dice/ChipStack';
 import { DECIMALS_PER_CKUSDT, formatUSDT, TRANSFER_FEE } from '../../types/balance';
 import { ApproveArgs } from '../../types/ledger';
 import './BettingRail.css';
@@ -199,55 +200,11 @@ export function BettingRail({
      }
   }, [gameBalance, disabled]);
 
-  // === New Chip Arc Visualization ===
-  // We want to render chips in an arc. We need to map the `displayChips` array to positions.
-  // We'll limit to e.g. 15 chips for visual clarity.
-  const arcChips = useMemo(() => {
-    // Flatten displayChips to individual chips
-    let chips: ChipDenomination[] = [];
-    displayChips.forEach(({ chip, count }) => {
-      for(let i=0; i<count; i++) chips.push(chip);
-    });
-    
-    // Sort: Large value at bottom? Or just keep order?
-    // decomposeIntoChips returns High->Low. 
-    // If we stack them, we probably want larger ones at the back or bottom?
-    // Let's reverse so smaller chips are on top if we overlap.
-    // Actually, standard poker stacks have chips of same color together.
-    // Let's just take up to 20 chips.
-    const MAX_CHIPS = 20;
-    const visibleChips = chips.slice(0, MAX_CHIPS);
-    
-    const total = visibleChips.length;
-    const baseAngle = -40; // Start angle
-    const endAngle = 40;   // End angle
-    const angleStep = total > 1 ? (endAngle - baseAngle) / (total - 1) : 0;
-
-    return visibleChips.map((chip, index) => {
-      // Calculate position
-      // We fan them out in an arc.
-      // Center is index ~ total/2
-      const angle = total === 1 ? 0 : baseAngle + (index * angleStep);
-      // Offset Y slightly based on distance from center to create an arch effect?
-      // Or just rotate around a bottom point.
-      // transform-origin: bottom center is set in CSS.
-      
-      return {
-        chip,
-        style: {
-          transform: `translateX(-50%) rotate(${angle}deg) translateY(${Math.abs(angle) * 0.5}px)`,
-          zIndex: index,
-        }
-      };
-    });
-  }, [displayChips]);
-
-
   return (
     <>
       {/* Fixed bottom container */}
       <div className="fixed bottom-0 left-0 right-0 z-40">
-        {/* Curved top edge with Wood Border */}
+        {/* Curved top edge */}
         <div className="betting-rail-curve" />
 
         {/* Main rail surface */}
@@ -271,12 +228,12 @@ export function BettingRail({
                 ))}
               </div>
 
-              {/* Column 2: Chip Pile (Semicircle) & Bet Amount */}
+              {/* Column 2: Chip Stack & Bet Amount */}
               <div className="flex flex-col items-center justify-center relative -mt-4">
                  
-                {/* The Chip Arc */}
+                {/* The Chip Stack */}
                 <div 
-                  className="chip-arc-container cursor-pointer" 
+                  className="h-20 flex items-end justify-center cursor-pointer transition-opacity hover:opacity-90" 
                   onClick={undoLastChip}
                   title="Click to undo last chip"
                 >
@@ -285,17 +242,12 @@ export function BettingRail({
                       BET
                     </div>
                   ) : (
-                    arcChips.map((item, i) => (
-                      <img 
-                        key={i}
-                        src={item.chip.topImg} // Top view for the arc looks better "stacked" flat or side view? 
-                                               // User said "semicircle where they're touching". 
-                                               // Usually this means top-down view of flat chips overlapping.
-                        alt={item.chip.label}
-                        className="chip-in-arc"
-                        style={item.style}
-                      />
-                    ))
+                    <ChipStack 
+                      amount={betAmount} 
+                      maxChipsShown={20} 
+                      showValue={false} 
+                      size="md" 
+                    />
                   )}
                 </div>
 
@@ -319,13 +271,8 @@ export function BettingRail({
                 </div>
               </div>
 
-              {/* Column 3: Empty right side for symmetry or additional controls? 
-                  User wanted buttons in footer. 
-                  We can put a "Repeat Bet" or similar here later.
-                  For now, let's keep it balanced.
-              */}
+              {/* Column 3: Undo/Action placeholder */}
               <div className="w-[200px] flex justify-end">
-                 {/* Placeholder or move Undo button here explicitly? */}
                  <button 
                    onClick={undoLastChip}
                    disabled={chipHistory.length === 0 || disabled}
@@ -359,7 +306,7 @@ export function BettingRail({
                </div>
             </div>
 
-            {/* Bottom Info Row - WITH BUTTONS NOW */}
+            {/* Bottom Info Row - WITH BUTTONS */}
             <div className="flex items-center justify-between text-xs mt-2 pt-2 border-t border-gray-800/50 text-gray-400 relative">
               
               <div className="flex items-center gap-4 flex-1">
