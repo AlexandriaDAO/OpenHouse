@@ -6,28 +6,26 @@ interface ChipStackProps {
   maxChipsShown?: number; // Max chips per pile
   onClick?: () => void;
   showValue?: boolean;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
   className?: string;
 }
 
 export const ChipStack: React.FC<ChipStackProps> = ({
   amount,
-  maxChipsShown = 10,
+  maxChipsShown = 20,
   onClick,
   showValue = true,
   size = 'md',
   className = '',
 }) => {
   const chipCounts = decomposeIntoChips(amount);
-  // decomposeIntoChips returns High -> Low (Black -> White)
-  // We'll display them in that order (Left -> Right: Black ... White) or reverse?
-  // Usually larger values are more significant, so Left is good.
 
-  // Size configurations
+  // Size configurations - Tweaked for tighter stacking
   const sizeConfig = {
-    sm: { width: 40, height: 20, offset: -4 },
-    md: { width: 60, height: 30, offset: -6 },
-    lg: { width: 80, height: 40, offset: -8 },
+    sm: { width: 36, height: 18, offset: -3 },
+    md: { width: 56, height: 28, offset: -5 },
+    lg: { width: 72, height: 36, offset: -7 },
+    xl: { width: 96, height: 48, offset: -9 }, // New extra large size
   };
   const { width, height, offset } = sizeConfig[size];
 
@@ -36,9 +34,9 @@ export const ChipStack: React.FC<ChipStackProps> = ({
       <div
         className={`flex flex-col items-center justify-center ${className}`}
         onClick={onClick}
-        style={{ cursor: onClick ? 'pointer' : 'default', minHeight: height + 20 }}
+        style={{ cursor: onClick ? 'pointer' : 'default', minHeight: height }}
       >
-        <div className="text-gray-500 text-xs italic">No chips</div>
+        {/* Empty state handled by parent usually, or minimal placeholder */}
       </div>
     );
   }
@@ -49,23 +47,25 @@ export const ChipStack: React.FC<ChipStackProps> = ({
       onClick={onClick}
       style={{ cursor: onClick ? 'pointer' : 'default' }}
     >
-      {/* Piles Container */}
-      <div className="flex flex-row items-end justify-center gap-1">
+      {/* Piles Container - Reduced gap for tight "touching" look */}
+      <div className="flex flex-row items-end justify-center -space-x-2">
         {chipCounts.map(({ chip, count }) => {
           const visibleCount = Math.min(count, maxChipsShown);
           const hasMore = count > maxChipsShown;
           
-          // Create array for mapping
           const chipsInPile = Array(visibleCount).fill(chip);
+
+          // Calculate exact height needed
+          const stackHeight = (visibleCount - 1) * Math.abs(offset) + height;
 
           return (
             <div
               key={chip.color}
-              className="relative"
+              className="relative transition-transform hover:-translate-y-1"
               style={{
                 width: width,
-                height: height + (visibleCount - 1) * Math.abs(offset) + 10,
-                // Ensure enough height for the stack
+                height: stackHeight,
+                zIndex: 10, // Ensure base z-index
               }}
             >
               {chipsInPile.map((_, index) => (
@@ -73,9 +73,9 @@ export const ChipStack: React.FC<ChipStackProps> = ({
                   key={index}
                   src={chip.sideImg}
                   alt={`${chip.color} chip`}
-                  className="absolute left-1/2 transform -translate-x-1/2 drop-shadow-md transition-transform hover:scale-105"
+                  className="absolute left-1/2 transform -translate-x-1/2 drop-shadow-md"
                   style={{
-                    width,
+                    width: '100%', // Fit container
                     height: 'auto',
                     bottom: index * Math.abs(offset),
                     zIndex: index,
@@ -83,13 +83,13 @@ export const ChipStack: React.FC<ChipStackProps> = ({
                 />
               ))}
 
-              {/* "More" indicator if truncated */}
+              {/* "More" indicator */}
               {hasMore && (
                 <div
-                  className="absolute -top-2 -right-2 bg-dfinity-turquoise text-black text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center z-50 shadow-sm border border-white/20"
-                  style={{ bottom: (visibleCount - 1) * Math.abs(offset) + height - 10 }} // Position near top of stack
+                  className="absolute -top-3 -right-1 bg-dfinity-turquoise text-black text-[9px] font-bold rounded-full w-5 h-5 flex items-center justify-center z-50 shadow-sm border border-white/20"
+                  style={{ bottom: stackHeight - 10 }}
                 >
-                  +{count - maxChipsShown}
+                  +
                 </div>
               )}
             </div>
