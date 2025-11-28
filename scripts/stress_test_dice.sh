@@ -21,6 +21,7 @@ fi
 export DFX_WARNING=-mainnet_plaintext_identity
 
 CANISTER_ID="whchi-hyaaa-aaaao-a4ruq-cai"
+CKUSDT_CANISTER_ID="cngnf-vqaaa-aaaar-qag4q-cai"
 NETWORK="ic"
 CONCURRENT_USERS=15          # 10-20 range
 OPERATIONS_PER_USER=15       # Each user does 15 operations
@@ -56,6 +57,41 @@ function random_bet_params() {
     CLIENT_SEED="stress_test_${RANDOM}_${RANDOM}"
 
     echo "$BET|$TARGET|$DIRECTION|$CLIENT_SEED"
+}
+
+function report_funds() {
+    echo ""
+    echo "======================================"
+    echo "  💰 FUNDS REPORT (Where is my money?)"
+    echo "======================================"
+    
+    local PRINCIPAL=$(dfx identity get-principal)
+    
+    # 1. Check Wallet Balance (ckUSDT)
+    local WALLET_BAL_RAW=$(dfx canister --network $NETWORK call $CKUSDT_CANISTER_ID icrc1_balance_of "(record { owner = principal \"$PRINCIPAL\" })" 2>&1)
+    local WALLET_BAL=$(echo "$WALLET_BAL_RAW" | awk -F'[:)]' '{print $1}' | sed 's/[^0-9]//g')
+    if [ -z "$WALLET_BAL" ]; then WALLET_BAL=0; fi
+    local WALLET_FMT=$(echo "scale=2; $WALLET_BAL / 1000000" | bc)
+    
+    # 2. Check Dice Backend Balance
+    local DICE_BAL_RAW=$(dfx canister --network $NETWORK call $CANISTER_ID get_my_balance 2>&1)
+    local DICE_BAL=$(echo "$DICE_BAL_RAW" | awk -F'[:)]' '{print $1}' | sed 's/[^0-9]//g')
+    if [ -z "$DICE_BAL" ]; then DICE_BAL=0; fi
+    local DICE_FMT=$(echo "scale=2; $DICE_BAL / 1000000" | bc)
+    
+    # 3. Check LP Position
+    local LP_RAW=$(dfx canister --network $NETWORK call $CANISTER_ID get_my_lp_position 2>&1)
+    # This is a rough check for shares, real value calculation is complex but this helps track if funds are stuck in LP
+    local SHARES=$(echo "$LP_RAW" | grep "shares" | sed 's/[^0-9]//g')
+    if [ -z "$SHARES" ]; then SHARES=0; fi
+    
+    echo "1. IC Wallet (ckUSDT):  $WALLET_FMT USDT"
+    echo "2. Dice Game Balance:   $DICE_FMT USDT"
+    echo "3. LP Shares Held:      $SHARES shares"
+    echo "--------------------------------------"
+    local TOTAL=$(echo "scale=2; ($WALLET_BAL + $DICE_BAL) / 1000000" | bc)
+    echo "Total Liquid Funds:     $TOTAL USDT (excluding potential LP value)"
+    echo "======================================"
 }
 
 # Call dfx with error checking
@@ -265,6 +301,9 @@ echo ""
 # -----------------------------------------------------------------------------
 echo "[VALIDATION] Running post-test validation..."
 
+# Refresh balance to ensure final audit is accurate
+dfx canister --network $NETWORK call $CANISTER_ID refresh_canister_balance > /dev/null 2>&1
+
 # Run audit again
 FINAL_AUDIT=$(dfx canister --network $NETWORK call $CANISTER_ID audit_balances 2>&1)
 if ! echo "$FINAL_AUDIT" | grep -q "Ok"; then
@@ -318,3 +357,6 @@ echo "======================================"
 
 # Cleanup
 rm -rf "$TEMP_DIR"
+
+# Final funds report
+report_funds
