@@ -221,74 +221,69 @@ export function BettingRail({
                 ))}
               </div>
 
-              {/* CENTER: Chip Stack + Bet Amount */}
-              <div className="flex flex-col items-center -mt-12">
+              {/* CENTER: Chip Stack + Bet Amount (horizontal) */}
+              <div className="flex items-end gap-6">
                 {/* Interactive Chip Stack */}
-                <div className="mb-2">
-                  <InteractiveChipStack
-                    amount={betAmount}
-                    onRemoveChip={removeChip}
-                    disabled={disabled}
-                    maxChipsPerPile={10}
-                  />
-                </div>
+                <InteractiveChipStack
+                  amount={betAmount}
+                  onRemoveChip={removeChip}
+                  disabled={disabled}
+                  maxChipsPerPile={10}
+                />
 
-                {/* Bet Amount Display */}
-                <div className="flex items-center gap-4">
-                  <div className="text-center">
-                    <div className="text-white font-mono font-black text-3xl leading-none drop-shadow-lg">
-                      ${betAmount.toFixed(2)}
-                    </div>
-                    <div className="text-gray-500 text-xs mt-1">
-                      max ${maxBet.toFixed(2)}
-                    </div>
+                {/* Bet Amount Display - to the right of stack */}
+                <div className="flex flex-col items-start pb-1">
+                  <div className="text-white font-mono font-bold text-2xl leading-none">
+                    ${betAmount.toFixed(2)}
                   </div>
-
-                  {betAmount > 0 && (
-                    <button
-                      onClick={clearBet}
-                      disabled={disabled}
-                      className="rail-button rail-button-secondary text-red-400 border-red-400/30 hover:border-red-400 hover:text-red-300"
-                    >
-                      Clear
-                    </button>
-                  )}
+                  <div className="flex items-center gap-3 mt-1">
+                    <span className="text-gray-500 text-xs">max ${maxBet.toFixed(2)}</span>
+                    {betAmount > 0 && (
+                      <button
+                        onClick={clearBet}
+                        disabled={disabled}
+                        className="text-gray-500 hover:text-red-400 text-xs transition"
+                      >
+                        clear
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
 
               {/* RIGHT: Balances & Actions */}
-              <div className="flex flex-col items-end gap-2">
+              <div className="flex flex-col items-end gap-1 text-xs">
                 {/* Chips Balance */}
-                <div className="flex items-center gap-3">
-                  <span className="text-gray-400 text-sm">
-                    Chips: <span className="text-white font-mono font-bold">${formatUSDT(gameBalance)}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-500">
+                    Chips: <span className="text-white font-mono">${formatUSDT(gameBalance)}</span>
                   </span>
                   <button
                     onClick={() => setShowDepositModal(true)}
-                    className={`rail-button ${showDepositAnimation ? 'rail-button-primary deposit-button-pulse' : 'rail-button-primary'}`}
+                    className={`text-green-500 hover:text-green-400 transition ${showDepositAnimation ? 'deposit-button-pulse' : ''}`}
                   >
-                    + Buy
+                    + buy
                   </button>
                 </div>
 
                 {/* Wallet Balance */}
-                <div className="flex items-center gap-3">
-                  <span className="text-gray-500 text-sm">
-                    Wallet: <span className="text-gray-300 font-mono">${formatUSDT(walletBalance)}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-600">
+                    Wallet: <span className="text-gray-400 font-mono">${formatUSDT(walletBalance)}</span>
                   </span>
                   <button
                     onClick={handleWithdrawAll}
                     disabled={isWithdrawing || gameBalance === 0n}
-                    className="rail-button rail-button-secondary"
+                    className="text-gray-500 hover:text-white disabled:opacity-30 transition"
                   >
-                    Cash Out
+                    cash out
                   </button>
                 </div>
 
                 {/* House Limit Warning */}
                 {houseLimitStatus !== 'healthy' && (
-                  <div className={`text-xs font-bold ${houseLimitStatus === 'danger' ? 'text-red-500' : 'text-yellow-500'}`}>
-                    {houseLimitStatus === 'danger' ? 'House limit exceeded' : 'Near house limit'}
+                  <div className={`text-[10px] ${houseLimitStatus === 'danger' ? 'text-red-500' : 'text-yellow-500'}`}>
+                    {houseLimitStatus === 'danger' ? 'limit exceeded' : 'near limit'}
                   </div>
                 )}
               </div>

@@ -4,11 +4,11 @@
 
 /* Curved top edge - the "lip" of the table */
 .betting-rail-curve {
-  height: 48px;
+  height: 28px;
   background: linear-gradient(
     to bottom,
     transparent 0%,
-    transparent 30%,
+    transparent 40%,
     #1a472a 100%
   );
   border-top-left-radius: 50% 100%;
@@ -158,20 +158,18 @@
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
-  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: transform 0.15s ease;
   cursor: pointer;
   filter: drop-shadow(0 2px 3px rgba(0,0,0,0.4));
 }
 
 .chip-in-pile:hover {
-  filter: brightness(1.2) drop-shadow(0 4px 8px rgba(0,0,0,0.5));
-  z-index: 200 !important;
+  transform: translateX(-50%) translateY(3px);
 }
 
 /* Click feedback */
 .chip-in-pile:active {
-  transform: translateX(-50%) scale(0.95);
-  filter: brightness(1.3);
+  transform: translateX(-50%) translateY(5px);
 }
 
 /* Chip removal animation */
