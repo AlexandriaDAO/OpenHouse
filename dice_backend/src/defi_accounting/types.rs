@@ -98,6 +98,21 @@ pub enum AuditEvent {
     },
 }
 
+/// Health check result for admin monitoring.
+/// Mirrors the logic of scripts/check_balance.sh
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct HealthCheck {
+    pub pool_reserve: u64,
+    pub total_deposits: u64,
+    pub canister_balance: u64,
+    pub calculated_total: u64,
+    pub excess: i64,
+    pub excess_usdt: f64,
+    pub is_healthy: bool,
+    pub health_status: String,
+    pub timestamp: u64,
+}
+
 impl Storable for AuditEntry {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         Cow::Owned(

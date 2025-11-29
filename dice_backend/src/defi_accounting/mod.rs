@@ -5,6 +5,8 @@ pub mod query;
 pub mod statistics;
 pub mod types;
 
+pub use types::HealthCheck;
+
 // Re-export types and update functions from original modules
 pub use accounting::update_balance;
 
