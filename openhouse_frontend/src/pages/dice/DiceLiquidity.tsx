@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Principal } from '@dfinity/principal';
 import { useAuth } from '../../providers/AuthProvider';
 import useDiceActor from '../../hooks/actors/useDiceActor';
@@ -26,6 +27,7 @@ interface LPPosition {
 const DICE_BACKEND_CANISTER_ID = 'whchi-hyaaa-aaaao-a4ruq-cai';
 
 export function DiceLiquidity() {
+  const navigate = useNavigate();
   const { isAuthenticated, principal } = useAuth();
   const { actor: diceActor } = useDiceActor();
   const { actor: ledgerActor } = useLedgerActor();
@@ -168,6 +170,17 @@ export function DiceLiquidity() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 pb-12">
+      {/* Back to Game Button */}
+      <div className="pt-4 pb-2">
+        <button
+          onClick={() => navigate('/dice')}
+          className="text-dfinity-turquoise hover:text-dfinity-turquoise/80 text-sm font-medium flex items-center gap-2 transition"
+        >
+          <span>←</span>
+          <span>🎲 Back to Game</span>
+        </button>
+      </div>
+
       {/* HERO SECTION - BE THE HOUSE */}
       <div className="text-center py-8">
         <h1 className="text-3xl font-black text-white mb-2 tracking-tight">
@@ -257,12 +270,12 @@ export function DiceLiquidity() {
                     type="number"
                     value={depositAmount}
                     onChange={(e) => setDepositAmount(e.target.value)}
-                    className="w-full bg-gray-950/50 border border-gray-700 rounded-lg px-4 py-3 text-white font-mono focus:ring-2 focus:ring-dfinity-turquoise/50 outline-none"
+                    className="w-full bg-gray-950/50 border border-gray-700 rounded-lg px-4 py-3 pr-16 text-white font-mono focus:ring-2 focus:ring-dfinity-turquoise/50 outline-none"
                     placeholder="10"
                     min="10"
                     disabled={isDepositing}
                   />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm font-bold">
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm font-bold pointer-events-none select-none bg-transparent">
                     USDT
                   </span>
                 </div>

@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Principal } from '@dfinity/principal';
 import { CHIP_DENOMINATIONS, ChipDenomination, decomposeIntoChips } from '../game-specific/dice/chipConfig';
 import { InteractiveChipStack } from './InteractiveChipStack';
@@ -36,6 +37,11 @@ export function BettingRail({
   multiplier,
   canisterId,
 }: BettingRailProps) {
+  // === Navigation ===
+  const navigate = useNavigate();
+  const location = useLocation();
+  const isLiquidityRoute = location.pathname.includes('/liquidity');
+
   // === Internal State ===
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [depositAmount, setDepositAmount] = useState('1');
@@ -276,6 +282,12 @@ export function BettingRail({
                 >
                   Cash Out
                 </button>
+                <button
+                  onClick={() => navigate(isLiquidityRoute ? '/dice' : '/dice/liquidity')}
+                  className="text-dfinity-turquoise hover:text-dfinity-turquoise/80 font-medium transition"
+                >
+                  {isLiquidityRoute ? '🎲 Play Game' : '💰 Be The House'}
+                </button>
               </div>
             </div>
           </div>
@@ -315,6 +327,12 @@ export function BettingRail({
                   className="text-gray-500 disabled:opacity-30"
                 >
                   Cash Out
+                </button>
+                <button
+                  onClick={() => navigate(isLiquidityRoute ? '/dice' : '/dice/liquidity')}
+                  className="text-dfinity-turquoise"
+                >
+                  {isLiquidityRoute ? '🎲' : '💰'}
                 </button>
               </div>
             </div>
