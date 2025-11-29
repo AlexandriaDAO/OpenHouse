@@ -58,11 +58,22 @@ impl Card {
 #[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
 pub struct Hand {
     pub cards: Vec<Card>,
+    pub is_from_split: bool,
 }
 
 impl Hand {
     pub fn new() -> Self {
-        Self { cards: Vec::new() }
+        Self { 
+            cards: Vec::new(),
+            is_from_split: false,
+        }
+    }
+
+    pub fn new_split() -> Self {
+        Self {
+            cards: Vec::new(),
+            is_from_split: true,
+        }
     }
 
     pub fn add_card(&mut self, card: Card) {
@@ -89,7 +100,7 @@ impl Hand {
     }
 
     pub fn is_blackjack(&self) -> bool {
-        self.cards.len() == 2 && self.value() == 21
+        self.cards.len() == 2 && self.value() == 21 && !self.is_from_split
     }
 
     pub fn is_bust(&self) -> bool {
@@ -145,6 +156,8 @@ pub struct BlackjackGame {
     pub results: Vec<Option<GameResult>>,
     pub payout: u64,
     pub timestamp: u64,
+    pub client_seed: String,
+    pub card_draw_counter: u32,
 }
 
 impl Storable for BlackjackGame {
