@@ -1,15 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import useDiceActor from '../hooks/actors/useDiceActor';
 import { HealthCheck } from '../declarations/dice_backend/dice_backend.did';
+import { useAuth } from '../providers/AuthProvider';
+
+const ADMIN_PRINCIPAL = 'p7336-jmpo5-pkjsf-7dqkd-ea3zu-g2ror-ctcn2-sxtuo-tjve3-ulrx7-wae';
 
 export const Admin: React.FC = () => {
   const { actor } = useDiceActor();
+  const { principal, isAuthenticated } = useAuth();
   const [health, setHealth] = useState<HealthCheck | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Check if current user is the admin
+  const isAdmin = principal === ADMIN_PRINCIPAL;
+
   const checkHealth = async () => {
-    if (!actor) return;
+    if (!actor || !isAdmin) return;
     setLoading(true);
     setError(null);
     try {
@@ -28,12 +35,38 @@ export const Admin: React.FC = () => {
   };
 
   useEffect(() => {
-      if(actor) {
+      if(actor && isAdmin) {
           checkHealth();
       }
-  }, [actor]);
+  }, [actor, isAdmin]);
 
   if (!actor) return <div className="p-8 text-white">Initializing actor...</div>;
+
+  // Access control: Only show admin UI to authorized principal
+  if (!isAdmin) {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white p-8 flex items-center justify-center">
+        <div className="max-w-md w-full">
+          <div className="bg-red-900/20 border border-red-500 rounded-lg p-8 text-center">
+            <div className="text-6xl mb-4">🚫</div>
+            <h1 className="text-2xl font-bold text-red-400 mb-2">Access Denied</h1>
+            <p className="text-gray-300 mb-4">
+              This page is restricted to authorized administrators only.
+            </p>
+            <div className="bg-gray-800 rounded p-3 mb-4">
+              <p className="text-xs text-gray-400 mb-1">Your Principal:</p>
+              <p className="font-mono text-xs text-gray-300 break-all">{principal || 'Not authenticated'}</p>
+            </div>
+            {!isAuthenticated && (
+              <p className="text-sm text-gray-400">
+                Please log in with an authorized account.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
@@ -63,7 +96,10 @@ export const Admin: React.FC = () => {
                   <div className={`text-2xl font-bold mb-2 ${health.is_healthy ? 'text-green-400' : 'text-red-400'}`}>
                       {health.is_healthy ? 'HEALTHY' : 'UNHEALTHY'}
                   </div>
-                  <div className="text-gray-400 text-sm">{health.health_status}</div>
+                  <div className="text-gray-400 text-sm mb-3">{health.health_status}</div>
+                  <div className="text-xs text-gray-500">
+                      Last checked: {new Date(Number(health.timestamp) / 1_000_000).toLocaleString()}
+                  </div>
               </div>
 
               <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
