@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import useDiceActor from '../../../hooks/actors/useDiceActor';
-import { AccountingStats, PoolStats, GameStats } from '../../../types/dice-backend';
+import { AccountingStats, PoolStats } from '../../../types/dice-backend';
 
 interface HealthDashboardProps {
   inline?: boolean;
@@ -16,7 +16,6 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({ inline = false
 
   const [accounting, setAccounting] = useState<AccountingStats | null>(null);
   const [poolStats, setPoolStats] = useState<PoolStats | null>(null);
-  const [gameStats, setGameStats] = useState<GameStats | null>(null);
   const [auditStatus, setAuditStatus] = useState<string>('');
   const [canAcceptBets, setCanAcceptBets] = useState<boolean | null>(null);
 
@@ -47,18 +46,19 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({ inline = false
     setError(null);
 
     try {
-      // Fetch all stats in parallel
-      const [accountingResult, poolResult, gameResult, auditResult, betsResult] = await Promise.all([
+      // CRITICAL: Refresh canister balance FIRST to ensure accurate data
+      await diceActor.refresh_canister_balance();
+
+      // Then fetch all stats in parallel
+      const [accountingResult, poolResult, auditResult, betsResult] = await Promise.all([
         diceActor.get_accounting_stats(),
         diceActor.get_pool_stats(),
-        diceActor.get_stats(),
         diceActor.audit_balances(),
         diceActor.can_accept_bets()
       ]);
 
       setAccounting(accountingResult);
       setPoolStats(poolResult);
-      setGameStats(gameResult);
       setAuditStatus('Ok' in auditResult ? auditResult.Ok : auditResult.Err);
       setCanAcceptBets(betsResult);
       setLastUpdated(new Date());
@@ -79,12 +79,6 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({ inline = false
 
   const formatNumber = (n: bigint) => {
     return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  };
-
-  const calculateHouseEdge = () => {
-    if (!gameStats || gameStats.total_volume === BigInt(0)) return '0.00';
-    const houseEdge = (Number(gameStats.house_profit) / Number(gameStats.total_volume)) * 100;
-    return houseEdge.toFixed(2);
   };
 
   const calculateExcess = () => {
@@ -148,7 +142,7 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({ inline = false
             </span>
           </div>
 
-          {accounting && poolStats && gameStats && (
+          {accounting && poolStats && (
             <div className="space-y-4">
               {/* System Health */}
               <section className="bg-gray-800/50 p-3 rounded">
@@ -225,35 +219,6 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({ inline = false
                   <div className="flex flex-col">
                     <span className="text-gray-400">Share Price</span>
                     <span className="font-mono text-white">{formatUSDT(poolStats.share_price)} USDT</span>
-                  </div>
-                </div>
-              </section>
-
-              {/* Game Stats */}
-              <section className="bg-green-900/10 p-3 rounded border border-green-500/20">
-                <h3 className="text-sm font-bold mb-2 text-green-400">🎲 Game Performance</h3>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="flex flex-col">
-                    <span className="text-gray-400">Total Games</span>
-                    <span className="font-mono text-white">{formatNumber(gameStats.total_games)}</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-gray-400">Total Volume</span>
-                    <span className="font-mono text-white">{formatUSDT(gameStats.total_volume)} USDT</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-gray-400">Total Payouts</span>
-                    <span className="font-mono text-white">{formatUSDT(gameStats.total_payouts)} USDT</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-gray-400">House Profit</span>
-                    <span className={`font-mono ${Number(gameStats.house_profit) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {formatUSDT(gameStats.house_profit)} USDT
-                    </span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-gray-400">House Edge</span>
-                    <span className="font-mono text-white">{calculateHouseEdge()}%</span>
                   </div>
                 </div>
               </section>

@@ -1,17 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Link } from 'react-router-dom';
-import { Principal } from '@dfinity/principal';
 import useDiceActor from '../../hooks/actors/useDiceActor';
 import useLedgerActor from '../../hooks/actors/useLedgerActor';
-import {
-  GameLayout,
-  GameButton,
-  GameStats,
-  type GameStat,
-  BettingRail
-} from '../../components/game-ui';
+import { GameLayout, BettingRail } from '../../components/game-ui';
 import { DiceAnimation, DiceControls, type DiceDirection } from '../../components/game-specific/dice';
-import { useGameMode, useGameState } from '../../hooks/games';
 import { useGameBalance } from '../../providers/GameBalanceProvider';
 import { useBalance } from '../../providers/BalanceProvider';
 import { useAuth } from '../../providers/AuthProvider';
@@ -30,7 +21,6 @@ export function DiceGame() {
   const { actor } = useDiceActor();
   const { actor: ledgerActor } = useLedgerActor();
   const { isAuthenticated } = useAuth();
-  const gameMode = useGameMode();
 
   // Global Balance State
   const { balance: walletBalance, refreshBalance: refreshWalletBalance } = useBalance();
@@ -206,9 +196,9 @@ export function DiceGame() {
   }, []);
 
   return (
-    <GameLayout minBet={0.01} maxWin={10} houseEdge={0.99}>
-      {/* Main container - viewport-height aware */}
-      <div className="flex flex-col h-[calc(100vh-280px)] md:h-[calc(100vh-260px)] max-w-xl mx-auto px-4">
+    <GameLayout hideFooter noScroll>
+      {/* Main container - grows to fill space, pushes BettingRail to bottom */}
+      <div className="flex-1 flex flex-col max-w-xl mx-auto px-4 overflow-hidden min-h-0">
 
         {/* Auth check - compact */}
         {!isAuthenticated && (
@@ -328,7 +318,8 @@ export function DiceGame() {
         </div>
       </div>
 
-      {/* BettingRail - Fixed bottom */}
+      {/* BettingRail - Stays at bottom */}
+      <div className="flex-shrink-0">
       <BettingRail
         betAmount={betAmount}
         onBetChange={setBetAmount}
@@ -343,6 +334,7 @@ export function DiceGame() {
         multiplier={multiplier}
         canisterId={DICE_BACKEND_CANISTER_ID}
       />
+      </div>
 
       {/* Odds Explainer Modal */}
       {showOddsExplainer && (

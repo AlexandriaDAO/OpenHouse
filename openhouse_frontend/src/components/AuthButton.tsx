@@ -35,20 +35,20 @@ export const AuthButton: React.FC = () => {
 
   if (isAuthenticated && principal) {
     return (
-      <div className="flex items-center gap-4">
-        {/* Balance Display */}
-        <div className="flex items-center gap-2 bg-casino-accent px-4 py-2 rounded-lg">
-          <div className="text-sm">
-            <div className="text-gray-400 text-xs">USDT Balance</div>
-            <div className="font-bold text-lg">
-              {balanceLoading ? (
-                <span className="animate-pulse">Loading...</span>
-              ) : balance !== null ? (
-                <span>{formatUSDT(balance)}</span>
-              ) : (
-                <span className="text-gray-500">--</span>
-              )}
-            </div>
+      <div className="flex items-center gap-3">
+        {/* Balance Display with Icon */}
+        <div className="flex items-center gap-2 bg-casino-accent/50 px-3 py-1.5 rounded">
+          <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <div className="font-mono text-sm">
+            {balanceLoading ? (
+              <span className="animate-pulse">...</span>
+            ) : balance !== null ? (
+              <span>{formatUSDT(balance)}</span>
+            ) : (
+              <span className="text-gray-500">--</span>
+            )}
           </div>
           <button
             onClick={handleRefreshBalance}
@@ -57,7 +57,7 @@ export const AuthButton: React.FC = () => {
             title="Refresh balance"
           >
             <svg
-              className={`w-4 h-4 ${balanceLoading ? 'animate-spin' : ''}`}
+              className={`w-3.5 h-3.5 ${balanceLoading ? 'animate-spin' : ''}`}
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -72,23 +72,23 @@ export const AuthButton: React.FC = () => {
           </button>
         </div>
 
-        {/* Principal Display with Copy */}
-        <div className="flex items-center gap-2 bg-casino-secondary px-4 py-2 rounded-lg">
-          <div className="text-sm">
-            <div className="text-gray-400 text-xs">Principal</div>
-            <div className="font-mono text-xs">{principal.substring(0, 20)}...</div>
-          </div>
+        {/* Principal Display with Icon */}
+        <div className="flex items-center gap-2 bg-casino-secondary/50 px-3 py-1.5 rounded">
+          <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+          </svg>
+          <div className="font-mono text-xs text-gray-300">{principal.substring(0, 8)}...</div>
           <button
             onClick={handleCopyPrincipal}
             className="text-gray-400 hover:text-white transition-colors"
             title="Copy principal"
           >
             {copied ? (
-              <svg className="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-3.5 h-3.5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
             ) : (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -100,9 +100,15 @@ export const AuthButton: React.FC = () => {
           </button>
         </div>
 
-        {/* Logout Button */}
-        <button onClick={logout} className="btn-secondary">
-          Logout
+        {/* Logout Icon Button */}
+        <button
+          onClick={logout}
+          className="p-2 hover:bg-casino-secondary/30 rounded transition-colors"
+          title="Logout"
+        >
+          <svg className="w-5 h-5 text-gray-400 hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+          </svg>
         </button>
       </div>
     );

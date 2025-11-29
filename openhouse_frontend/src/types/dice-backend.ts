@@ -36,20 +36,6 @@ export interface PoolStats {
 }
 
 /**
- * Game performance statistics from get_stats()
- */
-export interface GameStats {
-  /** Total number of games played */
-  total_games: bigint;
-  /** Total betting volume (in e8s) */
-  total_volume: bigint;
-  /** Total payouts to winners (in e8s) */
-  total_payouts: bigint;
-  /** House profit/loss (in e8s) */
-  house_profit: bigint;
-}
-
-/**
  * LP position information from get_lp_position() or get_my_lp_position()
  */
 export interface LPPosition {

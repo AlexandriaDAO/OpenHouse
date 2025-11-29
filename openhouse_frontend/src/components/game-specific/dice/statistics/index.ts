@@ -1,1 +1,1 @@
-export { DiceStatistics } from './statistics/DiceStatistics';
+export { DiceStatistics } from './DiceStatistics';

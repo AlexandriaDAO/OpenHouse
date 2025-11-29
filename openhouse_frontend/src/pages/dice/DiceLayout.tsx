@@ -1,14 +1,14 @@
-import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 
 export function DiceLayout() {
   const location = useLocation();
   const isLiquidityRoute = location.pathname.includes('/liquidity');
+  const isPlayRoute = !isLiquidityRoute;
 
   return (
-    <div className="container mx-auto px-4 pt-4 pb-2"> {/* Reduced padding */}
-      {/* Tab Navigation - smaller */}
-      <div className="flex gap-3 mb-3 border-b border-gray-700">
+    <div className={`h-full flex flex-col ${isPlayRoute ? 'overflow-hidden' : ''}`}>
+      {/* Tab Navigation */}
+      <div className="flex gap-3 mb-2 border-b border-gray-700 flex-shrink-0">
         <Link
           to="/dice"
           className={`px-3 py-1.5 text-sm -mb-px transition-colors ${
@@ -27,12 +27,14 @@ export function DiceLayout() {
               : 'text-gray-400 hover:text-gray-300'
           }`}
         >
-          💰 Become an Owner
+          💰 Be The House
         </Link>
       </div>
 
       {/* Render child route (DiceGame or DiceLiquidity) */}
-      <Outlet />
+      <div className={`flex-1 ${isPlayRoute ? 'overflow-hidden min-h-0' : ''}`}>
+        <Outlet />
+      </div>
     </div>
   );
 }
