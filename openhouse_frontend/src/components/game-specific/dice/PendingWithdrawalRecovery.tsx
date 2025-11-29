@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import useDiceActor from '../../../hooks/actors/useDiceActor';
 import { formatUSDT } from '../../../types/balance';
 import { PendingWithdrawal } from '../../../declarations/dice_backend/dice_backend.did';
@@ -7,7 +7,30 @@ interface Props {
   onResolved: () => void;  // Callback when pending state is cleared
 }
 
-export const PendingWithdrawalRecovery: React.FC<Props> = ({ onResolved }) => {
+// Error Boundary wrapper for safety
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(_: Error) {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("PendingWithdrawalRecovery Error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return null; // Fail gracefully by not rendering
+    }
+    return this.props.children;
+  }
+}
+
+const PendingWithdrawalRecoveryContent: React.FC<Props> = ({ onResolved }) => {
   const { actor } = useDiceActor();
   const [pending, setPending] = useState<PendingWithdrawal | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -18,28 +41,37 @@ export const PendingWithdrawalRecovery: React.FC<Props> = ({ onResolved }) => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  // Ref to track previous pending state for auto-resolution detection
+  const prevPendingRef = useRef<PendingWithdrawal | null>(null);
+
   // Check for pending withdrawal on mount and poll
   useEffect(() => {
     if (!actor) return;
 
     let isMounted = true;
     const checkPending = async () => {
-      if (!pending) setIsLoading(true); // Only show loading on first check
+      // Only show loading on first check if we don't have data yet
+      if (!prevPendingRef.current) setIsLoading(true);
       setCheckError(null);
+      
       try {
         const result = await actor.get_my_withdrawal_status();
         if (isMounted) {
           const newPending = result.length > 0 ? result[0] : null;
           setPending(newPending);
           
-          // If resolved externally (e.g. other tab), notify parent
-          if (!newPending && pending) {
+          // Check for auto-resolution:
+          // If we HAD a pending withdrawal (prevPendingRef.current) 
+          // and now we DON'T (newPending is null), it was resolved externally.
+          if (prevPendingRef.current && !newPending) {
              onResolved();
           }
+          
+          prevPendingRef.current = newPending;
         }
       } catch (err) {
         console.error('Failed to check pending status:', err);
-        if (isMounted && !pending) { // Only show error if we don't have data yet
+        if (isMounted && !prevPendingRef.current) { 
           setCheckError(err instanceof Error ? err.message : 'Failed to check status');
         }
       } finally {
@@ -49,22 +81,22 @@ export const PendingWithdrawalRecovery: React.FC<Props> = ({ onResolved }) => {
 
     checkPending();
     
-    // Poll every 10s if pending exists
-    const interval = setInterval(() => {
-        if (pending) checkPending();
-    }, 10000);
+    // Poll every 10s
+    const interval = setInterval(checkPending, 10000);
 
     return () => {
       isMounted = false;
       clearInterval(interval);
     };
-  }, [actor, pending, onResolved]);
+    // Removed 'pending' from dependency array to prevent infinite loop
+  }, [actor, onResolved]);
 
   // Handle retry
   const handleRetry = async () => {
     if (!actor) return;
     setIsRetrying(true);
     setError(null);
+    setSuccess(null); // Clear previous success
     try {
       const result = await actor.retry_withdrawal();
       if ('Ok' in result) {
@@ -72,6 +104,7 @@ export const PendingWithdrawalRecovery: React.FC<Props> = ({ onResolved }) => {
         // Delay unmounting so user sees success message
         setTimeout(() => {
             setPending(null);
+            prevPendingRef.current = null; // Update ref to prevent duplicate resolution call
             onResolved();
         }, 2000);
       } else {
@@ -90,6 +123,7 @@ export const PendingWithdrawalRecovery: React.FC<Props> = ({ onResolved }) => {
     if (!actor) return;
     setIsAbandoning(true);
     setError(null);
+    setSuccess(null); // Clear previous success
     try {
       const result = await actor.abandon_withdrawal();
       if ('Ok' in result) {
@@ -97,6 +131,7 @@ export const PendingWithdrawalRecovery: React.FC<Props> = ({ onResolved }) => {
         // Delay unmounting so user sees success message
         setTimeout(() => {
             setPending(null);
+            prevPendingRef.current = null;
             onResolved();
         }, 2000);
       } else {
@@ -211,3 +246,9 @@ export const PendingWithdrawalRecovery: React.FC<Props> = ({ onResolved }) => {
     </div>
   );
 };
+
+export const PendingWithdrawalRecovery: React.FC<Props> = (props) => (
+  <ErrorBoundary>
+    <PendingWithdrawalRecoveryContent {...props} />
+  </ErrorBoundary>
+);
