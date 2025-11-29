@@ -207,7 +207,7 @@ export function DiceGame() {
 
   return (
     <GameLayout minBet={0.01} maxWin={10} houseEdge={0.99}>
-      {/* Main container - viewport-height aware, accounts for rail */}
+      {/* Main container - viewport-height aware */}
       <div className="flex flex-col h-[calc(100vh-280px)] md:h-[calc(100vh-260px)] max-w-xl mx-auto px-4">
 
         {/* Auth check - compact */}
@@ -217,63 +217,45 @@ export function DiceGame() {
           </div>
         )}
 
-        {/* Direction buttons + Dice - Row layout on desktop, stacked on mobile */}
-        <div className="flex items-center justify-center gap-4 md:gap-8 flex-shrink-0">
-          {/* Under button - left side on desktop */}
-          <button
-            onClick={() => setDirection('Under')}
-            className={`hidden md:flex px-6 py-3 text-sm font-bold rounded-lg transition ${ 
-              direction === 'Under'
-                ? 'border-2 border-white text-white'
-                : 'border border-gray-700 text-gray-500 hover:text-gray-300'
-            }`}
-            disabled={isPlaying}
-          >
-            UNDER
-          </button>
-
-          {/* Dice Animation - centered, no scale */}
+        {/* Dice Animation - Centerpiece, Clickable */}
+        <div className="flex-shrink-0 flex justify-center pt-2 pb-4 relative">
           <div className="relative">
             <DiceAnimation
               targetNumber={animatingResult}
               isRolling={isPlaying}
               onAnimationComplete={handleAnimationComplete}
+              onClick={rollDice}
             />
+            
+            {/* Click hint - visible only when idle and logged in */}
+            {!isPlaying && isAuthenticated && (
+              <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 text-[10px] text-gray-500 font-mono tracking-widest opacity-60 pointer-events-none">
+                TAP TO ROLL
+              </div>
+            )}
           </div>
-
-          {/* Over button - right side on desktop */}
-          <button
-            onClick={() => setDirection('Over')}
-            className={`hidden md:flex px-6 py-3 text-sm font-bold rounded-lg transition ${ 
-              direction === 'Over'
-                ? 'bg-white text-black'
-                : 'border border-gray-700 text-gray-500 hover:text-gray-300'
-            }`}
-            disabled={isPlaying}
-          >
-            OVER
-          </button>
         </div>
 
-        {/* Mobile-only direction buttons row */}
-        <div className="flex md:hidden gap-2 justify-center mt-2">
+        {/* Direction buttons row - Underneath Dice as requested */}
+        <div className="flex gap-4 justify-center mb-2 flex-shrink-0">
           <button
             onClick={() => setDirection('Under')}
-            className={`flex-1 px-4 py-2 text-xs font-bold rounded-lg transition ${ 
+            className={`flex-1 md:flex-none md:w-32 px-4 py-3 text-sm font-bold rounded-xl transition ${ 
               direction === 'Under'
-                ? 'border-2 border-white text-white'
-                : 'border border-gray-700 text-gray-500'
+                ? 'border-2 border-white text-white bg-white/5'
+                : 'border border-gray-700 text-gray-500 hover:text-gray-300 bg-black/20'
             }`}
             disabled={isPlaying}
           >
             UNDER
           </button>
+
           <button
             onClick={() => setDirection('Over')}
-            className={`flex-1 px-4 py-2 text-xs font-bold rounded-lg transition ${ 
+            className={`flex-1 md:flex-none md:w-32 px-4 py-3 text-sm font-bold rounded-xl transition ${ 
               direction === 'Over'
-                ? 'bg-white text-black'
-                : 'border border-gray-700 text-gray-500'
+                ? 'bg-white text-black shadow-lg shadow-white/10'
+                : 'border border-gray-700 text-gray-500 hover:text-gray-300 bg-black/20'
             }`}
             disabled={isPlaying}
           >
@@ -281,24 +263,46 @@ export function DiceGame() {
           </button>
         </div>
 
-        {/* Compact Controls Section */}
-        <div className="flex-1 flex flex-col justify-center space-y-3 py-2">
+        {/* Result display - Integrated into layout flow, minimizing shifts */}
+        <div className="h-12 flex items-center justify-center flex-shrink-0">
+          {lastResult && !isPlaying ? (
+            <div className={`text-center ${lastResult.is_win ? 'text-green-400' : 'text-red-400'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
+              <span className="font-black text-xl mr-2">
+                {lastResult.is_win ? 'WON' : 'LOST'}
+              </span>
+              {lastResult.is_win && (
+                <span className="text-dfinity-turquoise font-mono font-bold text-lg">
+                  +{formatUSDT(lastResult.payout)}
+                </span>
+              )}
+              <span className="text-gray-600 text-xs ml-3 border-l border-gray-700 pl-3">
+                 Rolled {lastResult.rolled_number}
+              </span>
+            </div>
+          ) : (
+            /* Placeholder to prevent layout jump */
+            <div className="h-full w-full"></div>
+          )}
+        </div>
 
-          {/* Target slider - inline with value */}
+        {/* Controls Section - Pushed down slightly */}
+        <div className="flex-1 flex flex-col justify-start space-y-4 pt-2">
+
+          {/* Target slider */}
           <DiceControls
             targetNumber={targetNumber}
             onTargetChange={setTargetNumber}
             disabled={isPlaying}
           />
 
-          {/* Quick presets - small inline buttons */}
+          {/* Quick presets - centered */}
           <div className="flex justify-center gap-2">
             {[10, 25, 50, 75, 90].map(val => (
               <button
                 key={val}
                 onClick={() => setTargetNumber(val)}
                 disabled={isPlaying}
-                className={`px-3 py-1 text-xs font-bold rounded transition ${ 
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition ${ 
                   targetNumber === val
                     ? 'bg-white text-black'
                     : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
@@ -309,49 +313,34 @@ export function DiceGame() {
             ))}
           </div>
 
-          {/* Stats row - ultra compact */}
-          <div className="flex justify-center gap-4 text-xs text-gray-400">
-            <span><b className="text-yellow-400">{winChance.toFixed(0)}%</b> chance</span>
-            <span><b className="text-green-400">{multiplier.toFixed(2)}x</b></span>
-            <span className="text-dfinity-turquoise">Win ${(betAmount * multiplier).toFixed(2)}</span>
+          {/* Stats row */}
+          <div className="flex justify-between items-center bg-black/20 rounded-lg p-3 border border-gray-800/50">
+            <div className="flex flex-col">
+              <span className="text-[10px] text-gray-500 uppercase tracking-wider">Win Chance</span>
+              <span className="text-yellow-400 font-mono font-bold">{winChance.toFixed(0)}%</span>
+            </div>
+            <div className="h-6 w-px bg-gray-800 mx-2"></div>
+            <div className="flex flex-col">
+              <span className="text-[10px] text-gray-500 uppercase tracking-wider">Multiplier</span>
+              <span className="text-green-400 font-mono font-bold">{multiplier.toFixed(2)}x</span>
+            </div>
+            <div className="h-6 w-px bg-gray-800 mx-2"></div>
+            <div className="flex flex-col text-right">
+              <span className="text-[10px] text-gray-500 uppercase tracking-wider">Payout</span>
+              <span className="text-dfinity-turquoise font-mono font-bold">${(betAmount * multiplier).toFixed(2)}</span>
+            </div>
              <button
                 onClick={() => setShowOddsExplainer(true)}
-                className="text-gray-600 hover:text-gray-400 text-xs"
+                className="ml-3 text-gray-600 hover:text-gray-400"
                 title="How odds work"
               >
-                (?)
+                ?
               </button>
           </div>
 
-          {/* Roll button - prominent but not oversized */}
-          <GameButton
-            onClick={rollDice}
-            disabled={!actor || betAmount === 0 || !isAuthenticated}
-            loading={isPlaying}
-            label="ROLL DICE"
-            loadingLabel="Rolling..."
-          />
-
-          {/* Result display - inline, compact */}
-          {lastResult && !isPlaying && (
-            <div className={`text-center py-2 ${lastResult.is_win ? 'text-green-400' : 'text-red-400'}`}>
-              <span className="font-bold text-lg">
-                {lastResult.is_win ? 'WON!' : 'LOST'}
-              </span>
-              {lastResult.is_win && (
-                <span className="text-dfinity-turquoise ml-2">
-                  +{formatUSDT(lastResult.payout)}
-                </span>
-              )}
-              <span className="text-gray-500 text-xs ml-2">
-                (Rolled {lastResult.rolled_number})
-              </span>
-            </div>
-          )}
-
-          {/* Error display - compact */}
+          {/* Error display */}
           {gameError && (
-            <div className="text-red-400 text-sm text-center p-2 bg-red-900/20 rounded">
+            <div className="text-red-400 text-xs text-center p-2 bg-red-900/10 border border-red-900/30 rounded">
               {gameError}
             </div>
           )}
