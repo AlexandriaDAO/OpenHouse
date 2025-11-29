@@ -169,6 +169,15 @@ async fn refresh_canister_balance() -> u64 {
 }
 
 // =============================================================================
+// ADMIN ENDPOINTS
+// =============================================================================
+
+#[update]
+async fn admin_health_check() -> Result<defi_accounting::types::HealthCheck, String> {
+    defi_accounting::accounting::admin_health_check().await
+}
+
+// =============================================================================
 // LIQUIDITY POOL ENDPOINTS
 // =============================================================================
 

@@ -9,7 +9,7 @@ use crate::types::{Account, TransferFromArgs, TransferFromError, TransferArg, Tr
 
 use crate::{MEMORY_MANAGER, Memory};
 use super::liquidity_pool;
-use super::types::{PendingWithdrawal, WithdrawalType, AuditEntry, AuditEvent};
+use super::types::{PendingWithdrawal, WithdrawalType, AuditEntry, AuditEvent, HealthCheck};
 
 use super::memory_ids::{
     USER_BALANCES_MEMORY_ID,
@@ -687,4 +687,54 @@ pub async fn get_canister_balance() -> u64 {
             0
         }
     }
+}
+
+const ADMIN_PRINCIPAL: &str = "p7336-jmpo5-pkjsf-7dqkd-ea3zu-g2ror-ctcn2-sxtuo-tjve3-ulrx7-wae";
+
+/// Admin-only health check that mirrors scripts/check_balance.sh
+/// Returns comprehensive accounting health status.
+pub async fn admin_health_check() -> Result<HealthCheck, String> {
+    let admin = Principal::from_text(ADMIN_PRINCIPAL)
+        .map_err(|_| "Invalid admin principal constant")?;
+
+    let caller = ic_cdk::api::msg_caller();
+    if caller != admin {
+        return Err("Unauthorized: admin only".to_string());
+    }
+
+    // Refresh canister balance from ledger
+    let canister_balance = refresh_canister_balance().await;
+
+    // Get current values
+    let pool_reserve = super::liquidity_pool::get_pool_reserve();
+    let total_deposits = calculate_total_deposits();
+    let calculated_total = pool_reserve.checked_add(total_deposits)
+        .ok_or("CRITICAL: Accounting overflow (pool_reserve + total_deposits > u64::MAX)")?;
+
+    // Calculate excess (can be negative if deficit)
+    let excess = canister_balance as i64 - calculated_total as i64;
+    let excess_usdt = excess as f64 / 1_000_000.0;
+
+    // Determine health status
+    let (is_healthy, health_status) = if excess < 0 {
+        (false, "CRITICAL: DEFICIT - Liabilities exceed assets".to_string())
+    } else if excess < 1_000_000 {
+        (true, "HEALTHY".to_string())
+    } else if excess < 5_000_000 {
+        (true, "WARNING: Excess accumulating (1-5 USDT)".to_string())
+    } else {
+        (false, "ACTION REQUIRED: High excess (>5 USDT)".to_string())
+    };
+
+    Ok(HealthCheck {
+        pool_reserve,
+        total_deposits,
+        canister_balance,
+        calculated_total,
+        excess,
+        excess_usdt,
+        is_healthy,
+        health_status,
+        timestamp: ic_cdk::api::time(),
+    })
 }
