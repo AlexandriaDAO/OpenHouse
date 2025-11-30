@@ -1,39 +1,24 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useStatsData, Period } from './useStatsData';
 import { SharePriceChart, PoolReserveChart, VolumeChart, ProfitLossChart } from './StatsCharts';
 
 export const DiceStatistics: React.FC = () => {
-  // State for UI toggle
-  const [isExpanded, setIsExpanded] = useState(false);
-  
-  // Custom hook handles data fetching, transformation, and state
-  const { 
-    period, 
-    setPeriod, 
-    isLoading, 
-    error, 
-    chartData, 
-    apy7, 
+  // Always fetch data when component is rendered (no nested toggle)
+  const {
+    period,
+    setPeriod,
+    isLoading,
+    error,
+    chartData,
+    apy7,
     apy30,
-    hasData 
-  } = useStatsData(isExpanded);
+    hasData
+  } = useStatsData(true);
 
   return (
-    <div className="card p-1 mt-6 bg-gray-900/40 border border-gray-700/50 overflow-hidden">
-      {/* Toggle Button - Improved with ARIA */}
-      <button
-        onClick={() => setIsExpanded(!isExpanded)}
-        aria-expanded={isExpanded}
-        aria-label={isExpanded ? 'Hide pool statistics' : 'Show pool statistics'}
-        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-dfinity-turquoise/10 hover:bg-dfinity-turquoise/20 text-dfinity-turquoise rounded-t font-mono text-sm transition-colors duration-200"
-      >
-        <span className="text-lg">{isExpanded ? '📉' : '📈'}</span>
-        <span className="font-bold tracking-wide uppercase">{isExpanded ? 'Hide' : 'View'} Pool Performance</span>
-      </button>
-
-      {/* Expanded Content with Fade In */}
-      {isExpanded && (
-        <div className="p-4 space-y-6 animate-[fadeIn_0.3s_ease-in-out]">
+    <div className="card mt-6 bg-gray-900/40 border border-gray-700/50 overflow-hidden">
+      {/* Content - Always visible when component renders */}
+      <div className="p-4 space-y-6">
           
           {/* Header Controls */}
           <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-2">
@@ -121,7 +106,6 @@ export const DiceStatistics: React.FC = () => {
             </>
           )}
         </div>
-      )}
     </div>
   );
 };

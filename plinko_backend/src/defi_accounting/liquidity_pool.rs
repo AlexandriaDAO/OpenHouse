@@ -466,8 +466,7 @@ pub(crate) fn get_pool_stats_internal() -> PoolStats {
         Nat::from(1u64) // Minimum price if drained
     } else {
         // SAFETY: total_shares checked for zero above (line 336)
-        // Convert from 6 decimals (pool_reserve) to 8 decimals (share_price): multiply by 100
-        (pool_reserve.clone() * Nat::from(100u64)) / total_shares.clone()
+        pool_reserve.clone() / total_shares.clone()
     };
 
     // Count LPs (excluding burned shares)

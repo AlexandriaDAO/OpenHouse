@@ -64,13 +64,21 @@ export const useStatsData = (isExpanded: boolean) => {
       // Share price uses 8 decimals (per backend comment: "divide by 100_000_000 for USDT per share")
       const sharePriceDecimals = 100_000_000;
 
+      // BUGFIX: Old snapshots from before 2025-11-29 were calculated with wrong formula (missing *100)
+      // Detect and fix: if share_price is suspiciously low (< 50), apply 100x correction
+      let sharePriceRaw = Number(s.share_price);
+      if (sharePriceRaw > 0 && sharePriceRaw < 50) {
+        // This is old buggy data - apply correction factor
+        sharePriceRaw = sharePriceRaw * 100;
+      }
+
       return {
         date: new Date(dateMs),
         dateLabel: new Date(dateMs).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
         poolReserve: Number(s.pool_reserve_end) / currencyDecimals,
         volume: Number(s.daily_volume) / currencyDecimals,
         profit: Number(s.daily_pool_profit) / currencyDecimals,
-        sharePrice: Number(s.share_price) / sharePriceDecimals,
+        sharePrice: sharePriceRaw / sharePriceDecimals,
       };
     });
   }, [snapshots]);

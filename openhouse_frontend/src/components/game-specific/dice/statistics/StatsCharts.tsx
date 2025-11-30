@@ -1,6 +1,7 @@
 import React from 'react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { ChartDataPoint } from './useStatsData';
+import { InfoTooltip } from '../../../InfoTooltip';
 
 // DFINITY brand colors
 const COLORS = {
@@ -15,18 +16,18 @@ interface ChartProps {
   height?: number;
 }
 
-const CustomTooltip = ({ active, payload, label, valuePrefix = '', valueSuffix = '' }: any) => {
+const CustomTooltip = ({ active, payload, label, valuePrefix = '', valueSuffix = '', decimals = 2 }: any) => {
   if (!active || !payload || !payload.length) return null;
-  
+
   const value = payload[0].value;
   const formattedValue = new Intl.NumberFormat('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals
   }).format(value);
-  
+
   // Determine color based on value for profit chart
   const isProfit = payload[0].name === "Profit/Loss";
-  const valueColor = isProfit 
+  const valueColor = isProfit
     ? (value >= 0 ? 'text-dfinity-green' : 'text-dfinity-red')
     : 'text-dfinity-turquoise';
 
@@ -44,9 +45,17 @@ const CustomTooltip = ({ active, payload, label, valuePrefix = '', valueSuffix =
 export const SharePriceChart: React.FC<ChartProps> = ({ data, height = 220 }) => (
   <div className="bg-black/20 rounded-lg p-4 border border-white/5 hover:border-white/10 transition-all duration-300">
     <div className="flex items-center justify-between mb-4">
-      <div className="text-xs font-bold text-gray-400 uppercase tracking-wider">Share Price</div>
+      <div className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
+        Share Price
+        <InfoTooltip content="Your share value changes with the pool's performance.
+
+↗ Rises when players lose (house profits)
+↘ Falls when players win big
+
+The 1% house edge means shares trend upward over time." />
+      </div>
       <div className="text-[10px] text-dfinity-turquoise bg-dfinity-turquoise/10 px-2 py-0.5 rounded-full">
-        Current: {data[data.length - 1]?.sharePrice.toFixed(4)} USDT
+        Current: {data[data.length - 1]?.sharePrice.toFixed(6)} USDT
       </div>
     </div>
     <ResponsiveContainer width="100%" height={height}>
@@ -59,15 +68,15 @@ export const SharePriceChart: React.FC<ChartProps> = ({ data, height = 220 }) =>
           dy={10}
           minTickGap={30}
         />
-        <YAxis 
-          tick={{ fill: COLORS.text, fontSize: 10 }} 
-          domain={['auto', 'auto']} 
+        <YAxis
+          tick={{ fill: COLORS.text, fontSize: 10 }}
+          domain={['auto', 'auto']}
           axisLine={false}
           tickLine={false}
-          width={35}
-          tickFormatter={(val) => val.toFixed(2)}
+          width={40}
+          tickFormatter={(val) => val.toFixed(6)}
         />
-        <Tooltip content={<CustomTooltip valueSuffix=" USDT" />} cursor={{ stroke: 'rgba(255,255,255,0.1)' }} />
+        <Tooltip content={<CustomTooltip valueSuffix=" USDT" decimals={6} />} cursor={{ stroke: 'rgba(255,255,255,0.1)' }} />
         <Line
           type="monotone"
           dataKey="sharePrice"

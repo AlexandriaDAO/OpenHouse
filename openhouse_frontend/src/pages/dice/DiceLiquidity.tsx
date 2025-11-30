@@ -7,6 +7,7 @@ import useLedgerActor from '../../hooks/actors/useLedgerActor';
 import { DECIMALS_PER_CKUSDT, TRANSFER_FEE } from '../../types/balance';
 import { HealthDashboard, DiceStatistics } from '../../components/game-specific/dice';
 import { PendingWithdrawalRecovery } from '../../components/game-specific/dice/PendingWithdrawalRecovery';
+import { InfoTooltip } from '../../components/InfoTooltip';
 
 // Local interfaces matching what DiceLiquidityPanel used
 interface PoolStats {
@@ -213,9 +214,18 @@ export function DiceLiquidity() {
              </div>
           </div>
           <div className="p-4 text-center">
-             <div className="text-gray-500 text-xs uppercase tracking-wider mb-1">Share Price</div>
+             <div className="text-gray-500 text-xs uppercase tracking-wider mb-1 flex items-center justify-center gap-1">
+               Share Price
+               <InfoTooltip content="Share price = Pool Value ÷ Total Shares
+
+When players lose bets, the pool grows and your shares become more valuable.
+
+When players win, the pool shrinks and shares lose value.
+
+With the 1% house edge, share price trends upward over time as the house profits." />
+             </div>
              <div className="text-xl font-mono font-bold text-purple-400">
-               ${poolStats ? (Number(poolStats.share_price) / DECIMALS_PER_CKUSDT).toFixed(4) : '---'}
+               ${poolStats ? (Number(poolStats.share_price) / 100_000_000).toFixed(6) : '---'}
              </div>
           </div>
         </div>
