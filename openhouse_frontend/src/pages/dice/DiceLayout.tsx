@@ -5,9 +5,9 @@ export function DiceLayout() {
   const isPlayRoute = !location.pathname.includes('/liquidity');
 
   return (
-    <div className={`h-full flex flex-col ${isPlayRoute ? 'overflow-hidden' : ''}`}>
+    <div className={`h-full flex flex-col ${isPlayRoute ? 'overflow-hidden' : 'overflow-y-auto'}`}>
       {/* Render child route (DiceGame or DiceLiquidity) */}
-      <div className={`flex-1 ${isPlayRoute ? 'overflow-hidden min-h-0' : ''}`}>
+      <div className={`flex-1 ${isPlayRoute ? 'overflow-hidden min-h-0' : 'overflow-y-auto'}`}>
         <Outlet />
       </div>
     </div>

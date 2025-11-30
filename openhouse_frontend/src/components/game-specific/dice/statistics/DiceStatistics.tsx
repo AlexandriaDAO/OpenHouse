@@ -83,10 +83,10 @@ export const DiceStatistics: React.FC = () => {
           {/* Empty State */}
           {!isLoading && !error && !hasData && (
             <div className="text-center py-12 bg-black/20 rounded-xl border border-dashed border-gray-800">
-              <p className="text-gray-400 text-sm mb-2">Not enough data yet</p>
+              <p className="text-gray-400 text-sm mb-2">No data yet</p>
               <p className="text-xs text-gray-600 max-w-md mx-auto">
-                The pool needs at least 3 days of activity to generate meaningful charts. 
-                Check back soon!
+                The pool needs at least one day of activity to generate charts.
+                Check back tomorrow!
               </p>
             </div>
           )}

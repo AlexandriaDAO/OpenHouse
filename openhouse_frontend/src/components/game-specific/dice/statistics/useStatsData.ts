@@ -57,17 +57,20 @@ export const useStatsData = (isExpanded: boolean) => {
       // Safe BigInt to Number conversion
       // Timestamp is nanoseconds. Convert to milliseconds first using BigInt division to avoid precision loss.
       const dateMs = Number(s.day_timestamp / 1_000_000n);
-      
-      // Currency values are 6 decimals. 
-      const decimals = 1_000_000;
-      
+
+      // Currency values (pool_reserve, volume, profit) use 6 decimals
+      const currencyDecimals = 1_000_000;
+
+      // Share price uses 8 decimals (per backend comment: "divide by 100_000_000 for USDT per share")
+      const sharePriceDecimals = 100_000_000;
+
       return {
         date: new Date(dateMs),
         dateLabel: new Date(dateMs).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        poolReserve: Number(s.pool_reserve_end) / decimals,
-        volume: Number(s.daily_volume) / decimals,
-        profit: Number(s.daily_pool_profit) / decimals,
-        sharePrice: Number(s.share_price) / decimals,
+        poolReserve: Number(s.pool_reserve_end) / currencyDecimals,
+        volume: Number(s.daily_volume) / currencyDecimals,
+        profit: Number(s.daily_pool_profit) / currencyDecimals,
+        sharePrice: Number(s.share_price) / sharePriceDecimals,
       };
     });
   }, [snapshots]);
@@ -80,7 +83,7 @@ export const useStatsData = (isExpanded: boolean) => {
     chartData,
     apy7,
     apy30,
-    hasData: chartData.length >= 3,
+    hasData: chartData.length >= 1,
     refetch: fetchData
   };
 };
