@@ -69,6 +69,13 @@ export function DiceGame() {
         `The randomness generator is initializing (happens once after updates). ` +
         `Please try again in a few seconds. No funds were deducted.`;
     }
+    if (errorMsg.includes('timed out') || errorMsg.includes('504') || errorMsg.includes('Gateway')) {
+      return `NETWORK TIMEOUT - YOUR FUNDS ARE SAFE\n\n` +
+        `The network was slow to respond. This does NOT affect your money.\n\n` +
+        `• If the bet wasn't processed: your balance is unchanged\n` +
+        `• If the bet was processed: the result is already applied\n\n` +
+        `Refresh the page to see your current balance.`;
+    }
     return errorMsg;
   };
 
@@ -190,6 +197,10 @@ export function DiceGame() {
       const errorMsg = err instanceof Error ? err.message : 'Failed to roll dice';
       setGameError(parseBackendError(errorMsg));
       setIsPlaying(false);
+      // On timeout, refresh balance so user can see actual state
+      if (errorMsg.includes('timed out') || errorMsg.includes('504') || errorMsg.includes('Gateway')) {
+        gameBalanceContext.refresh().catch(console.error);
+      }
     }
   };
 
