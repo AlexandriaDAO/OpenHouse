@@ -31,7 +31,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
               </Link>
               <button
                 onClick={() => setShowModal(true)}
-                className="text-gray-500 hover:text-gray-300 text-xs transition-colors hidden sm:flex flex-col items-start leading-relaxed"
+                className="text-gray-500 hover:text-gray-300 text-[10px] transition-colors hidden sm:flex flex-col items-start leading-tight whitespace-nowrap"
               >
                 <span>Player-owned.</span>
                 <span>Provably fair.</span>

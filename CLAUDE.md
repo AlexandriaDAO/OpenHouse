@@ -55,8 +55,8 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 - **Mechanics**: Roll a number from 0-100, predict over or under target
 - **Objective**: Choose target number and direction, win if roll matches prediction
 - **Min Bet**: 0.01 USDT
-- **Max Bet**: Dynamic based on multiplier (10 USDT max win / multiplier)
-- **Max Win**: 10 USDT
+- **Max Bet**: Dynamic based on multiplier (100 USDT max win / multiplier)
+- **Max Win**: 100 USDT
 - **House Edge**: 1%
 - **Win Chance**: 1% to 98% (adjustable via target number)
 - **Canister**: `dice_backend`

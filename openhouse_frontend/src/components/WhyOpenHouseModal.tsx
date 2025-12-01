@@ -123,7 +123,7 @@ export function WhyOpenHouseModal({ isOpen, onClose }: WhyOpenHouseModalProps) {
               </p>
             </div>
             <a
-              href="https://github.com/AlexandriaDAO/core/tree/master/openhouse"
+              href="https://github.com/AlexandriaDAO/core/tree/master"
               target="_blank"
               rel="noopener noreferrer"
               className="text-dfinity-turquoise hover:underline text-sm flex items-center gap-2 justify-center"

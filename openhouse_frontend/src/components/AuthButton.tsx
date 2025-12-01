@@ -115,11 +115,14 @@ export const AuthButton: React.FC = () => {
   }
 
   return (
-    <div className="flex items-center gap-4">
-      <div className="text-sm text-gray-400">Anonymous Mode (Browse Only)</div>
-      <button onClick={login} className="btn-primary">
-        Login to Play
-      </button>
-    </div>
+    <button
+      onClick={login}
+      className="p-2 hover:bg-gray-800 rounded transition-colors"
+      title="Login"
+    >
+      <svg className="w-6 h-6 text-gray-400 hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+      </svg>
+    </button>
   );
 };
