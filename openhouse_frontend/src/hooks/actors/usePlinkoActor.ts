@@ -8,6 +8,9 @@ const canisterId = 'weupr-2qaaa-aaaap-abl3q-cai';
 const usePlinkoActor = createActorHook<_SERVICE>({
   canisterId,
   idlFactory,
+  httpAgentOptions: {
+    verifyQuerySignatures: false,
+  },
 });
 
 export default usePlinkoActor;

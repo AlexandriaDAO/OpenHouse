@@ -8,6 +8,9 @@ const canisterId = 'wvrcw-3aaaa-aaaah-arm4a-cai';
 const useBlackjackActor = createActorHook<_SERVICE>({
   canisterId,
   idlFactory,
+  httpAgentOptions: {
+    verifyQuerySignatures: false,
+  },
 });
 
 export default useBlackjackActor;

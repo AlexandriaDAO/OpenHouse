@@ -8,6 +8,9 @@ const canisterId = 'fws6k-tyaaa-aaaap-qqc7q-cai';
 const useCrashActor = createActorHook<_SERVICE>({
   canisterId,
   idlFactory,
+  httpAgentOptions: {
+    verifyQuerySignatures: false,
+  },
 });
 
 export default useCrashActor;

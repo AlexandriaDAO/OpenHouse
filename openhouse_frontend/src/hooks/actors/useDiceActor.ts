@@ -8,6 +8,9 @@ const canisterId = 'whchi-hyaaa-aaaao-a4ruq-cai';
 const useDiceActor = createActorHook<_SERVICE>({
   canisterId,
   idlFactory,
+  httpAgentOptions: {
+    verifyQuerySignatures: false,
+  },
 });
 
 export default useDiceActor;

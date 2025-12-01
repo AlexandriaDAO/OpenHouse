@@ -8,6 +8,9 @@ const CKUSDT_LEDGER_CANISTER_ID = 'cngnf-vqaaa-aaaar-qag4q-cai';
 const useLedgerActor = createActorHook<ckUSDTLedgerService>({
   canisterId: CKUSDT_LEDGER_CANISTER_ID,
   idlFactory: ledgerIdlFactory,
+  httpAgentOptions: {
+    verifyQuerySignatures: false,
+  },
 });
 
 export default useLedgerActor;
