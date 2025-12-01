@@ -6,11 +6,11 @@
 ```bash
 REPO_ROOT=$(git rev-parse --show-toplevel)
 if [ "$REPO_ROOT" = "/home/theseus/alexandria/openhouse" ]; then
-    echo "❌ FATAL: In main repo. Must be in worktree."
+    echo "FATAL: In main repo. Must be in worktree."
     echo "Worktree: /home/theseus/alexandria/openhouse-betting-rail-redesign"
     exit 1
 fi
-echo "✅ In isolated worktree: $REPO_ROOT"
+echo "In isolated worktree: $REPO_ROOT"
 ```
 
 ## Your Autonomous Workflow (NO QUESTIONS ALLOWED)
@@ -30,20 +30,21 @@ echo "✅ In isolated worktree: $REPO_ROOT"
 5. **Create PR** (MANDATORY):
    ```bash
    git add .
-   git commit -m "refactor(betting-rail): Hybrid redesign - clean dark + chips"
+   git commit -m "refactor(betting-rail): Complete UI overhaul - buttons, layout, refresh"
    git push -u origin feature/betting-rail-hybrid-redesign
-   gh pr create --title "Refactor: Betting Rail Hybrid Redesign" --body "Implements PLAN_BETTING_RAIL_REDESIGN.md
+   gh pr create --title "Refactor: Betting Rail Complete UI Overhaul" --body "Implements PLAN_BETTING_RAIL_REDESIGN.md
 
    ## Summary
-   - Removes skeuomorphic felt/curve elements
-   - Adopts Stake.com-inspired clean dark interface
-   - Keeps chip visuals as OpenHouse's unique differentiator
-   - Reduces CSS from 294 lines to ~100 lines
+   - Bottom-anchored layout (chips grow upward, controls fixed)
+   - Unified refresh button for all balances
+   - New button hierarchy (primary/secondary/accent/tertiary)
+   - Hybrid style: cyberpunk + minimal + casino
+   - Same styling for desktop and mobile
 
    ## Changes
-   - BettingRail.css: Major simplification
-   - BettingRail.tsx: Remove curve, update classes
-   - InteractiveChipStack.tsx: Simplify hover states
+   - BettingRail.css: New button system, layout fixes
+   - BettingRail.tsx: Restructure layout, move refresh, apply new classes
+   - InteractiveChipStack.tsx: Adjust for bottom-anchored layout
 
    Deployed to mainnet:
    - Frontend: https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io"
@@ -57,347 +58,454 @@ echo "✅ In isolated worktree: $REPO_ROOT"
    - After 5 iterations: Escalate to human
 
 ## CRITICAL RULES
-- ❌ NO questions ("should I?", "want me to?", "is it done?")
-- ❌ NO skipping PR creation - it's MANDATORY
-- ❌ NO stopping after implementation - create PR immediately
-- ⚠️ MAINNET DEPLOYMENT: All changes go directly to production
-- ✅ After sleep: IMMEDIATELY continue (no pause)
-- ✅ ONLY stop at: approved, max iterations, or error
+- NO questions ("should I?", "want me to?", "is it done?")
+- NO skipping PR creation - it's MANDATORY
+- NO stopping after implementation - create PR immediately
+- MAINNET DEPLOYMENT: All changes go directly to production
+- After sleep: IMMEDIATELY continue (no pause)
+- ONLY stop at: approved, max iterations, or error
 
 **Branch:** `feature/betting-rail-hybrid-redesign`
 **Worktree:** `/home/theseus/alexandria/openhouse-betting-rail-redesign`
 
 ---
 
-# Implementation Plan: Betting Rail Hybrid Redesign
+# Implementation Plan: Betting Rail Complete UI Overhaul
 
 ## Task Classification
-**REFACTORING** - Improve existing code with subtractive approach (target: negative LOC)
+**REFACTORING** - Improve existing code with targeted fixes for UX issues
 
-## Goal
-Transform the betting rail from heavy skeuomorphic (felt texture, curved lip) to a **clean dark interface with selective casino touches** (chips remain, felt goes), inspired by Stake.com's dice interface.
-
-## Design Direction
-
-**Remove:**
-- Felt texture (SVG noise overlay, complex gradients)
-- Curved "table lip" element (`.betting-rail-curve`)
-- Gold accent lines and pseudo-element decorations
-- Heavy box-shadows simulating table depth
-- Complex 3D hover transforms
-
-**Keep:**
-- Chip visuals as interactive betting elements (unique to OpenHouse)
-- Chip stacking metaphor (differentiator from Stake's manual input)
-- Click-to-add, click-to-remove chip interaction
-- Essential animations (chip add/remove feedback)
-
-**Adopt from Stake.com:**
-- Clean dark background (`#1a1d21` or similar)
-- Minimal, flat design with subtle borders
-- Clear typography hierarchy
-- Focused accent color (green for wins/actions)
-- Simple hover states (scale only, no 3D effects)
+## Goals
+1. **Fix layout instability** - Bottom-anchor controls so chips grow upward without shifting content
+2. **Unify refresh button** - Single prominent button that clearly refreshes ALL balances
+3. **Improve button visibility** - Make max/clear/cashout more visible and accessible
+4. **Consistent button styling** - Unified button system with clear hierarchy
+5. **Hybrid aesthetic** - Cyberpunk (glow) + minimal (clean) + casino (gold accents)
 
 ---
 
-## Current State
+## Current Issues
 
-### File: `openhouse_frontend/src/components/game-ui/BettingRail.css` (294 lines)
-
-**Lines 6-58**: `.betting-rail-curve` - Curved table lip with pseudo-elements
-```css
-// CURRENT - DELETE ENTIRELY
-.betting-rail-curve {
-  height: 28px;
-  background: linear-gradient(...);
-  border-top-left-radius: 50% 100%;
-  // ... pseudo-elements for gold accents
-}
-```
-
-**Lines 61-83**: `.betting-rail` - Main felt surface
-```css
-// CURRENT - Heavy gradients + SVG noise
-.betting-rail {
-  background:
-    url("data:image/svg+xml,..."),  // SVG noise texture
-    radial-gradient(...),            // Center highlight
-    linear-gradient(...);            // Felt gradient
-  box-shadow: 0 -6px 40px rgba(0,0,0,0.6), ...;
-}
-```
-
-**Lines 89-127**: `.chip-button` - Complex hover transforms
-```css
-// CURRENT - 3D lift effect
-.chip-button:hover:not(:disabled) {
-  transform: translateY(-6px) scale(1.05);
-  filter: brightness(1.15) drop-shadow(0 8px 12px rgba(0,0,0,0.4));
-}
-```
-
-**Lines 143-173**: `.chip-pile`, `.chip-in-pile` - Complex pile transforms
-
-### File: `openhouse_frontend/src/components/game-ui/BettingRail.tsx` (419 lines)
-
-**Line 197**: Curve element
+### Issue 1: Layout Instability (Lines 193-224 in BettingRail.tsx)
+The chip stack is at the top of the rail, pushing content down as chips are added.
 ```tsx
-// CURRENT - DELETE
-<div className="betting-rail-curve" />
+// CURRENT - chips at top, pushes content
+<div className="flex flex-col items-center gap-1">
+  <InteractiveChipStack ... />      // This grows and pushes everything
+  <div>$X.XX max clear</div>
+</div>
 ```
 
-**Line 200**: Rail container with custom class
+### Issue 2: Refresh Button Placement (Lines 236-247)
+Refresh button is only next to "House", making users think it only refreshes House.
 ```tsx
-// CURRENT
-<div className="betting-rail">
+// CURRENT - confusing placement
+<div>House: <span>${formatUSDT(houseBalance)}</span>
+  <button onClick={onBalanceRefresh}>...</button>  // Only here!
+</div>
 ```
+
+### Issue 3: Invisible Buttons (Lines 207-222)
+Max/clear buttons use `text-[10px]` (10 pixels!) and `text-gray-500` (low contrast).
+```tsx
+// CURRENT - tiny and invisible
+<button className="text-gray-500 hover:text-green-400 text-[10px] ...">
+  max ${maxBet.toFixed(2)}
+</button>
+```
+
+### Issue 4: Inconsistent Button Styles (Lines 272-290)
+Each button has completely different styling - no visual hierarchy.
 
 ---
 
 ## Implementation
 
-### Step 1: Simplify BettingRail.css
+### Step 1: Add New Button CSS Classes
 
 **File:** `openhouse_frontend/src/components/game-ui/BettingRail.css`
 
+Add these new classes (keep existing chip animations):
+
 ```css
-// PSEUDOCODE - New simplified CSS (~100 lines)
-
 /* ========================================
-   BETTING RAIL - Clean Dark Interface
+   RAIL BUTTONS - New Unified System
    ======================================== */
 
-/* Main surface - clean dark background */
-.betting-rail {
-  background: linear-gradient(180deg, #1e2328 0%, #1a1d21 100%);
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
-}
-
-/* ========================================
-   CHIP BUTTONS - Simple hover
-   ======================================== */
-
-.chip-button {
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-  border-radius: 50%;
-  background: transparent;
-  border: none;
-  padding: 2px;
-  cursor: pointer;
-}
-
-.chip-button:hover:not(:disabled) {
-  transform: scale(1.1);
-  /* Subtle green glow on hover */
-  filter: drop-shadow(0 0 8px rgba(34, 197, 94, 0.3));
-}
-
-.chip-button:active:not(:disabled) {
-  transform: scale(1.05);
-}
-
-.chip-button:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-  filter: grayscale(0.5);
-}
-
-/* ========================================
-   CHIP STACK - Simplified
-   ======================================== */
-
-.chip-stack-container {
-  display: flex;
-  flex-direction: row;
-  align-items: flex-end;
-  justify-content: center;
-  min-height: 80px;
-}
-
-.chip-pile {
-  position: relative;
-  cursor: pointer;
-  margin: 0 -6px;
-  transition: transform 0.2s ease;
-}
-
-.chip-pile:hover {
-  transform: translateY(-2px);
-}
-
-.chip-in-pile {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  cursor: pointer;
-  filter: drop-shadow(0 2px 3px rgba(0,0,0,0.3));
-  transition: transform 0.1s ease;
-}
-
-.chip-in-pile:hover {
-  transform: translateX(-50%) translateY(-2px);
-}
-
-/* ========================================
-   ANIMATIONS - Keep essential only
-   ======================================== */
-
-@keyframes chip-remove {
-  0% {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0) scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: translateX(-50%) translateY(-20px) scale(0.8);
-  }
-}
-
-.chip-removing {
-  animation: chip-remove 0.25s ease-out forwards;
-}
-
-@keyframes deposit-pulse {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5);
-  }
-  50% {
-    box-shadow: 0 0 0 6px rgba(34, 197, 94, 0);
-  }
-}
-
-.deposit-button-pulse {
-  animation: deposit-pulse 1.5s ease-in-out infinite;
-}
-
-/* ========================================
-   PLACEHOLDER
-   ======================================== */
-
-.bet-placeholder {
-  width: 80px;
-  height: 80px;
-  border: 2px dashed rgba(255, 255, 255, 0.1);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0.5;
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.3);
-}
-
-/* ========================================
-   BUTTONS - Keep existing (already clean)
-   ======================================== */
-
-.rail-button {
-  padding: 4px 12px;
-  border-radius: 4px;
-  font-size: 10px;
-  font-weight: 700;
+/* Base button - shared styles */
+.rail-btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  transition: all 0.15s ease;
+  transition: all 0.2s ease;
   cursor: pointer;
+  font-family: 'JetBrains Mono', monospace;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
 
-.rail-button-primary {
-  background: #22c55e;
+/* Primary - Buy Chips (green, prominent) */
+.rail-btn-primary {
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
   color: white;
-  border: none;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.2);
 }
 
-.rail-button-primary:hover {
-  background: #16a34a;
+.rail-btn-primary:hover:not(:disabled) {
+  box-shadow: 0 0 20px rgba(34, 197, 94, 0.4);
+  transform: translateY(-1px);
 }
 
-.rail-button-secondary {
+/* Secondary - Cash Out (gold/amber outline, casino feel) */
+.rail-btn-secondary {
   background: transparent;
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.4);
+}
+
+.rail-btn-secondary:hover:not(:disabled) {
+  background: rgba(251, 191, 36, 0.1);
+  border-color: #fbbf24;
+  box-shadow: 0 0 12px rgba(251, 191, 36, 0.2);
+}
+
+/* Accent - Be The House (turquoise with glow, brand color) */
+.rail-btn-accent {
+  background: linear-gradient(135deg, #39FF14 0%, #00d4aa 100%);
+  color: #000;
+  border: 1px solid rgba(57, 255, 20, 0.3);
+  box-shadow: 0 0 12px rgba(57, 255, 20, 0.2);
+  font-weight: 700;
+}
+
+.rail-btn-accent:hover:not(:disabled) {
+  box-shadow: 0 0 20px rgba(57, 255, 20, 0.4);
+  transform: translateY(-1px);
+}
+
+/* Tertiary - Max/Clear (subtle but visible) */
+.rail-btn-tertiary {
+  background: rgba(255, 255, 255, 0.05);
   color: #9ca3af;
-  border: 1px solid #4b5563;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 4px 10px;
+  font-size: 10px;
 }
 
-.rail-button-secondary:hover {
+.rail-btn-tertiary:hover:not(:disabled) {
   color: white;
-  border-color: #6b7280;
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
-.rail-button:disabled {
+/* Clear variant - red on hover */
+.rail-btn-tertiary.rail-btn-danger:hover:not(:disabled) {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.3);
+  background: rgba(248, 113, 113, 0.1);
+}
+
+/* Disabled state for all */
+.rail-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* Icon button (refresh) */
+.rail-btn-icon {
+  padding: 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #6b7280;
+  transition: all 0.15s ease;
+}
+
+.rail-btn-icon:hover {
+  color: white;
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 /* ========================================
-   RESPONSIVE
+   BALANCE PANEL
    ======================================== */
 
-@media (max-width: 768px) {
-  .chip-button:hover:not(:disabled) {
-    transform: scale(1.05);
-  }
+.balance-panel {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.balance-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.balance-label {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #6b7280;
 }
 ```
 
-### Step 2: Update BettingRail.tsx
+### Step 2: Restructure Layout (Bottom-Anchored)
 
 **File:** `openhouse_frontend/src/components/game-ui/BettingRail.tsx`
 
+**DESKTOP Layout (Lines 188-295):**
+
 ```tsx
-// PSEUDOCODE - Changes to make
+// PSEUDOCODE - New structure
 
-// Line 197: DELETE the curve div entirely
-// BEFORE:
-<div className="betting-rail-curve" />
+{/* Fixed bottom container - DESKTOP */}
+<div className="hidden md:block fixed bottom-0 left-0 right-0 z-40">
+  <div className="betting-rail">
+    <div className="container mx-auto px-6 py-3">
 
-// AFTER:
-// (delete this line)
+      {/* BOTTOM ROW - Fixed, never moves */}
+      <div className="flex items-end justify-between">
 
-// Line 200: Keep the betting-rail class (CSS handles the new look)
-// No change needed here - CSS does the work
+        {/* LEFT: Balance Panel with unified refresh */}
+        <div className="balance-panel w-44">
+          <div className="balance-header">
+            <span className="balance-label">Balances</span>
+            <button
+              onClick={onBalanceRefresh}
+              className="rail-btn-icon"
+              title="Refresh all balances"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M4 12c0-4.4 3.6-8 8-8 3.1 0 5.8 1.8 7.1 4.4M20 12c0 4.4-3.6 8-8 8-3.1 0-5.8-1.8-7.1-4.4"/>
+                <path d="M20 4v4h-4M4 20v-4h4"/>
+              </svg>
+            </button>
+          </div>
+          <div className="space-y-1 text-xs">
+            <div className="text-gray-400">
+              Chips: <span className="text-white font-mono">${formatUSDT(gameBalance)}</span>
+            </div>
+            <div className="text-gray-500">
+              Wallet: <span className="text-gray-400 font-mono">${formatUSDT(walletBalance)}</span>
+            </div>
+            <div className="text-gray-500">
+              House: <span className="text-gray-400 font-mono">${formatUSDT(houseBalance)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* CENTER: Bet Display + Chips */}
+        <div className="flex flex-col items-center">
+          {/* Chip Stack - grows upward */}
+          <div className="mb-2">
+            <InteractiveChipStack
+              amount={betAmount}
+              onRemoveChip={removeChip}
+              disabled={disabled}
+              maxChipsPerPile={8}
+            />
+          </div>
+
+          {/* Bet Amount + Max/Clear */}
+          <div className="flex items-center gap-2 mb-3">
+            <div className="text-white font-mono font-bold text-xl">
+              ${betAmount.toFixed(2)}
+            </div>
+            <button
+              onClick={() => onBetChange(Math.min(maxBet, gameBalanceUSDT))}
+              disabled={disabled || betAmount >= maxBet || betAmount >= gameBalanceUSDT}
+              className="rail-btn-tertiary"
+            >
+              MAX
+            </button>
+            {betAmount > 0 && (
+              <button
+                onClick={clearBet}
+                disabled={disabled}
+                className="rail-btn-tertiary rail-btn-danger"
+              >
+                CLEAR
+              </button>
+            )}
+          </div>
+
+          {/* Chip Buttons Row */}
+          <div className="flex items-center gap-2">
+            {CHIP_DENOMINATIONS.map(chip => (
+              <button
+                key={chip.color}
+                onClick={() => addChip(chip)}
+                disabled={disabled || !canAddChip(chip.value)}
+                className="chip-button"
+                title={`Add $${chip.value.toFixed(2)}`}
+              >
+                <img
+                  src={chip.topImg}
+                  alt={chip.label}
+                  className="w-12 h-12 object-contain"
+                />
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* RIGHT: Action Buttons */}
+        <div className="flex flex-col items-end gap-2 w-44">
+          <button
+            onClick={() => setShowDepositModal(true)}
+            className={`rail-btn rail-btn-primary ${showDepositAnimation ? 'deposit-button-pulse' : ''}`}
+          >
+            + Buy Chips
+          </button>
+          <button
+            onClick={handleWithdrawAll}
+            disabled={isWithdrawing || gameBalance === 0n}
+            className="rail-btn rail-btn-secondary"
+          >
+            Cash Out
+          </button>
+          <button
+            onClick={() => navigate(isLiquidityRoute ? '/dice' : '/dice/liquidity')}
+            className="rail-btn rail-btn-accent"
+          >
+            {isLiquidityRoute ? 'Play Game' : 'Be The House'}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 ```
 
-### Step 3: Simplify InteractiveChipStack.tsx (if needed)
+**MOBILE Layout (Lines 297-385):**
+
+Apply the same changes to mobile:
+- Same balance panel structure with unified refresh
+- Same button classes (rail-btn-primary, etc.)
+- Same layout principle (controls fixed, chips above)
+
+```tsx
+// PSEUDOCODE - Mobile structure
+
+{/* MOBILE: Bottom bar */}
+<div className="md:hidden fixed bottom-0 left-0 right-0 z-50">
+  <div className="betting-rail">
+    <div className="px-4 py-2">
+
+      {/* Top row: Balances + Actions */}
+      <div className="flex items-start justify-between mb-2">
+        {/* Left: Balance panel (compact) */}
+        <div className="balance-panel flex-1 mr-2">
+          <div className="balance-header">
+            <span className="balance-label">Balances</span>
+            <button onClick={onBalanceRefresh} className="rail-btn-icon">
+              <svg className="w-3 h-3">...</svg>
+            </button>
+          </div>
+          <div className="grid grid-cols-3 gap-1 text-[10px]">
+            <div>Chips: <span className="text-white">${formatUSDT(gameBalance)}</span></div>
+            <div>Wallet: ${formatUSDT(walletBalance)}</div>
+            <div>House: ${formatUSDT(houseBalance)}</div>
+          </div>
+        </div>
+
+        {/* Right: Actions (stacked) */}
+        <div className="flex flex-col gap-1">
+          <button onClick={() => setShowDepositModal(true)} className="rail-btn rail-btn-primary text-[10px] py-1 px-2">
+            + Buy
+          </button>
+          <button onClick={handleWithdrawAll} disabled={...} className="rail-btn rail-btn-secondary text-[10px] py-1 px-2">
+            Cash
+          </button>
+          <button onClick={() => navigate(...)} className="rail-btn rail-btn-accent text-[10px] py-1 px-2">
+            {isLiquidityRoute ? 'Play' : 'House'}
+          </button>
+        </div>
+      </div>
+
+      {/* Center: Stack + Amount */}
+      <div className="flex flex-col items-center">
+        <InteractiveChipStack ... />
+        <div className="flex items-center gap-2 my-1">
+          <div className="text-white font-mono font-bold">${betAmount.toFixed(2)}</div>
+          <button className="rail-btn-tertiary text-[9px]">MAX</button>
+          {betAmount > 0 && <button className="rail-btn-tertiary rail-btn-danger text-[9px]">CLEAR</button>}
+        </div>
+      </div>
+
+      {/* Chip buttons */}
+      <div className="flex justify-center gap-1">
+        {CHIP_DENOMINATIONS.map(chip => (
+          <button key={chip.color} className="chip-button">
+            <img src={chip.topImg} className="w-10 h-10" />
+          </button>
+        ))}
+      </div>
+    </div>
+  </div>
+</div>
+```
+
+### Step 3: Update InteractiveChipStack (if needed)
 
 **File:** `openhouse_frontend/src/components/game-ui/InteractiveChipStack.tsx`
 
-Review and simplify any inline styles or complex hover logic. The CSS changes should handle most of this.
-
----
-
-## Visual Reference
-
-**Before (Skeuomorphic):**
-```
-    ╭────────────────────────────────╮  ← Curved lip with gold accent
-   ╱  [Felt texture with gradients]  ╲
-  │  Chips  │  Stack  │  Balance      │
-   ╲  [Heavy shadows, 3D effects]    ╱
-    ╰────────────────────────────────╯
-```
-
-**After (Hybrid Clean):**
-```
-┌─────────────────────────────────────┐  ← Subtle top border
-│  [Clean dark gradient]              │
-│  Chips  │  Stack  │  Balance        │
-│  [Minimal shadows, flat design]     │
-└─────────────────────────────────────┘
-```
+The component should work with the new layout. Only adjust if needed:
+- Ensure chips render correctly when positioned above controls
+- Keep existing animations
 
 ---
 
 ## Files to Modify
 
-| File | Action | LOC Change |
-|------|--------|------------|
-| `openhouse_frontend/src/components/game-ui/BettingRail.css` | Rewrite (simplify) | 294 → ~120 |
-| `openhouse_frontend/src/components/game-ui/BettingRail.tsx` | Delete curve div | -1 line |
-| `openhouse_frontend/src/components/game-ui/InteractiveChipStack.tsx` | Review (likely no change) | 0 |
+| File | Action | Key Changes |
+|------|--------|-------------|
+| `BettingRail.css` | Add classes | New `.rail-btn-*` system, `.balance-panel` |
+| `BettingRail.tsx` | Restructure | Layout reorder, apply classes, move refresh |
+| `InteractiveChipStack.tsx` | Review | Likely no changes needed |
 
-**Net LOC change:** -175 lines (approximately)
+---
+
+## Visual Result
+
+**Before:**
+```
+┌─ Curved felt rail ─────────────────────────────┐
+│  [Chips grow and push everything down]         │
+│  Chips: $X  Wallet: $Y  House: $Z [refresh]   │ <- refresh only for House?
+│  [tiny max] [tiny clear]                       │ <- hard to see
+│  [chip buttons]                                │
+│  + Buy Chips   Cash Out   Be The House         │ <- inconsistent styles
+└────────────────────────────────────────────────┘
+```
+
+**After:**
+```
+┌─ Clean dark rail ──────────────────────────────┐
+│           [Chip stack grows upward]            │
+│  ┌─────────┐                    ┌────────────┐ │
+│  │Balances↺│  $10.00  MAX CLEAR │ + Buy Chips│ │ <- unified refresh
+│  │Chips $X │  [chip buttons]    │  Cash Out  │ │ <- visible buttons
+│  │Wallet $Y│                    │ Be The House│ │ <- consistent styles
+│  │House $Z │                    └────────────┘ │
+│  └─────────┘                                   │
+└────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -406,11 +514,4 @@ Review and simplify any inline styles or complex hover logic. The CSS changes sh
 - **Affected canisters:** Frontend only (`pezw3-laaaa-aaaal-qssoa-cai`)
 - **No backend changes required**
 - **Test at:** https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/dice
-
----
-
-## Sources
-
-- [Stake.com Dice Interface](https://stake.com/casino/games/dice)
-- [Casino Website Design Examples - Subframe](https://www.subframe.com/tips/casino-website-design-examples)
-- [Stake Dice Strategy - NoDepositz](https://nodepositz.com/blog/stake-dice-strategy/)
+- **Mobile test:** Same URL on mobile device/emulator
