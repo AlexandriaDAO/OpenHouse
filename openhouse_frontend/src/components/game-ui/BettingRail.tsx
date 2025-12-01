@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Principal } from '@dfinity/principal';
 import { CHIP_DENOMINATIONS, ChipDenomination, decomposeIntoChips } from '../game-specific/dice/chipConfig';
 import { InteractiveChipStack } from './InteractiveChipStack';
@@ -38,6 +39,11 @@ export function BettingRail({
   multiplier,
   canisterId,
 }: BettingRailProps) {
+  // === Navigation ===
+  const navigate = useNavigate();
+  const location = useLocation();
+  const isLiquidityRoute = location.pathname.includes('/liquidity');
+
   // === Internal State ===
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [depositAmount, setDepositAmount] = useState('1');
@@ -195,91 +201,117 @@ export function BettingRail({
       <div className="hidden md:block fixed bottom-0 left-0 right-0 z-40">
         {/* Main rail surface - semicircle */}
         <div className="betting-rail">
-          <div className="container mx-auto px-6 pt-4 pb-3">
-            {/* CENTER: Chip Stack + Amount */}
-            <div className="flex flex-col items-center gap-1">
-              {/* Chip Stack */}
-              <InteractiveChipStack
-                amount={betAmount}
-                onRemoveChip={removeChip}
-                disabled={disabled}
-                maxChipsPerPile={8}
-              />
-
-              {/* Bet Amount + Max + Clear */}
-              <div className="flex items-center gap-3">
-                <div className="text-white font-mono font-bold text-xl">
-                  ${betAmount.toFixed(2)}
-                </div>
-                <button
-                  onClick={() => onBetChange(Math.min(maxBet, gameBalanceUSDT))}
-                  disabled={disabled || betAmount >= maxBet || betAmount >= gameBalanceUSDT}
-                  className="text-gray-500 hover:text-green-400 text-[10px] disabled:opacity-30 transition"
-                >
-                  max ${maxBet.toFixed(2)}
-                </button>
-                {betAmount > 0 && (
+          <div className="container mx-auto px-6 py-3">
+            {/* BOTTOM ROW - Fixed, never moves */}
+            <div className="flex items-end justify-between">
+              {/* LEFT: Balance Panel with unified refresh */}
+              <div className="balance-panel w-44">
+                <div className="balance-header">
+                  <span className="balance-label">Balances</span>
                   <button
-                    onClick={clearBet}
-                    disabled={disabled}
-                    className="text-gray-500 hover:text-red-400 text-[10px] transition"
+                    onClick={onBalanceRefresh}
+                    className="rail-btn-icon"
+                    title="Refresh all balances"
                   >
-                    clear
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M4 12c0-4.4 3.6-8 8-8 3.1 0 5.8 1.8 7.1 4.4M20 12c0 4.4-3.6 8-8 8-3.1 0-5.8-1.8-7.1-4.4"/>
+                      <path d="M20 4v4h-4M4 20v-4h4"/>
+                    </svg>
                   </button>
-                )}
-              </div>
-            </div>
-
-            {/* Bottom row: Balances | Chip Buttons | Actions */}
-            <div className="flex items-end justify-between pt-2 pb-1">
-              {/* LEFT: Balances */}
-              <div className="flex flex-col gap-1 text-xs w-40">
-                <div className="text-gray-500">
-                  Chips: <span className="text-white font-mono">${formatUSDT(gameBalance)}</span>
                 </div>
-                <div className="text-gray-600">
-                  Wallet: <span className="text-gray-400 font-mono">${formatUSDT(walletBalance)}</span>
-                </div>
-                {houseLimitStatus !== 'healthy' && (
-                  <div className={`text-[10px] ${houseLimitStatus === 'danger' ? 'text-red-500' : 'text-yellow-500'}`}>
-                    {houseLimitStatus === 'danger' ? 'limit exceeded' : 'near limit'}
+                <div className="space-y-1 text-xs">
+                  <div className="text-gray-400">
+                    Chips: <span className="text-white font-mono">${formatUSDT(gameBalance)}</span>
                   </div>
-                )}
+                  <div className="text-gray-500">
+                    Wallet: <span className="text-gray-400 font-mono">${formatUSDT(walletBalance)}</span>
+                  </div>
+                  <div className="text-gray-500">
+                    House: <span className="text-gray-400 font-mono">${formatUSDT(houseBalance)}</span>
+                  </div>
+                  {houseLimitStatus !== 'healthy' && (
+                    <div className={`text-[10px] ${houseLimitStatus === 'danger' ? 'text-red-500' : 'text-yellow-500'}`}>
+                      {houseLimitStatus === 'danger' ? 'limit exceeded' : 'near limit'}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {/* CENTER: Chip Buttons */}
-              <div className="flex items-center gap-2">
-                {CHIP_DENOMINATIONS.map(chip => (
+              {/* CENTER: Bet Display + Chips */}
+              <div className="flex flex-col items-center">
+                {/* Chip Stack - grows upward */}
+                <div className="mb-2">
+                  <InteractiveChipStack
+                    amount={betAmount}
+                    onRemoveChip={removeChip}
+                    disabled={disabled}
+                    maxChipsPerPile={8}
+                  />
+                </div>
+
+                {/* Bet Amount + Max/Clear */}
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="text-white font-mono font-bold text-xl">
+                    ${betAmount.toFixed(2)}
+                  </div>
                   <button
-                    key={chip.color}
-                    onClick={() => addChip(chip)}
-                    disabled={disabled || !canAddChip(chip.value)}
-                    className="chip-button"
-                    title={`Add $${chip.value.toFixed(2)}`}
+                    onClick={() => onBetChange(Math.min(maxBet, gameBalanceUSDT))}
+                    disabled={disabled || betAmount >= maxBet || betAmount >= gameBalanceUSDT}
+                    className="rail-btn rail-btn-tertiary"
                   >
-                    <img
-                      src={chip.topImg}
-                      alt={chip.label}
-                      className="w-12 h-12 object-contain"
-                    />
+                    MAX
                   </button>
-                ))}
+                  {betAmount > 0 && (
+                    <button
+                      onClick={clearBet}
+                      disabled={disabled}
+                      className="rail-btn rail-btn-tertiary rail-btn-danger"
+                    >
+                      CLEAR
+                    </button>
+                  )}
+                </div>
+
+                {/* Chip Buttons Row */}
+                <div className="flex items-center gap-2">
+                  {CHIP_DENOMINATIONS.map(chip => (
+                    <button
+                      key={chip.color}
+                      onClick={() => addChip(chip)}
+                      disabled={disabled || !canAddChip(chip.value)}
+                      className="chip-button"
+                      title={`Add $${chip.value.toFixed(2)}`}
+                    >
+                      <img
+                        src={chip.topImg}
+                        alt={chip.label}
+                        className="w-12 h-12 object-contain"
+                      />
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {/* RIGHT: Actions */}
-              <div className="flex flex-col items-end gap-1 text-xs w-40">
+              {/* RIGHT: Action Buttons */}
+              <div className="flex flex-col items-end gap-2 w-44">
                 <button
                   onClick={() => setShowDepositModal(true)}
-                  className={`text-green-500 hover:text-green-400 font-medium transition ${showDepositAnimation ? 'deposit-button-pulse' : ''}`}
+                  className={`rail-btn rail-btn-primary ${showDepositAnimation ? 'deposit-button-pulse' : ''}`}
                 >
                   + Buy Chips
                 </button>
                 <button
                   onClick={handleWithdrawAll}
                   disabled={isWithdrawing || gameBalance === 0n}
-                  className="text-gray-500 hover:text-white disabled:opacity-30 transition"
+                  className="rail-btn rail-btn-secondary"
                 >
                   Cash Out
+                </button>
+                <button
+                  onClick={() => navigate(isLiquidityRoute ? '/dice' : '/dice/liquidity')}
+                  className="rail-btn rail-btn-accent"
+                >
+                  {isLiquidityRoute ? 'Play Game' : 'Be The House'}
                 </button>
               </div>
             </div>
@@ -287,64 +319,85 @@ export function BettingRail({
         </div>
       </div>
 
-      {/* MOBILE: Semicircle bottom bar */}
+      {/* MOBILE: Bottom bar */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-50">
         <div className="betting-rail">
-          <div className="px-4 pt-3 pb-1">
-            {/* Top row: balances + actions */}
-            <div className="flex items-center justify-between w-full text-xs mb-2">
-              <div className="text-gray-500">
-                Chips: <span className="text-white font-mono">${formatUSDT(gameBalance)}</span>
+          <div className="px-4 py-2">
+            {/* Top row: Balances + Actions */}
+            <div className="flex items-start justify-between mb-2">
+              {/* Left: Balance panel (compact) */}
+              <div className="balance-panel flex-1 mr-2">
+                <div className="balance-header">
+                  <span className="balance-label">Balances</span>
+                  <button onClick={onBalanceRefresh} className="rail-btn-icon">
+                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M4 12c0-4.4 3.6-8 8-8 3.1 0 5.8 1.8 7.1 4.4M20 12c0 4.4-3.6 8-8 8-3.1 0-5.8-1.8-7.1-4.4"/>
+                      <path d="M20 4v4h-4M4 20v-4h4"/>
+                    </svg>
+                  </button>
+                </div>
+                <div className="grid grid-cols-3 gap-1 text-[10px]">
+                  <div className="text-gray-400">Chips: <span className="text-white">${formatUSDT(gameBalance)}</span></div>
+                  <div className="text-gray-500">Wallet: ${formatUSDT(walletBalance)}</div>
+                  <div className="text-gray-500">House: ${formatUSDT(houseBalance)}</div>
+                </div>
               </div>
-              <div className="flex gap-3">
+
+              {/* Right: Actions (stacked) */}
+              <div className="flex flex-col gap-1">
                 <button
                   onClick={() => setShowDepositModal(true)}
-                  className={`text-green-500 ${showDepositAnimation ? 'deposit-button-pulse' : ''}`}
+                  className={`rail-btn rail-btn-primary text-[10px] py-1 px-2 ${showDepositAnimation ? 'deposit-button-pulse' : ''}`}
                 >
                   + Buy
                 </button>
                 <button
                   onClick={handleWithdrawAll}
                   disabled={isWithdrawing || gameBalance === 0n}
-                  className="text-gray-500 disabled:opacity-30"
+                  className="rail-btn rail-btn-secondary text-[10px] py-1 px-2"
                 >
-                  Cash Out
+                  Cash
+                </button>
+                <button
+                  onClick={() => navigate(isLiquidityRoute ? '/dice' : '/dice/liquidity')}
+                  className="rail-btn rail-btn-accent text-[10px] py-1 px-2"
+                >
+                  {isLiquidityRoute ? 'Play' : 'House'}
                 </button>
               </div>
             </div>
 
             {/* Center: Stack + Amount */}
-            <div className="flex flex-col items-center gap-1">
+            <div className="flex flex-col items-center">
               <InteractiveChipStack
                 amount={betAmount}
                 onRemoveChip={removeChip}
                 disabled={disabled}
                 maxChipsPerPile={6}
               />
-
-              {/* Bet amount + max + clear */}
-              <div className="flex items-center gap-2">
-                <div className="text-white font-mono font-bold text-lg">${betAmount.toFixed(2)}</div>
+              <div className="flex items-center gap-2 my-1">
+                <div className="text-white font-mono font-bold">${betAmount.toFixed(2)}</div>
                 <button
                   onClick={() => onBetChange(Math.min(maxBet, gameBalanceUSDT))}
                   disabled={disabled || betAmount >= maxBet || betAmount >= gameBalanceUSDT}
-                  className="text-gray-500 hover:text-green-400 text-[10px] disabled:opacity-30"
+                  className="rail-btn rail-btn-tertiary text-[9px]"
                 >
-                  max
+                  MAX
                 </button>
                 {betAmount > 0 && (
                   <button
                     onClick={clearBet}
-                    className="text-gray-500 hover:text-red-400 text-[10px]"
+                    disabled={disabled}
+                    className="rail-btn rail-btn-tertiary rail-btn-danger text-[9px]"
                   >
-                    clear
+                    CLEAR
                   </button>
                 )}
               </div>
             </div>
 
-            {/* Chip buttons - pinned to bottom */}
-            <div className="flex justify-center gap-1 pt-2 pb-1">
+            {/* Chip buttons */}
+            <div className="flex justify-center gap-1">
               {CHIP_DENOMINATIONS.map(chip => (
                 <button
                   key={chip.color}
