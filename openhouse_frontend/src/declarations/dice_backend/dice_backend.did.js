@@ -1,14 +1,45 @@
 export const idlFactory = ({ IDL }) => {
+  const UserBalance = IDL.Record({
+    'balance' : IDL.Nat64,
+    'user' : IDL.Principal,
+  });
+  const LPPositionInfo = IDL.Record({
+    'shares' : IDL.Nat,
+    'user' : IDL.Principal,
+  });
+  const PendingWithdrawalInfo = IDL.Record({
+    'user' : IDL.Principal,
+    'created_at' : IDL.Nat64,
+    'amount' : IDL.Nat64,
+    'withdrawal_type' : IDL.Text,
+  });
+  const AbandonedEntry = IDL.Record({
+    'user' : IDL.Principal,
+    'timestamp' : IDL.Nat64,
+    'amount' : IDL.Nat64,
+  });
+  const OrphanedFundsReport = IDL.Record({
+    'abandoned_count' : IDL.Nat64,
+    'total_abandoned_amount' : IDL.Nat64,
+    'recent_abandonments' : IDL.Vec(AbandonedEntry),
+  });
   const HealthCheck = IDL.Record({
+    'stable_memory_pages' : IDL.Nat64,
     'total_deposits' : IDL.Nat64,
     'is_healthy' : IDL.Bool,
     'calculated_total' : IDL.Nat64,
+    'heap_memory_bytes' : IDL.Nat64,
+    'total_abandoned_amount' : IDL.Nat64,
     'health_status' : IDL.Text,
+    'unique_lps' : IDL.Nat64,
+    'unique_users' : IDL.Nat64,
     'pool_reserve' : IDL.Nat64,
     'timestamp' : IDL.Nat64,
     'excess' : IDL.Int64,
     'excess_usdt' : IDL.Float64,
+    'pending_withdrawals_count' : IDL.Nat64,
     'canister_balance' : IDL.Nat64,
+    'pending_withdrawals_total_amount' : IDL.Nat64,
   });
   const RollDirection = IDL.Variant({ 'Over' : IDL.Null, 'Under' : IDL.Null });
   const AccountingStats = IDL.Record({
@@ -66,6 +97,31 @@ export const idlFactory = ({ IDL }) => {
         [],
         [IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text })],
         [],
+      ),
+    'admin_get_all_balances' : IDL.Func(
+        [IDL.Nat64, IDL.Nat64],
+        [IDL.Variant({ 'Ok' : IDL.Vec(UserBalance), 'Err' : IDL.Text })],
+        ['query'],
+      ),
+    'admin_get_all_lp_positions' : IDL.Func(
+        [IDL.Nat64, IDL.Nat64],
+        [IDL.Variant({ 'Ok' : IDL.Vec(LPPositionInfo), 'Err' : IDL.Text })],
+        ['query'],
+      ),
+    'admin_get_all_pending_withdrawals' : IDL.Func(
+        [],
+        [
+          IDL.Variant({
+            'Ok' : IDL.Vec(PendingWithdrawalInfo),
+            'Err' : IDL.Text,
+          }),
+        ],
+        ['query'],
+      ),
+    'admin_get_orphaned_funds_report' : IDL.Func(
+        [],
+        [IDL.Variant({ 'Ok' : OrphanedFundsReport, 'Err' : IDL.Text })],
+        ['query'],
       ),
     'admin_health_check' : IDL.Func(
         [],

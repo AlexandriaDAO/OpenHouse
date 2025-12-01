@@ -4,14 +4,14 @@ import { GameInfo } from '../types';
 
 const games: GameInfo[] = [
   {
-    id: 'crash',
-    name: 'Crash',
-    description: 'Watch the multiplier rise and cash out before it crashes',
-    minBet: 1,
-    maxWin: 1000,
-    houseEdge: 1,
-    path: '/crash',
-    icon: '🚀',
+    id: 'dice',
+    name: 'Dice',
+    description: 'Roll 0-100, predict over/under!',
+    minBet: 0.01,
+    maxWin: 10,
+    houseEdge: 0.99,
+    path: '/dice',
+    icon: '🎲',
   },
   {
     id: 'plinko',
@@ -24,6 +24,16 @@ const games: GameInfo[] = [
     icon: '🎯',
   },
   {
+    id: 'crash',
+    name: 'Crash',
+    description: 'Watch the multiplier rise and cash out before it crashes',
+    minBet: 1,
+    maxWin: 1000,
+    houseEdge: 1,
+    path: '/crash',
+    icon: '🚀',
+  },
+  {
     id: 'blackjack',
     name: 'Blackjack',
     description: 'Beat the dealer! Hit or Stand to reach 21',
@@ -32,16 +42,6 @@ const games: GameInfo[] = [
     houseEdge: 1,
     path: '/blackjack',
     icon: '🃏',
-  },
-  {
-    id: 'dice',
-    name: 'Dice',
-    description: 'Roll 0-100, predict over/under!',
-    minBet: 0.01,
-    maxWin: 10,
-    houseEdge: 0.99,
-    path: '/dice',
-    icon: '🎲',
   },
 ];
 

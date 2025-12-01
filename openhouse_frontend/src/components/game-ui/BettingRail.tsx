@@ -226,26 +226,28 @@ export function BettingRail({
             {/* Bottom row: Balances | Chip Buttons | Actions */}
             <div className="flex items-end justify-between pt-2 pb-1">
               {/* LEFT: Balances */}
-              <div className="flex flex-col gap-1 text-xs w-40">
-                <div className="text-gray-500">
-                  Chips: <span className="text-white font-mono">${formatUSDT(gameBalance)}</span>
+              <div className="flex items-start gap-2 w-44">
+                <div className="flex flex-col gap-1 text-xs">
+                  <div className="text-gray-500">
+                    Chips: <span className="text-white font-mono">{formatUSDT(gameBalance)}</span>
+                  </div>
+                  <div className="text-gray-600">
+                    Wallet: <span className="text-gray-400 font-mono">{formatUSDT(walletBalance)}</span>
+                  </div>
+                  <div className="text-gray-600">
+                    House: <span className="text-gray-400 font-mono">{formatUSDT(houseBalance)}</span>
+                  </div>
                 </div>
-                <div className="text-gray-600">
-                  Wallet: <span className="text-gray-400 font-mono">${formatUSDT(walletBalance)}</span>
-                </div>
-                <div className="text-gray-600 flex items-center gap-1">
-                  House: <span className="text-gray-400 font-mono">${formatUSDT(houseBalance)}</span>
-                  <button
-                    onClick={onBalanceRefresh}
-                    className="text-gray-600 hover:text-gray-400 p-0.5 transition"
-                    title="Refresh balances"
-                  >
-                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M4 12c0-4.4 3.6-8 8-8 3.1 0 5.8 1.8 7.1 4.4M20 12c0 4.4-3.6 8-8 8-3.1 0-5.8-1.8-7.1-4.4"/>
-                      <path d="M20 4v4h-4M4 20v-4h4"/>
-                    </svg>
-                  </button>
-                </div>
+                <button
+                  onClick={onBalanceRefresh}
+                  className="refresh-all-button"
+                  title="Refresh all balances"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="M4 12c0-4.4 3.6-8 8-8 3.1 0 5.8 1.8 7.1 4.4M20 12c0 4.4-3.6 8-8 8-3.1 0-5.8-1.8-7.1-4.4"/>
+                    <path d="M20 4v4h-4M4 20v-4h4"/>
+                  </svg>
+                </button>
               </div>
 
               {/* CENTER: Chip Buttons */}
@@ -297,29 +299,34 @@ export function BettingRail({
       {/* MOBILE: Semicircle bottom bar */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-50">
         <div className="betting-rail">
-          <div className="px-4 pt-3 pb-1">
+          <div className="px-4 pt-5 pb-3">
             {/* Top row: balances + actions */}
-            <div className="flex items-center justify-between w-full text-xs mb-2">
-              <div className="flex flex-col">
-                <div className="text-gray-500 flex items-center gap-1">
-                  Chips: <span className="text-white font-mono">${formatUSDT(gameBalance)}</span>
-                  <button onClick={onBalanceRefresh} className="text-gray-600 hover:text-gray-400">
-                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M4 12c0-4.4 3.6-8 8-8 3.1 0 5.8 1.8 7.1 4.4M20 12c0 4.4-3.6 8-8 8-3.1 0-5.8-1.8-7.1-4.4"/>
-                      <path d="M20 4v4h-4M4 20v-4h4"/>
-                    </svg>
-                  </button>
+            <div className="flex items-start justify-between w-full text-xs mb-3">
+              <div className="flex items-start gap-2">
+                <div className="flex flex-col gap-0.5">
+                  <div className="text-gray-500">
+                    Chips: <span className="text-white font-mono">{formatUSDT(gameBalance)}</span>
+                  </div>
+                  <div className="text-gray-600 text-[10px]">
+                    Wallet: {formatUSDT(walletBalance)}
+                  </div>
+                  <div className="text-gray-600 text-[10px]">
+                    House: {formatUSDT(houseBalance)}
+                  </div>
                 </div>
-                <div className="text-gray-600 text-[10px]">
-                  House: ${formatUSDT(houseBalance)}
-                </div>
+                <button onClick={onBalanceRefresh} className="refresh-all-button-mobile">
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="M4 12c0-4.4 3.6-8 8-8 3.1 0 5.8 1.8 7.1 4.4M20 12c0 4.4-3.6 8-8 8-3.1 0-5.8-1.8-7.1-4.4"/>
+                    <path d="M20 4v4h-4M4 20v-4h4"/>
+                  </svg>
+                </button>
               </div>
-              <div className="flex gap-3">
+              <div className="flex flex-col items-end gap-1.5">
                 <button
                   onClick={() => setShowDepositModal(true)}
-                  className={`text-green-500 ${showDepositAnimation ? 'deposit-button-pulse' : ''}`}
+                  className={`text-green-500 font-medium ${showDepositAnimation ? 'deposit-button-pulse' : ''}`}
                 >
-                  + Buy
+                  + Buy Chips
                 </button>
                 <button
                   onClick={handleWithdrawAll}
@@ -330,15 +337,15 @@ export function BettingRail({
                 </button>
                 <button
                   onClick={() => navigate(isLiquidityRoute ? '/dice' : '/dice/liquidity')}
-                  className="text-dfinity-turquoise"
+                  className="text-dfinity-turquoise text-[10px]"
                 >
-                  {isLiquidityRoute ? '🎲' : '💰'}
+                  {isLiquidityRoute ? '🎲 Play Game' : '💰 Be The House'}
                 </button>
               </div>
             </div>
 
             {/* Center: Stack + Amount */}
-            <div className="flex flex-col items-center gap-1">
+            <div className="flex flex-col items-center gap-1 mb-2">
               <InteractiveChipStack
                 amount={betAmount}
                 onRemoveChip={removeChip}
@@ -367,8 +374,8 @@ export function BettingRail({
               </div>
             </div>
 
-            {/* Chip buttons - pinned to bottom */}
-            <div className="flex justify-center gap-1 pt-2 pb-1">
+            {/* Chip buttons */}
+            <div className="flex justify-center gap-1">
               {CHIP_DENOMINATIONS.map(chip => (
                 <button
                   key={chip.color}

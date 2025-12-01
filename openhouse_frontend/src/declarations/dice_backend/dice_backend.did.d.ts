@@ -2,6 +2,11 @@ import type { Principal } from '@dfinity/principal';
 import type { ActorMethod } from '@dfinity/agent';
 import type { IDL } from '@dfinity/candid';
 
+export interface AbandonedEntry {
+  'user' : Principal,
+  'timestamp' : bigint,
+  'amount' : bigint,
+}
 export interface AccountingStats {
   'total_user_deposits' : bigint,
   'unique_depositors' : bigint,
@@ -23,29 +28,48 @@ export interface DailySnapshot {
   'daily_pool_profit' : bigint,
 }
 export interface HealthCheck {
+  'stable_memory_pages' : bigint,
   'total_deposits' : bigint,
   'is_healthy' : boolean,
   'calculated_total' : bigint,
+  'heap_memory_bytes' : bigint,
+  'total_abandoned_amount' : bigint,
   'health_status' : string,
+  'unique_lps' : bigint,
+  'unique_users' : bigint,
   'pool_reserve' : bigint,
   'timestamp' : bigint,
   'excess' : bigint,
   'excess_usdt' : number,
+  'pending_withdrawals_count' : bigint,
   'canister_balance' : bigint,
+  'pending_withdrawals_total_amount' : bigint,
 }
 export interface LPPosition {
   'shares' : bigint,
   'redeemable_icp' : bigint,
   'pool_ownership_percent' : number,
 }
+export interface LPPositionInfo { 'shares' : bigint, 'user' : Principal }
 export interface MinimalGameResult {
   'is_win' : boolean,
   'rolled_number' : number,
   'payout' : bigint,
 }
+export interface OrphanedFundsReport {
+  'abandoned_count' : bigint,
+  'total_abandoned_amount' : bigint,
+  'recent_abandonments' : Array<AbandonedEntry>,
+}
 export interface PendingWithdrawal {
   'created_at' : bigint,
   'withdrawal_type' : WithdrawalType,
+}
+export interface PendingWithdrawalInfo {
+  'user' : Principal,
+  'created_at' : bigint,
+  'amount' : bigint,
+  'withdrawal_type' : string,
 }
 export interface PoolStats {
   'total_shares' : bigint,
@@ -57,6 +81,7 @@ export interface PoolStats {
 }
 export type RollDirection = { 'Over' : null } |
   { 'Under' : null };
+export interface UserBalance { 'balance' : bigint, 'user' : Principal }
 export type WithdrawalType = {
     'LP' : { 'shares' : bigint, 'reserve' : bigint, 'amount' : bigint }
   } |
@@ -65,6 +90,26 @@ export interface _SERVICE {
   'abandon_withdrawal' : ActorMethod<
     [],
     { 'Ok' : bigint } |
+      { 'Err' : string }
+  >,
+  'admin_get_all_balances' : ActorMethod<
+    [bigint, bigint],
+    { 'Ok' : Array<UserBalance> } |
+      { 'Err' : string }
+  >,
+  'admin_get_all_lp_positions' : ActorMethod<
+    [bigint, bigint],
+    { 'Ok' : Array<LPPositionInfo> } |
+      { 'Err' : string }
+  >,
+  'admin_get_all_pending_withdrawals' : ActorMethod<
+    [],
+    { 'Ok' : Array<PendingWithdrawalInfo> } |
+      { 'Err' : string }
+  >,
+  'admin_get_orphaned_funds_report' : ActorMethod<
+    [],
+    { 'Ok' : OrphanedFundsReport } |
       { 'Err' : string }
   >,
   'admin_health_check' : ActorMethod<

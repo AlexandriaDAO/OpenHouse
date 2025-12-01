@@ -292,6 +292,9 @@ pub fn schedule_lp_withdrawal(user: Principal, shares: Nat, reserve: Nat, amount
 // INTERNAL CORE
 // =============================================================================
 
+// Suppress warning for deprecated `ic_cdk::call`.
+// Refactoring to `Call::unbounded_wait` requires dependency updates and significant changes.
+#[allow(deprecated)]
 pub(crate) async fn attempt_transfer(user: Principal, amount: u64, created_at: u64) -> TransferResult {
     let ck_usdt_principal = Principal::from_text(CKUSDT_CANISTER_ID).expect("Invalid principal constant");
 
@@ -625,6 +628,8 @@ pub fn get_withdrawal_status() -> Option<PendingWithdrawal> {
     PENDING_WITHDRAWALS.with(|p| p.borrow().get(&caller))
 }
 
+// Retained for internal debugging and future admin features.
+#[allow(dead_code)]
 pub fn get_audit_log(offset: usize, limit: usize) -> Vec<AuditEntry> {
     AUDIT_LOG_MAP.with(|log| {
         let log = log.borrow();

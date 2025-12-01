@@ -33,7 +33,7 @@ const createInitialGameStatus = (): GameStatus => ({
 
 // Initial state for the provider
 const createInitialState = (): BalanceProviderState => {
-  const games: GameType[] = ['dice', 'crash', 'plinko', 'blackjack'];
+  const games: GameType[] = ['dice', 'plinko', 'crash', 'blackjack'];
 
   return {
     balances: games.reduce((acc, game) => ({
@@ -76,8 +76,8 @@ export const GameBalanceProvider: React.FC<GameBalanceProviderProps> = ({ childr
   const [state, setState] = useState<BalanceProviderState>(createInitialState());
   const verificationTimers = useRef<Record<GameType, ReturnType<typeof setTimeout> | null>>({
     dice: null,
-    crash: null,
     plinko: null,
+    crash: null,
     blackjack: null,
   });
 

@@ -20,10 +20,10 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 ./deploy.sh
 
 # Deploy specific game backend
-./deploy.sh --crash-only
-./deploy.sh --plinko-only
-./deploy.sh --blackjack-only
 ./deploy.sh --dice-only
+./deploy.sh --plinko-only
+./deploy.sh --crash-only
+./deploy.sh --blackjack-only
 
 # Deploy frontend only
 ./deploy.sh --frontend-only
@@ -36,28 +36,30 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 
 | Component | Canister ID | Purpose | URL |
 |-----------|-------------|---------|-----|
-| **Crash Backend** | `fws6k-tyaaa-aaaap-qqc7q-cai` | Crash game logic | - |
-| **Plinko Backend** | `weupr-2qaaa-aaaap-abl3q-cai` | Plinko game logic | - |
-| **Blackjack Backend** | `wvrcw-3aaaa-aaaah-arm4a-cai` | Blackjack game logic | - |
 | **Dice Backend** | `whchi-hyaaa-aaaao-a4ruq-cai` | Dice game logic | - |
+| **Plinko Backend** | `weupr-2qaaa-aaaap-abl3q-cai` | Plinko game logic | - |
+| **Crash Backend** | `fws6k-tyaaa-aaaap-qqc7q-cai` | Crash game logic | - |
+| **Blackjack Backend** | `wvrcw-3aaaa-aaaah-arm4a-cai` | Blackjack game logic | - |
 | **OpenHouse Frontend** | `pezw3-laaaa-aaaal-qssoa-cai` | Multi-game router UI | https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io |
 
 ### Frontend Routes
 - `/` - Game selection homepage
-- `/crash` - Crash game interface
-- `/plinko` - Plinko game interface
-- `/blackjack` - Blackjack game interface
 - `/dice` - Dice game interface
+- `/plinko` - Plinko game interface
+- `/crash` - Crash game interface
+- `/blackjack` - Blackjack game interface
 
 ## 🎮 Games Overview
 
-### 1. Crash Game
-- **Mechanics**: Multiplier increases from 1.00x until it crashes
-- **Objective**: Cash out before the crash
-- **Min Bet**: 1 USDT
-- **Max Win**: 1000x
+### 1. Dice
+- **Mechanics**: Roll a number from 0-100, predict over or under target
+- **Objective**: Choose target number and direction, win if roll matches prediction
+- **Min Bet**: 0.01 USDT
+- **Max Bet**: Dynamic based on multiplier (10 USDT max win / multiplier)
+- **Max Win**: 10 USDT
 - **House Edge**: 1%
-- **Canister**: `crash_backend`
+- **Win Chance**: 1% to 98% (adjustable via target number)
+- **Canister**: `dice_backend`
 
 ### 2. Plinko
 - **Mechanics**: Ball bounces through pegs to land in multiplier slots
@@ -67,7 +69,15 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 - **House Edge**: 1%
 - **Canister**: `plinko_backend`
 
-### 3. Blackjack
+### 3. Crash Game
+- **Mechanics**: Multiplier increases from 1.00x until it crashes
+- **Objective**: Cash out before the crash
+- **Min Bet**: 1 USDT
+- **Max Win**: 1000x
+- **House Edge**: 1%
+- **Canister**: `crash_backend`
+
+### 4. Blackjack
 - **Mechanics**: Classic blackjack against the dealer
 - **Objective**: Get closer to 21 than dealer without busting
 - **Actions**: Hit, Stand, Double Down, Split
@@ -75,16 +85,6 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 - **Max Win**: 10 USDT
 - **House Edge**: ~1%
 - **Canister**: `blackjack_backend`
-
-### 4. Dice
-- **Mechanics**: Roll a number from 0-100, predict over or under target
-- **Objective**: Choose target number and direction, win if roll matches prediction
-- **Min Bet**: 0.01 USDT
-- **Max Bet**: Dynamic based on multiplier (10 USDT max win / multiplier)
-- **Max Win**: 10 USDT
-- **House Edge**: 1%
-- **Win Chance**: 1% to 98% (adjustable via target number)
-- **Canister**: `dice_backend`
 
 ### Future Games
 - **Slots**: Traditional slot machine with crypto themes
@@ -95,10 +95,10 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 ### Step 1: Make Code Changes
 ```bash
 # Game backend changes
-vim crash_backend/src/lib.rs
-vim plinko_backend/src/lib.rs
-vim mines_backend/src/lib.rs
 vim dice_backend/src/lib.rs
+vim plinko_backend/src/lib.rs
+vim crash_backend/src/lib.rs
+vim blackjack_backend/src/lib.rs
 
 # Frontend changes
 vim openhouse_frontend/dist/index.html
@@ -111,10 +111,10 @@ vim openhouse_frontend/dist/index.html
 ./deploy.sh
 
 # Or deploy specific components
-./deploy.sh --crash-only
 ./deploy.sh --dice-only
 ./deploy.sh --plinko-only
-./deploy.sh --mines-only
+./deploy.sh --crash-only
+./deploy.sh --blackjack-only
 ./deploy.sh --frontend-only
 ```
 
@@ -123,23 +123,23 @@ vim openhouse_frontend/dist/index.html
 # Run automated tests
 ./deploy.sh --test
 
-# Manual testing - Crash game
-dfx canister --network ic call crash_backend greet '("Player")'
-dfx canister --network ic call crash_backend get_game_state
+# Manual testing - Dice game
+dfx canister --network ic call dice_backend greet '("Player")'
+dfx canister --network ic call dice_backend get_stats
+dfx canister --network ic call dice_backend calculate_payout_info '(50 : nat8, variant { Over })'
 
 # Manual testing - Plinko game
 dfx canister --network ic call plinko_backend greet '("Player")'
 dfx canister --network ic call plinko_backend get_stats
 dfx canister --network ic call plinko_backend get_multipliers '(16, variant { High })'
 
-# Manual testing - Mines game
-dfx canister --network ic call mines_backend greet '("Player")'
-dfx canister --network ic call mines_backend get_stats
+# Manual testing - Crash game
+dfx canister --network ic call crash_backend greet '("Player")'
+dfx canister --network ic call crash_backend get_game_state
 
-# Manual testing - Dice game
-dfx canister --network ic call dice_backend greet '("Player")'
-dfx canister --network ic call dice_backend get_stats
-dfx canister --network ic call dice_backend calculate_payout_info '(50 : nat8, variant { Over })'
+# Manual testing - Blackjack game
+dfx canister --network ic call blackjack_backend greet '("Player")'
+dfx canister --network ic call blackjack_backend get_stats
 
 # Check frontend
 open https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io
@@ -296,28 +296,34 @@ fn post_upgrade() {
 ### Health Checks
 ```bash
 # Check canister cycles
-dfx canister --network ic status crash_backend
-dfx canister --network ic status plinko_backend
 dfx canister --network ic status dice_backend
+dfx canister --network ic status plinko_backend
+dfx canister --network ic status crash_backend
+dfx canister --network ic status blackjack_backend
 
 # Check recent activity
-dfx canister --network ic call crash_backend get_game_state
-dfx canister --network ic call plinko_backend get_stats
 dfx canister --network ic call dice_backend get_stats
+dfx canister --network ic call plinko_backend get_stats
+dfx canister --network ic call crash_backend get_game_state
+dfx canister --network ic call blackjack_backend get_stats
 ```
 
 ## 🚨 Emergency Procedures
 
 ### Pause All Games
 ```bash
-dfx canister --network ic call crash_backend pause_game
+dfx canister --network ic call dice_backend pause_game
 dfx canister --network ic call plinko_backend pause_game
+dfx canister --network ic call crash_backend pause_game
+dfx canister --network ic call blackjack_backend pause_game
 ```
 
 ### Resume Games
 ```bash
-dfx canister --network ic call crash_backend resume_game
+dfx canister --network ic call dice_backend resume_game
 dfx canister --network ic call plinko_backend resume_game
+dfx canister --network ic call crash_backend resume_game
+dfx canister --network ic call blackjack_backend resume_game
 ```
 
 ## 📝 Deployment Checklist
@@ -343,10 +349,10 @@ After deployment:
 
 - **Frontend**: https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io
 - **IC Dashboard**: https://dashboard.internetcomputer.org
-- **Crash Backend**: https://dashboard.internetcomputer.org/canister/fws6k-tyaaa-aaaap-qqc7q-cai
-- **Plinko Backend**: https://dashboard.internetcomputer.org/canister/weupr-2qaaa-aaaap-abl3q-cai
-- **Mines Backend**: https://dashboard.internetcomputer.org/canister/wvrcw-3aaaa-aaaah-arm4a-cai
 - **Dice Backend**: https://dashboard.internetcomputer.org/canister/whchi-hyaaa-aaaao-a4ruq-cai
+- **Plinko Backend**: https://dashboard.internetcomputer.org/canister/weupr-2qaaa-aaaap-abl3q-cai
+- **Crash Backend**: https://dashboard.internetcomputer.org/canister/fws6k-tyaaa-aaaap-qqc7q-cai
+- **Blackjack Backend**: https://dashboard.internetcomputer.org/canister/wvrcw-3aaaa-aaaah-arm4a-cai
 - **VRF Documentation**: https://internetcomputer.org/docs/current/references/ic-interface-spec#ic-raw_rand
 
 ## ⚡ Key Principles

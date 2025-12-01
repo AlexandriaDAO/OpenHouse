@@ -1,40 +1,42 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { IdentityProvider } from './lib/ic-use-identity';
 import { AuthProvider } from './providers/AuthProvider';
 import { ActorProvider } from './providers/ActorProvider';
 import { BalanceProvider } from './providers/BalanceProvider';
 import { GameBalanceProvider } from './providers/GameBalanceProvider';
 import { Layout } from './components/Layout';
 import { Home } from './pages/Home';
-import { Crash } from './pages/Crash';
-import { Plinko } from './pages/Plinko';
-import { Blackjack } from './pages/Blackjack';
 import { DiceLayout, DiceGame, DiceLiquidity } from './pages/dice';
+import { Plinko } from './pages/Plinko';
+import { Crash } from './pages/Crash';
+import { Blackjack } from './pages/Blackjack';
 import { Admin } from './pages/Admin';
 
 function App() {
   return (
     <Router>
-      <AuthProvider>
-        <ActorProvider>
+      <IdentityProvider>
+        <ActorProvider />
+        <AuthProvider>
           <BalanceProvider>
             <GameBalanceProvider>
               <Layout>
                 <Routes>
                   <Route path="/" element={<Home />} />
-                  <Route path="/crash" element={<Crash />} />
-                  <Route path="/plinko" element={<Plinko />} />
-                  <Route path="/blackjack" element={<Blackjack />} />
                   <Route path="/dice" element={<DiceLayout />}>
                     <Route index element={<DiceGame />} />
                     <Route path="liquidity" element={<DiceLiquidity />} />
                   </Route>
+                  <Route path="/plinko" element={<Plinko />} />
+                  <Route path="/crash" element={<Crash />} />
+                  <Route path="/blackjack" element={<Blackjack />} />
                   <Route path="/admin" element={<Admin />} />
                 </Routes>
               </Layout>
             </GameBalanceProvider>
           </BalanceProvider>
-        </ActorProvider>
-      </AuthProvider>
+        </AuthProvider>
+      </IdentityProvider>
     </Router>
   );
 }
