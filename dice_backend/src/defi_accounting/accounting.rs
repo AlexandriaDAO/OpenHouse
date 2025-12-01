@@ -22,6 +22,7 @@ use super::memory_ids::{
 const MIN_DEPOSIT: u64 = 1_000_000; // 1 USDT
 const MIN_WITHDRAW: u64 = 1_000_000; // 1 USDT
 const MAX_AUDIT_ENTRIES: u64 = 1000; // Retention limit
+const MAX_RECENT_ABANDONMENTS: usize = 50; // Max entries for orphaned funds report
 /// Minimum balance before triggering automatic weekly withdrawal to parent canister.
 /// Set to 10 USDT to minimize gas costs while ensuring timely fee collection.
 const PARENT_AUTO_WITHDRAW_THRESHOLD: u64 = 10_000_000; // 10 USDT
@@ -783,7 +784,7 @@ pub(crate) fn build_orphaned_funds_report_internal() -> super::types::OrphanedFu
                 });
                 
                 // Keep only last 50
-                if recent.len() > 50 {
+                if recent.len() > MAX_RECENT_ABANDONMENTS {
                     recent.pop_front();
                 }
             }

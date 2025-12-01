@@ -67,7 +67,6 @@ type HealthCheck = record {
   is_healthy: bool;
   health_status: text;
   timestamp: nat64;
-  // NEW fields
   pending_withdrawals_count: nat64;
   pending_withdrawals_total_amount: nat64;
   heap_memory_bytes: nat64;

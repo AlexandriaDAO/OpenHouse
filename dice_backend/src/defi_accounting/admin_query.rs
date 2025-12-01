@@ -4,11 +4,13 @@ use super::liquidity_pool;
 use super::types::*;
 
 const ADMIN_PRINCIPAL: &str = "p7336-jmpo5-pkjsf-7dqkd-ea3zu-g2ror-ctcn2-sxtuo-tjve3-ulrx7-wae";
+const WASM_PAGE_SIZE_BYTES: u64 = 65536;
+const MAX_PAGINATION_LIMIT: u64 = 100;
 
 fn require_admin() -> Result<(), String> {
     let caller = ic_cdk::api::msg_caller();
     let admin = Principal::from_text(ADMIN_PRINCIPAL)
-        .map_err(|_| "Invalid admin principal")?;
+        .map_err(|e| format!("Invalid admin principal: {:?}", e))?;
     if caller != admin {
         return Err("Unauthorized: admin only".to_string());
     }
@@ -55,7 +57,7 @@ pub async fn admin_health_check() -> Result<HealthCheck, String> {
 
     // Memory metrics (NEW)
     let heap_memory_bytes = (core::arch::wasm32::memory_size(0) as u64)
-        .checked_mul(65536)
+        .checked_mul(WASM_PAGE_SIZE_BYTES)
         .unwrap_or(u64::MAX);
     let stable_memory_pages = ic_cdk::api::stable::stable_size();
 
@@ -95,13 +97,13 @@ pub fn get_orphaned_funds_report() -> Result<OrphanedFundsReport, String> {
 /// Paginated list of all user balances
 pub fn get_all_balances(offset: u64, limit: u64) -> Result<Vec<UserBalance>, String> {
     require_admin()?;
-    let limit = limit.min(100); // Cap at 100
+    let limit = limit.min(MAX_PAGINATION_LIMIT);
     Ok(accounting::iter_user_balances_internal(offset as usize, limit as usize))
 }
 
 /// Paginated list of all LP positions
 pub fn get_all_lp_positions(offset: u64, limit: u64) -> Result<Vec<LPPositionInfo>, String> {
     require_admin()?;
-    let limit = limit.min(100); // Cap at 100
+    let limit = limit.min(MAX_PAGINATION_LIMIT);
     Ok(liquidity_pool::iter_lp_positions_internal(offset as usize, limit as usize))
 }
