@@ -1,3 +1,213 @@
+# 🤖 AUTONOMOUS PR ORCHESTRATOR - DO NOT SKIP
+
+**You are an autonomous PR orchestrator. Your ONLY job is to implement this plan and create a PR.**
+
+## Isolation Check (RUN FIRST)
+```bash
+REPO_ROOT=$(git rev-parse --show-toplevel)
+if [ "$REPO_ROOT" = "/home/theseus/alexandria/openhouse" ]; then
+    echo "❌ FATAL: In main repo. Must be in worktree."
+    echo "Worktree: /home/theseus/alexandria/openhouse-admin-dashboard"
+    exit 1
+fi
+echo "✅ In isolated worktree: $REPO_ROOT"
+```
+
+## Your Autonomous Workflow (NO QUESTIONS ALLOWED)
+1. **Verify isolation** - You must be in worktree: `/home/theseus/alexandria/openhouse-admin-dashboard`
+2. **Implement feature** - Follow plan sections below
+3. **Build & Deploy to Mainnet**:
+   ```bash
+   cd openhouse_frontend
+   npm run build
+   cd ..
+   ./deploy.sh
+   ```
+
+4. **Verify deployment**:
+   ```bash
+   # Test the live site
+   echo "Visit: https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/admin"
+   ```
+
+5. **Create PR** (MANDATORY):
+   ```bash
+   git add .
+   git commit -m "feat(admin): unified information-dense dashboard"
+   git push -u origin feature/admin-dashboard
+   gh pr create --title "[Feature]: Unified Admin Dashboard" --body "Implements PLAN_unified_admin_dashboard.md
+
+Deployed to mainnet:
+- Frontend: https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/admin
+- Affected components: openhouse_frontend (Admin.tsx)
+
+## Changes
+- Removed 4-tab interface in favor of unified single-page dashboard
+- Added multi-game support (Dice + Plinko health checks)
+- Information-dense grid layout showing all datapoints at a glance
+- Real-time health monitoring across all casino backends
+- Improved visual hierarchy with color-coded status indicators
+
+## Screenshots
+Before: 4 separate tabs requiring navigation
+After: All critical metrics visible in one view"
+   ```
+
+6. **Iterate autonomously**:
+   - FOR i=1 to 5:
+     - Check review: `gh pr view [NUM] --json comments`
+     - Count P0 issues
+     - IF P0 > 0: Fix immediately, commit, push, sleep 300s, continue
+     - IF P0 = 0: Report success, EXIT
+   - After 5 iterations: Escalate to human
+
+## CRITICAL RULES
+- ❌ NO questions ("should I?", "want me to?", "is it done?")
+- ❌ NO skipping PR creation - it's MANDATORY
+- ❌ NO stopping after implementation - create PR immediately
+- ⚠️ MAINNET DEPLOYMENT: All changes go directly to production
+- ✅ After sleep: IMMEDIATELY continue (no pause)
+- ✅ ONLY stop at: approved, max iterations, or error
+
+**Branch:** `feature/admin-dashboard`
+**Worktree:** `/home/theseus/alexandria/openhouse-admin-dashboard`
+
+---
+
+# Implementation Plan: Unified Admin Dashboard
+
+## Task Classification
+**REFACTORING**: Improve existing admin page from 4-tab interface to unified information-dense dashboard.
+
+## Current State
+
+### File Structure
+```
+openhouse_frontend/src/
+├── pages/
+│   └── Admin.tsx                 # Current 4-tab admin interface (360 lines)
+├── hooks/actors/
+│   ├── useDiceActor.ts          # Dice backend hook
+│   ├── usePlinkoActor.ts        # Plinko backend hook
+│   ├── useCrashActor.ts         # Crash backend hook
+│   └── useBlackjackActor.ts     # Blackjack backend hook
+└── App.tsx                       # Routes admin page to /admin
+```
+
+### Current Implementation (Admin.tsx)
+
+**Lines 1-40: Imports & State Setup**
+- Only imports Dice backend types and actor
+- Hardcoded ADMIN_PRINCIPAL constant
+- useState hooks for 4 tabs: 'health' | 'withdrawals' | 'orphaned' | 'balances'
+
+**Lines 41-84: Data Fetching**
+- `fetchData()` callback only calls Dice backend
+- Tab-based lazy loading (only fetches data for active tab)
+- No multi-game support
+
+**Lines 106-141: Tab Navigation**
+- 4 separate buttons for tab switching
+- Content hidden/shown based on activeTab state
+- User must click through tabs to see all data
+
+**Lines 144-217: Health Tab**
+- 3-column grid with: System Status, Financials, Operational Metrics
+- Dice-only data
+
+**Lines 220-252: Withdrawals Tab**
+- Table of pending withdrawals (Dice only)
+
+**Lines 254-300: Orphaned Tab**
+- Abandoned withdrawal report (Dice only)
+
+**Lines 302-358: Balances Tab**
+- 2-column grid: User Balances, LP Positions (Dice only)
+
+### Backend API Availability
+
+**Dice Backend** (whchi-hyaaa-aaaao-a4ruq-cai):
+- ✅ `admin_health_check()` → HealthCheck
+- ✅ `admin_get_all_pending_withdrawals()` → Vec<PendingWithdrawalInfo>
+- ✅ `admin_get_orphaned_funds_report()` → OrphanedFundsReport
+- ✅ `admin_get_all_balances(offset, limit)` → Vec<UserBalance>
+- ✅ `admin_get_all_lp_positions(offset, limit)` → Vec<LPPositionInfo>
+
+**Plinko Backend** (weupr-2qaaa-aaaap-abl3q-cai):
+- ✅ `admin_health_check()` → HealthCheck
+- (Other admin functions TBD)
+
+**Crash Backend** (fws6k-tyaaa-aaaap-qqc7q-cai):
+- ❌ No admin functions yet
+
+**Blackjack Backend** (wvrcw-3aaaa-aaaah-arm4a-cai):
+- ❌ No admin functions yet
+
+### Problems with Current Design
+1. **Hidden Information**: Critical data requires tab navigation
+2. **Single Game Only**: Only monitors Dice backend
+3. **Inefficient Workflow**: Operator must click 4 tabs to see full picture
+4. **Wasted Space**: Large empty areas, inefficient use of viewport
+5. **No Comparative View**: Can't compare metrics across games
+
+## Proposed Solution: Unified Information-Dense Dashboard
+
+### Design Principles
+1. **Everything Visible**: All critical metrics in single scrollable view
+2. **Multi-Game Support**: Side-by-side comparison of Dice vs Plinko
+3. **Visual Hierarchy**: Color-coded status, clear sections, compact tables
+4. **Real-time Monitoring**: Auto-refresh every 30 seconds
+5. **Responsive Grid**: 12-column grid system for flexible layout
+
+### Layout Structure (Top to Bottom)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ ADMIN DASHBOARD                                    [Refresh]    │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│ ┌─ PLATFORM OVERVIEW ────────────────────────────────────────┐  │
+│ │ Total TVL: $XXX   |  Active Games: 2/4  |  Status: HEALTHY │  │
+│ └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│ ┌─ DICE GAME ─────────────┬─ PLINKO GAME ─────────────────────┐ │
+│ │ Status: HEALTHY ●       │ Status: HEALTHY ●                 │ │
+│ │ Pool: $XXX   Users: XXX │ Pool: $XXX   Users: XXX           │ │
+│ │ Pending W/D: X ($XXX)   │ Pending W/D: X ($XXX)             │ │
+│ │ Excess: +$XX  LPs: XX   │ Excess: +$XX  LPs: XX             │ │
+│ └─────────────────────────┴───────────────────────────────────┘ │
+│                                                                  │
+│ ┌─ SYSTEM RESOURCES ──────────────────────────────────────────┐ │
+│ │  Dice: 12.5 MB heap, 45 pages  |  Plinko: 8.2 MB, 32 pages │ │
+│ └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│ ┌─ PENDING WITHDRAWALS (Dice: 3, Plinko: 1) ─────────────────┐ │
+│ │ User          | Game   | Type | Amount    | Created        │ │
+│ │ p7336-jmp...  | Dice   | User | 150 USDT  | 2h ago        │ │
+│ │ abc12-def...  | Dice   | LP   | 500 USDT  | 5m ago        │ │
+│ │ xyz89-ghi...  | Plinko | User | 75 USDT   | 1h ago        │ │
+│ └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│ ┌─ ORPHANED FUNDS ────────────────────────────────────────────┐ │
+│ │ Dice: $45.23 (12 events)  |  Plinko: $0.00 (0 events)      │ │
+│ └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│ ┌─ TOP BALANCES ──────────┬─ TOP LP POSITIONS ───────────────┐ │
+│ │ User         |  Balance │ User         |  Shares           │ │
+│ │ p7336...     |  500 USDT│ abc12...     |  10000           │ │
+│ │ abc12...     |  250 USDT│ xyz89...     |  5000            │ │
+│ └──────────────────────────┴──────────────────────────────────┘ │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Implementation Pseudocode
+
+### File: `openhouse_frontend/src/pages/Admin.tsx` (MODIFY)
+
+```typescript
+// PSEUDOCODE
+
 import React, { useState, useEffect, useCallback } from 'react';
 import useDiceActor from '../hooks/actors/useDiceActor';
 import usePlinkoActor from '../hooks/actors/usePlinkoActor';
@@ -13,30 +223,9 @@ import { useAuth } from '../providers/AuthProvider';
 const ADMIN_PRINCIPAL = 'p7336-jmpo5-pkjsf-7dqkd-ea3zu-g2ror-ctcn2-sxtuo-tjve3-ulrx7-wae';
 const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds
 
-// Helper functions
-const formatUSDT = (amount: bigint | number): string => {
-  const val = typeof amount === 'bigint' ? Number(amount) : amount;
-  return (val / 1_000_000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 });
-};
-
-function formatTimeAgo(timestamp: bigint | Date): string {
-  // Convert bigint nanoseconds to Date if needed
-  const date = timestamp instanceof Date
-    ? timestamp
-    : new Date(Number(timestamp) / 1_000_000);
-
-  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
-
-  if (seconds < 60) return `${seconds}s ago`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-  return `${Math.floor(seconds / 86400)}d ago`;
-}
-
-function truncatePrincipal(principal: string, length: number = 8): string {
-  if (principal.length <= length + 3) return principal;
-  return principal.slice(0, length) + '...';
-}
+// Helper functions (keep existing formatUSDT, formatDate)
+// ADD: formatTimeAgo(timestamp) for relative times
+// ADD: truncatePrincipal(principal, length=8) for compact display
 
 interface GameHealthData {
   health: HealthCheck | null;
@@ -47,20 +236,16 @@ interface GameHealthData {
   error: string | null;
 }
 
-// Extended withdrawal info to include game name
-interface UnifiedPendingWithdrawal extends PendingWithdrawalInfo {
-  game: string;
-}
-
 export const Admin: React.FC = () => {
   const { actor: diceActor } = useDiceActor();
   const { actor: plinkoActor } = usePlinkoActor();
   const { principal, isAuthenticated } = useAuth();
 
+  // REMOVE: activeTab state (no more tabs!)
   const [loading, setLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
-  // Separate state for each game
+  // NEW: Separate state for each game
   const [diceData, setDiceData] = useState<GameHealthData>({
     health: null, pendingWithdrawals: [], orphanedReport: null,
     userBalances: [], lpPositions: [], error: null
@@ -73,7 +258,7 @@ export const Admin: React.FC = () => {
 
   const isAdmin = principal === ADMIN_PRINCIPAL;
 
-  // Fetch data from a specific game backend
+  // NEW: Fetch data from a specific game backend
   const fetchGameData = async (
     actor: any,
     setData: React.Dispatch<React.SetStateAction<GameHealthData>>,
@@ -125,7 +310,7 @@ export const Admin: React.FC = () => {
     }
   };
 
-  // Fetch all game data in parallel
+  // NEW: Fetch all game data in parallel
   const fetchAllData = useCallback(async () => {
     if (!isAdmin || !isAuthenticated) return;
     setLoading(true);
@@ -148,23 +333,9 @@ export const Admin: React.FC = () => {
     }
   }, [fetchAllData, isAdmin, isAuthenticated]);
 
-  // Access control
+  // Access control (keep existing logic)
   if (!isAdmin) {
-    return (
-      <div className="min-h-screen bg-gray-900 text-white p-8 flex items-center justify-center">
-        <div className="max-w-md w-full">
-          <div className="bg-red-900/20 border border-red-500 rounded-lg p-8 text-center">
-            <div className="text-6xl mb-4">🚫</div>
-            <h1 className="text-2xl font-bold text-red-400 mb-2">Access Denied</h1>
-            <p className="text-gray-300 mb-4">This page is restricted to authorized administrators only.</p>
-            <div className="bg-gray-800 rounded p-3 mb-4">
-              <p className="text-xs text-gray-400 mb-1">Your Principal:</p>
-              <p className="font-mono text-xs text-gray-300 break-all">{principal || 'Not authenticated'}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+    return /* existing access denied UI */;
   }
 
   // Calculate platform-wide metrics
@@ -175,7 +346,7 @@ export const Admin: React.FC = () => {
     .every(h => !h || h.is_healthy);
 
   // Combine pending withdrawals from all games
-  const allPendingWithdrawals: UnifiedPendingWithdrawal[] = [
+  const allPendingWithdrawals = [
     ...diceData.pendingWithdrawals.map(w => ({ ...w, game: 'Dice' })),
     ...plinkoData.pendingWithdrawals.map(w => ({ ...w, game: 'Plinko' })),
   ].sort((a, b) => Number(b.created_at - a.created_at)); // Most recent first
@@ -423,7 +594,7 @@ export const Admin: React.FC = () => {
   );
 };
 
-// Reusable component for game health display
+// NEW: Reusable component for game health display
 const GameHealthCard: React.FC<{
   gameName: string;
   data: GameHealthData;
@@ -496,7 +667,7 @@ const GameHealthCard: React.FC<{
   );
 };
 
-// Reusable component for orphaned funds display
+// NEW: Reusable component for orphaned funds display
 const OrphanedFundsCard: React.FC<{
   gameName: string;
   report: OrphanedFundsReport | null;
@@ -530,3 +701,95 @@ const OrphanedFundsCard: React.FC<{
     </div>
   );
 };
+
+// HELPER FUNCTIONS
+
+function formatTimeAgo(timestamp: bigint | Date): string {
+  // Convert bigint nanoseconds to Date if needed
+  const date = timestamp instanceof Date
+    ? timestamp
+    : new Date(Number(timestamp) / 1_000_000);
+
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
+}
+
+function truncatePrincipal(principal: string, length: number = 8): string {
+  if (principal.length <= length + 3) return principal;
+  return principal.slice(0, length) + '...';
+}
+```
+
+## Deployment Notes
+
+### Affected Components
+- **Frontend Only**: `openhouse_frontend/src/pages/Admin.tsx`
+- **No backend changes required** (uses existing admin APIs)
+
+### Deployment Steps
+```bash
+cd openhouse_frontend
+npm run build
+cd ..
+./deploy.sh --frontend-only
+```
+
+### Testing Checklist (Manual on Mainnet)
+1. Visit https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/admin
+2. Verify access control (non-admin should see denial)
+3. Check that both Dice and Plinko data loads
+4. Verify Platform Overview metrics match game cards
+5. Check pending withdrawals table combines both games correctly
+6. Verify orphaned funds shows data from both games
+7. Check top balances/LP positions are sorted correctly
+8. Test auto-refresh (wait 30 seconds, verify timestamp updates)
+9. Test manual refresh button
+10. Verify responsive layout on different screen sizes
+
+## Key Implementation Notes
+
+### Multi-Game Architecture
+- Uses both `useDiceActor` and `usePlinkoActor` hooks
+- Gracefully handles missing admin functions with try/catch
+- Each game has independent error states
+- Parallel data fetching with Promise.all
+
+### Auto-Refresh Strategy
+- 30-second interval via setInterval
+- Shows "Last updated: Xs ago" timestamp
+- Manual refresh button for immediate updates
+- Cleanup interval on component unmount
+
+### Information Density Optimizations
+- 12-column responsive grid system
+- Compact text sizes (text-xs, text-sm)
+- Truncated principals with hover tooltips
+- Color-coded status indicators (green/red/yellow)
+- Relative timestamps (2h ago vs full date)
+
+### Visual Hierarchy
+1. **Platform Overview** (top) - Most important aggregate metrics
+2. **Game Health Cards** - Side-by-side comparison
+3. **System Resources** - Technical metrics
+4. **Pending Withdrawals** - Action items
+5. **Orphaned Funds** - Warning indicators
+6. **Top Balances/LPs** - Historical data
+
+### Accessibility
+- All tables have proper thead/tbody structure
+- Color indicators also use text/icons (not just color)
+- Full principal visible on hover (title attribute)
+- Loading states for all async operations
+
+## Future Enhancements (Out of Scope)
+- Add Crash and Blackjack games when they have admin APIs
+- Export data to CSV/JSON
+- Historical charts (TVL over time, etc.)
+- Alert system for critical thresholds
+- WebSocket for real-time updates (instead of polling)
+- Search/filter functionality for large tables
+- Pagination for balances/LP positions
