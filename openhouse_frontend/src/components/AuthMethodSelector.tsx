@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import {
   IDENTITY_PROVIDERS,
   getPreferredProvider,
-  setPreferredProvider,
   type IdentityProviderConfig
 } from '../lib/ic-use-identity/config/identityProviders';
 
@@ -20,7 +19,6 @@ export const AuthMethodSelector: React.FC<AuthMethodSelectorProps> = ({
   );
 
   const handleSelect = (provider: IdentityProviderConfig) => {
-    setPreferredProvider(provider.id);
     onSelect(provider);
   };
 

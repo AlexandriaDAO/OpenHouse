@@ -31,13 +31,24 @@ export const DEFAULT_PROVIDER = IDENTITY_PROVIDERS[0];
 // LocalStorage key for remembering user's choice
 export const PROVIDER_PREFERENCE_KEY = 'openhouse_identity_provider';
 
+/**
+ * Retrieves the user's preferred identity provider from localStorage.
+ * @returns The saved provider config, or null if none exists or is invalid
+ */
 export function getPreferredProvider(): IdentityProviderConfig | null {
   try {
     const savedId = localStorage.getItem(PROVIDER_PREFERENCE_KEY);
     if (!savedId) return null;
 
     const provider = IDENTITY_PROVIDERS.find(p => p.id === savedId);
-    return provider ?? null;
+    
+    if (!provider) {
+      // Clear invalid preference
+      localStorage.removeItem(PROVIDER_PREFERENCE_KEY);
+      return null;
+    }
+
+    return provider;
   } catch (error) {
     console.error('Failed to get preferred provider:', error);
     return null;
