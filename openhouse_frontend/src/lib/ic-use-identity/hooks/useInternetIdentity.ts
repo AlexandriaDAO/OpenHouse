@@ -3,11 +3,11 @@ import { DelegationIdentity, isDelegationValid } from "@dfinity/identity";
 import { store } from "../store";
 import { setError, setIdentity } from "../store/mutators";
 import type { InternetIdentityContext, LoginOptions } from "../types";
+import { type IdentityProviderConfig, DEFAULT_PROVIDER } from "../config/identityProviders";
 
 const ONE_HOUR_IN_NANOSECONDS = BigInt(3_600_000_000_000);
-const DEFAULT_IDENTITY_PROVIDER = "https://identity.ic0.app";
 
-function login(loginOptions?: LoginOptions): void {
+function login(loginOptions?: LoginOptions, providerConfig?: IdentityProviderConfig): void {
   const context = store.getSnapshot().context;
 
   if (!context.providerComponentPresent) {
@@ -31,8 +31,10 @@ function login(loginOptions?: LoginOptions): void {
     return;
   }
 
+  const provider = providerConfig ?? DEFAULT_PROVIDER;
+
   const options: AuthClientLoginOptions = {
-    identityProvider: DEFAULT_IDENTITY_PROVIDER,
+    identityProvider: provider.url,
     onSuccess: onLoginSuccess,
     onError: onLoginError,
     maxTimeToLive: ONE_HOUR_IN_NANOSECONDS,
