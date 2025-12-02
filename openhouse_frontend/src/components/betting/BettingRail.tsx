@@ -202,46 +202,91 @@ export function BettingRail(props: any) {
 
       {/* MOBILE LAYOUT */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-50">
+        {/* Floating chip stack area - positioned above rail with proper spacing */}
         <div className="mobile-floating-area">
           <div className="mobile-chip-stack">
             <ChipStack
               amount={betAmount}
               onRemoveChip={removeChip}
               disabled={disabled}
-              maxChipsPerPile={5}
+              maxChipsPerPile={4}
+              scale={0.7}
             />
-          </div>
-          <div className="mobile-bet-display">
-            <span className="amount">${betAmount.toFixed(2)}</span>
-            <button onClick={setMaxBet} disabled={disabled || atMax} className="mobile-max-btn">MAX</button>
           </div>
         </div>
 
+        {/* Mobile rail with horizon line */}
         <div className={`betting-rail-mobile rail-theme--${railStyle}`}>
-          <div className="mobile-rail-grid">
-            <div className="mobile-row-chips">
-              <div className="mobile-chips-scroll">
-                <ChipSelector
-                  onAddChip={addChip}
-                  canAddChip={canAddChip}
-                  disabled={disabled}
-                  size="sm"
-                />
-              </div>
-              <button
-                onClick={deposit.openModal}
-                className="icon-btn icon-btn--deposit-mobile"
-                title="Buy Chips"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                  <path d="M12 5v14M5 12h14"/>
-                </svg>
-              </button>
-            </div>
+          {/* Horizon line - the curved table edge */}
+          <div className="mobile-horizon-line" />
 
-            <div className="mobile-row-bottom">
-              <CompactBalances />
-              <ActionRow />
+          <div className="mobile-rail-grid">
+            {/* Two column layout */}
+            <div className="mobile-two-columns">
+              {/* LEFT COLUMN: Action buttons on top, balances below */}
+              <div className="mobile-col-left">
+                <div className="mobile-action-buttons">
+                  <button
+                    onClick={deposit.openModal}
+                    className={`mobile-icon-btn mobile-icon-btn--deposit ${showDepositAnimation ? 'deposit-pulse' : ''}`}
+                    title="Buy Chips"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                      <path d="M12 5v14M5 12h14"/>
+                    </svg>
+                  </button>
+                  <button
+                    onClick={handleCashOutClick}
+                    disabled={deposit.isWithdrawing || gameBalance === 0n}
+                    className="mobile-icon-btn mobile-icon-btn--withdraw"
+                    title="Cash Out"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                      <path d="M5 12h14"/>
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => navigate(isLiquidityRoute ? '/dice' : '/dice/liquidity')}
+                    className="mobile-icon-btn mobile-icon-btn--house"
+                    title={isLiquidityRoute ? 'Play Game' : 'Be The House'}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M3 12l9-9 9 9"/>
+                      <path d="M5 10v10a1 1 0 001 1h12a1 1 0 001-1V10"/>
+                    </svg>
+                  </button>
+                </div>
+                <CompactBalances />
+              </div>
+
+              {/* RIGHT COLUMN: Bet display on top, chip selector below */}
+              <div className="mobile-col-right">
+                <div className="mobile-bet-display">
+                  <button
+                    onClick={clearBet}
+                    disabled={disabled || betAmount === 0}
+                    className="mobile-clr-btn"
+                  >
+                    CLR
+                  </button>
+                  <span className="amount">${betAmount.toFixed(2)}</span>
+                  <button
+                    onClick={setMaxBet}
+                    disabled={disabled || atMax}
+                    className="mobile-max-btn"
+                  >
+                    MAX
+                  </button>
+                </div>
+                <div className="mobile-chips-scroll">
+                  <ChipSelector
+                    onAddChip={addChip}
+                    canAddChip={canAddChip}
+                    disabled={disabled}
+                    size="xs"
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </div>

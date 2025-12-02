@@ -2,18 +2,24 @@ import { useMemo, useCallback } from 'react';
 import { decomposeIntoChips, ChipDenomination } from '../game-specific/dice/chipConfig';
 import { ChipStackProps } from './types';
 
-// Chip stack dimensions (could move to CSS variables if needed)
-const CHIP_WIDTH = 80;
-const CHIP_HEIGHT = 40;
-const STACK_OFFSET = 6; // Vertical spacing between chips in a pile
-const PILE_OVERLAP = -12; // Horizontal overlap between piles
+// Base chip stack dimensions (desktop)
+const BASE_CHIP_WIDTH = 80;
+const BASE_CHIP_HEIGHT = 40;
+const BASE_STACK_OFFSET = 6; // Vertical spacing between chips in a pile
+const BASE_PILE_OVERLAP = -12; // Horizontal overlap between piles
 
 export function ChipStack({
   amount,
   onRemoveChip,
   disabled = false,
   maxChipsPerPile = 12,
-}: ChipStackProps) {
+  scale = 1, // Scale factor for responsive sizing (0.5 = half size)
+}: ChipStackProps & { scale?: number }) {
+  // Apply scale to all dimensions
+  const CHIP_WIDTH = BASE_CHIP_WIDTH * scale;
+  const CHIP_HEIGHT = BASE_CHIP_HEIGHT * scale;
+  const STACK_OFFSET = BASE_STACK_OFFSET * scale;
+  const PILE_OVERLAP = BASE_PILE_OVERLAP * scale;
   // Decompose amount into chip counts
   const chipData = useMemo(() => decomposeIntoChips(amount), [amount]);
 

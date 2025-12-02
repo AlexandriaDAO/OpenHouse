@@ -411,130 +411,224 @@
 
 .betting-rail-mobile {
   background: linear-gradient(180deg, #1a1d21 0%, #0a0b0c 100%);
-  border-top: 1px solid rgba(255,255,255,0.1);
-  padding: 10px 12px;
-  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  padding: 8px 10px;
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
+  position: relative;
+  overflow: visible;
 }
 
+/* Horizon line - curved table edge */
+.mobile-horizon-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.6) 20%,
+    rgba(255, 255, 255, 0.9) 50%,
+    rgba(255, 255, 255, 0.6) 80%,
+    transparent 100%
+  );
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
+}
+
+/* For neon theme, make horizon more prominent */
+.rail-theme--neon .mobile-horizon-line {
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.8) 20%,
+    #ffffff 50%,
+    rgba(255, 255, 255, 0.8) 80%,
+    transparent 100%
+  );
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.5);
+}
+
+/* Floating area - positioned above rail with proper clearance */
 .mobile-floating-area {
   display: flex;
   flex-direction: column;
   align-items: center;
-  margin-bottom: 6px;
+  justify-content: flex-end;
   pointer-events: none;
+  padding-bottom: 8px;
+  min-height: 36px; /* Reserve space even when chips are small */
 }
 
 .mobile-chip-stack {
   pointer-events: auto;
-  margin-bottom: 4px;
 }
 
-.mobile-bet-display {
-  pointer-events: auto;
-  background: rgba(0,0,0,0.7);
-  backdrop-filter: blur(8px);
-  padding: 4px 12px;
-  border-radius: 16px;
-  border: 1px solid rgba(255,255,255,0.1);
+/* Mobile rail grid */
+.mobile-rail-grid {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Two column layout for mobile */
+.mobile-two-columns {
+  display: flex;
+  justify-content: space-between;
+  align-items: stretch;
+  gap: 12px;
+}
+
+/* Left column: action buttons + balances */
+.mobile-col-left {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+/* Right column: bet display + chip selector */
+.mobile-col-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+/* Action buttons */
+.mobile-action-buttons {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 5px;
+}
+
+.mobile-icon-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1.5px solid;
+}
+
+.mobile-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Deposit (+) - Green */
+.mobile-icon-btn--deposit {
+  background: var(--rail-accent);
+  border-color: var(--rail-accent);
+  color: #000;
+}
+
+.mobile-icon-btn--deposit:hover:not(:disabled) {
+  background: #16a34a;
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
+}
+
+/* Withdraw (-) - Red */
+.mobile-icon-btn--withdraw {
+  background: transparent;
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+.mobile-icon-btn--withdraw:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.15);
+}
+
+/* House - White */
+.mobile-icon-btn--house {
+  background: transparent;
+  border-color: #ffffff;
+  color: #ffffff;
+}
+
+.mobile-icon-btn--house:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Bet display pill */
+.mobile-bet-display {
+  pointer-events: auto;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  padding: 5px 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .mobile-bet-display .amount {
   font-family: 'Roboto Mono', monospace;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   color: #fff;
+  min-width: 50px;
+  text-align: center;
+}
+
+.mobile-clr-btn,
+.mobile-max-btn {
+  background: none;
+  border: none;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.mobile-clr-btn {
+  color: #ef4444;
+}
+
+.mobile-clr-btn:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.2);
 }
 
 .mobile-max-btn {
-  background: rgba(255,255,255,0.1);
-  border: none;
-  color: #9ca3af;
-  font-size: 10px;
-  font-weight: 700;
-  padding: 2px 6px;
-  border-radius: 4px;
-  cursor: pointer;
+  color: var(--rail-accent);
 }
 
+.mobile-max-btn:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.2);
+}
+
+.mobile-clr-btn:disabled,
 .mobile-max-btn:disabled {
-  opacity: 0.4;
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
-.mobile-rail-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.mobile-row-chips {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
+/* Chip selector scroll area */
 .mobile-chips-scroll {
   display: flex;
-  justify-content: center;
+  justify-content: flex-end;
   overflow-x: auto;
 }
 
-.icon-btn--deposit-mobile {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: var(--rail-accent);
-  border: none;
-  color: #000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.mobile-row-bottom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
 /* Mobile balance adjustments */
-.mobile-row-bottom .compact-balances {
-  flex-direction: row;
-  gap: 12px;
+.mobile-col-left .compact-balances {
+  flex-direction: column;
+  gap: 2px;
 }
 
-.mobile-row-bottom .compact-balances .refresh-btn-top {
-  margin-bottom: 0;
+.mobile-col-left .compact-balances .refresh-btn-top {
+  display: none; /* Hide on mobile to save space */
 }
 
-.mobile-row-bottom .balance-row {
+.mobile-col-left .balance-row {
   font-size: 10px;
 }
 
-.mobile-row-bottom .balance-label {
+.mobile-col-left .balance-label {
   font-size: 8px;
-  width: auto;
-  margin-right: 4px;
-}
-
-/* Mobile action row adjustments */
-.mobile-row-bottom .action-row {
-  gap: 4px;
-}
-
-.mobile-row-bottom .action-row .icon-btn {
-  width: 28px;
-  height: 28px;
-}
-
-.mobile-row-bottom .action-row .icon-btn svg {
-  width: 14px;
-  height: 14px;
+  width: 38px;
 }
 
 /* ==========================================================================
