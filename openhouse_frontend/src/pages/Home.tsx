@@ -1,5 +1,6 @@
 import React from 'react';
 import { GameCard } from '../components/GameCard';
+import { OnboardingBanner } from '../components/OnboardingBanner';
 import { GameInfo } from '../types';
 
 const games: GameInfo[] = [
@@ -47,10 +48,13 @@ const games: GameInfo[] = [
 
 export const Home: React.FC = () => {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-      {games.map((game) => (
-        <GameCard key={game.id} game={game} />
-      ))}
+    <div>
+      <OnboardingBanner context="home" />
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {games.map((game) => (
+          <GameCard key={game.id} game={game} />
+        ))}
+      </div>
     </div>
   );
 };

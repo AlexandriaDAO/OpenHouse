@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   IDENTITY_PROVIDERS,
   type IdentityProviderConfig
@@ -40,7 +40,6 @@ export const AuthMethodSelector: React.FC<AuthMethodSelectorProps> = ({
   onSelect,
   onCancel
 }) => {
-  const [showInfo, setShowInfo] = useState(false);
   const classicProvider = IDENTITY_PROVIDERS.find(p => p.id === 'classic')!;
   const v2Provider = IDENTITY_PROVIDERS.find(p => p.id === 'v2')!;
 
@@ -74,41 +73,6 @@ export const AuthMethodSelector: React.FC<AuthMethodSelectorProps> = ({
             <img src="/images/ic.svg" alt="Internet Identity" className="w-5 h-5" />
             <span className="text-sm font-medium">Internet Identity (Legacy)</span>
           </button>
-        </div>
-
-        {/* What is this? expandable section */}
-        <div className="mt-6 pt-4 border-t border-white/10">
-          <button
-            onClick={() => setShowInfo(!showInfo)}
-            className="w-full flex items-center justify-center gap-2 text-sm text-gray-400 hover:text-white transition-colors"
-          >
-            <span>What is this?</span>
-            <svg
-              className={`w-4 h-4 transition-transform ${showInfo ? 'rotate-180' : ''}`}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-
-          {showInfo && (
-            <div className="mt-4 p-4 rounded-lg bg-white/5 text-sm text-gray-300 space-y-3">
-              <p>
-                <strong className="text-white">100% On-Chain.</strong> This entire site is hosted on the Internet Computer blockchain. No traditional servers.
-              </p>
-              <p>
-                <strong className="text-white">Smart Contract Powered.</strong> All game logic runs in tamper-proof smart contracts with verifiable randomness.
-              </p>
-              <p>
-                <strong className="text-white">Blockchain Identity.</strong> No passwords or emails. Your identity is cryptographically secured and owned by you.
-              </p>
-              <p>
-                <strong className="text-white">Transparent Odds.</strong> All code is open source. The house edge is exactly what we say it is.
-              </p>
-            </div>
-          )}
         </div>
 
         {onCancel && (

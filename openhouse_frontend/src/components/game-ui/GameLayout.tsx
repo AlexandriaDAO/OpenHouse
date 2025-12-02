@@ -1,4 +1,5 @@
 import React, { ReactNode } from 'react';
+import { OnboardingBanner } from '../OnboardingBanner';
 
 interface GameLayoutProps {
   title?: string;
@@ -33,6 +34,9 @@ export const GameLayout: React.FC<GameLayoutProps> = ({
           {description && <p className="text-gray-400">{description}</p>}
         </div>
       )}
+
+      {/* Onboarding Banner - shows login/deposit prompts */}
+      <OnboardingBanner context="game" />
 
       {/* Game Content */}
       <div className={noScroll ? "flex-1 flex flex-col min-h-0" : ""}>
