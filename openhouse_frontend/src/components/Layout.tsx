@@ -38,7 +38,15 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                 <span className="text-dfinity-turquoise">Learn more</span>
               </button>
             </div>
-            <AuthButton />
+            <div className="flex items-center gap-3">
+              <Link
+                to="/send"
+                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-pure-white text-sm font-medium rounded border border-pure-white/10 transition-colors"
+              >
+                Send
+              </Link>
+              <AuthButton />
+            </div>
           </div>
         </div>
       </header>
