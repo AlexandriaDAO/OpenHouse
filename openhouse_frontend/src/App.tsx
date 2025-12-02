@@ -11,6 +11,7 @@ import { Plinko } from './pages/Plinko';
 import { Crash } from './pages/Crash';
 import { Blackjack } from './pages/Blackjack';
 import { Admin } from './pages/Admin';
+import { Send } from './pages/Send';
 
 function App() {
   return (
@@ -30,6 +31,7 @@ function App() {
                   <Route path="/plinko" element={<Plinko />} />
                   <Route path="/crash" element={<Crash />} />
                   <Route path="/blackjack" element={<Blackjack />} />
+                  <Route path="/send" element={<Send />} />
                   <Route path="/admin" element={<Admin />} />
                 </Routes>
               </Layout>
