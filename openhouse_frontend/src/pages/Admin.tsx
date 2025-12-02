@@ -1,90 +1,154 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import useDiceActor from '../hooks/actors/useDiceActor';
-import { 
-  HealthCheck, 
-  PendingWithdrawalInfo, 
-  OrphanedFundsReport, 
-  UserBalance, 
-  LPPositionInfo 
+import usePlinkoActor from '../hooks/actors/usePlinkoActor';
+import {
+  HealthCheck,
+  PendingWithdrawalInfo,
+  OrphanedFundsReport,
+  UserBalance,
+  LPPositionInfo
 } from '../declarations/dice_backend/dice_backend.did';
 import { useAuth } from '../providers/AuthProvider';
 
 const ADMIN_PRINCIPAL = 'p7336-jmpo5-pkjsf-7dqkd-ea3zu-g2ror-ctcn2-sxtuo-tjve3-ulrx7-wae';
+const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds
 
-// Helper to format ckUSDT (6 decimals) to readable string
+// Helper functions
 const formatUSDT = (amount: bigint | number): string => {
   const val = typeof amount === 'bigint' ? Number(amount) : amount;
   return (val / 1_000_000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 });
 };
 
-const formatDate = (ns: bigint): string => {
-  return new Date(Number(ns) / 1_000_000).toLocaleString();
-};
+function formatTimeAgo(timestamp: bigint | Date): string {
+  // Convert bigint nanoseconds to Date if needed
+  const date = timestamp instanceof Date
+    ? timestamp
+    : new Date(Number(timestamp) / 1_000_000);
+
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
+}
+
+function truncatePrincipal(principal: string, length: number = 8): string {
+  if (principal.length <= length + 3) return principal;
+  return principal.slice(0, length) + '...';
+}
+
+interface GameHealthData {
+  health: HealthCheck | null;
+  pendingWithdrawals: PendingWithdrawalInfo[];
+  orphanedReport: OrphanedFundsReport | null;
+  userBalances: UserBalance[];
+  lpPositions: LPPositionInfo[];
+  error: string | null;
+}
+
+// Extended withdrawal info to include game name
+interface UnifiedPendingWithdrawal extends PendingWithdrawalInfo {
+  game: string;
+}
 
 export const Admin: React.FC = () => {
-  const { actor } = useDiceActor();
+  const { actor: diceActor } = useDiceActor();
+  const { actor: plinkoActor } = usePlinkoActor();
   const { principal, isAuthenticated } = useAuth();
-  
-  const [activeTab, setActiveTab] = useState<'health' | 'withdrawals' | 'orphaned' | 'balances'>('health');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  // Data States
-  const [health, setHealth] = useState<HealthCheck | null>(null);
-  const [pendingWithdrawals, setPendingWithdrawals] = useState<PendingWithdrawalInfo[]>([]);
-  const [orphanedReport, setOrphanedReport] = useState<OrphanedFundsReport | null>(null);
-  const [userBalances, setUserBalances] = useState<UserBalance[]>([]);
-  const [lpPositions, setLpPositions] = useState<LPPositionInfo[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+
+  // Separate state for each game
+  const [diceData, setDiceData] = useState<GameHealthData>({
+    health: null, pendingWithdrawals: [], orphanedReport: null,
+    userBalances: [], lpPositions: [], error: null
+  });
+
+  const [plinkoData, setPlinkoData] = useState<GameHealthData>({
+    health: null, pendingWithdrawals: [], orphanedReport: null,
+    userBalances: [], lpPositions: [], error: null
+  });
 
   const isAdmin = principal === ADMIN_PRINCIPAL;
 
-  const fetchData = useCallback(async () => {
-    // Wait for both actor AND full authentication before making admin calls
-    if (!actor || !isAdmin || !isAuthenticated) return;
-    setLoading(true);
-    setError(null);
+  // Fetch data from a specific game backend
+  const fetchGameData = async (
+    actor: any,
+    setData: React.Dispatch<React.SetStateAction<GameHealthData>>,
+    gameName: string
+  ) => {
+    if (!actor) return;
 
     try {
-      // Always fetch health
+      // Always fetch health check
       const healthRes = await actor.admin_health_check();
-      if ('Ok' in healthRes) setHealth(healthRes.Ok);
-      else throw new Error(healthRes.Err);
+      if ('Err' in healthRes) throw new Error(healthRes.Err);
 
-      // Fetch other data based on active tab
-      if (activeTab === 'withdrawals') {
-        const withdrawRes = await actor.admin_get_all_pending_withdrawals();
-        if ('Ok' in withdrawRes) setPendingWithdrawals(withdrawRes.Ok);
-        else console.error("Failed to fetch withdrawals:", withdrawRes.Err);
-      } 
-      else if (activeTab === 'orphaned') {
-        const orphanRes = await actor.admin_get_orphaned_funds_report();
-        if ('Ok' in orphanRes) setOrphanedReport(orphanRes.Ok);
-        else console.error("Failed to fetch orphaned report:", orphanRes.Err);
-      }
-      else if (activeTab === 'balances') {
-        // Fetch top 50 balances and LP positions
-        // Note: BigInt literals require "n" suffix or BigInt() constructor
-        const balancesRes = await actor.admin_get_all_balances(BigInt(0), BigInt(50));
-        if ('Ok' in balancesRes) setUserBalances(balancesRes.Ok);
-        
-        const lpRes = await actor.admin_get_all_lp_positions(BigInt(0), BigInt(50));
-        if ('Ok' in lpRes) setLpPositions(lpRes.Ok);
-      }
+      // Try to fetch all other data (gracefully handle missing methods)
+      let pending: PendingWithdrawalInfo[] = [];
+      let orphaned: OrphanedFundsReport | null = null;
+      let balances: UserBalance[] = [];
+      let lps: LPPositionInfo[] = [];
+
+      try {
+        const pendingRes = await actor.admin_get_all_pending_withdrawals?.();
+        if (pendingRes && 'Ok' in pendingRes) pending = pendingRes.Ok;
+      } catch (e) { console.warn(`${gameName} missing pending withdrawals API`) }
+
+      try {
+        const orphanedRes = await actor.admin_get_orphaned_funds_report?.();
+        if (orphanedRes && 'Ok' in orphanedRes) orphaned = orphanedRes.Ok;
+      } catch (e) { console.warn(`${gameName} missing orphaned funds API`) }
+
+      try {
+        const balanceRes = await actor.admin_get_all_balances?.(BigInt(0), BigInt(50));
+        if (balanceRes && 'Ok' in balanceRes) balances = balanceRes.Ok;
+      } catch (e) { console.warn(`${gameName} missing balances API`) }
+
+      try {
+        const lpRes = await actor.admin_get_all_lp_positions?.(BigInt(0), BigInt(50));
+        if (lpRes && 'Ok' in lpRes) lps = lpRes.Ok;
+      } catch (e) { console.warn(`${gameName} missing LP positions API`) }
+
+      setData({
+        health: 'Ok' in healthRes ? healthRes.Ok : null,
+        pendingWithdrawals: pending,
+        orphanedReport: orphaned,
+        userBalances: balances,
+        lpPositions: lps,
+        error: null
+      });
     } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
+      setData(prev => ({ ...prev, error: String(e) }));
     }
-  }, [actor, isAdmin, isAuthenticated, activeTab]);
+  };
 
+  // Fetch all game data in parallel
+  const fetchAllData = useCallback(async () => {
+    if (!isAdmin || !isAuthenticated) return;
+    setLoading(true);
+
+    await Promise.all([
+      fetchGameData(diceActor, setDiceData, 'Dice'),
+      fetchGameData(plinkoActor, setPlinkoData, 'Plinko'),
+    ]);
+
+    setLastRefresh(new Date());
+    setLoading(false);
+  }, [diceActor, plinkoActor, isAdmin, isAuthenticated]);
+
+  // Initial fetch + auto-refresh
   useEffect(() => {
-    if (actor && isAdmin && isAuthenticated) {
-      fetchData();
+    if (isAdmin && isAuthenticated) {
+      fetchAllData();
+      const interval = setInterval(fetchAllData, AUTO_REFRESH_INTERVAL);
+      return () => clearInterval(interval);
     }
-  }, [fetchData]);
+  }, [fetchAllData, isAdmin, isAuthenticated]);
 
-  if (!actor) return <div className="p-8 text-white">Initializing actor...</div>;
-
+  // Access control
   if (!isAdmin) {
     return (
       <div className="min-h-screen bg-gray-900 text-white p-8 flex items-center justify-center">
@@ -103,259 +167,366 @@ export const Admin: React.FC = () => {
     );
   }
 
+  // Calculate platform-wide metrics
+  const totalTVL = (diceData.health?.pool_reserve || 0n) +
+                   (plinkoData.health?.pool_reserve || 0n);
+  const activeGames = [diceData.health, plinkoData.health].filter(h => h).length;
+  const overallHealthy = [diceData.health, plinkoData.health]
+    .every(h => !h || h.is_healthy);
+
+  // Combine pending withdrawals from all games
+  const allPendingWithdrawals: UnifiedPendingWithdrawal[] = [
+    ...diceData.pendingWithdrawals.map(w => ({ ...w, game: 'Dice' })),
+    ...plinkoData.pendingWithdrawals.map(w => ({ ...w, game: 'Plinko' })),
+  ].sort((a, b) => Number(b.created_at - a.created_at)); // Most recent first
+
+  // Combine top balances (merge and re-sort)
+  const allUserBalances = [
+    ...diceData.userBalances,
+    ...plinkoData.userBalances,
+  ].sort((a, b) => Number(b.balance - a.balance)).slice(0, 10);
+
+  const allLpPositions = [
+    ...diceData.lpPositions,
+    ...plinkoData.lpPositions,
+  ].sort((a, b) => Number(b.shares - a.shares)).slice(0, 10);
+
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8">
+    <div className="min-h-screen bg-gray-900 text-white p-6">
+      {/* Header */}
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold">Admin Dashboard</h1>
-        <button
-          onClick={fetchData}
-          disabled={loading}
-          className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded disabled:opacity-50 transition-colors"
-        >
-          {loading ? 'Refreshing...' : 'Refresh Data'}
+        <div>
+          <h1 className="text-3xl font-bold">Admin Dashboard</h1>
+          {lastRefresh && (
+            <p className="text-sm text-gray-400 mt-1">
+              Last updated: {formatTimeAgo(lastRefresh)} • Auto-refresh: 30s
+            </p>
+          )}
+        </div>
+        <button onClick={fetchAllData} disabled={loading}
+          className="bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded">
+          {loading ? 'Refreshing...' : 'Refresh Now'}
         </button>
       </div>
 
-      {error && (
-        <div className="bg-red-900/50 border border-red-500 p-4 rounded mb-6">
-          <h3 className="font-bold text-red-400">Error</h3>
-          <p>{error}</p>
-        </div>
-      )}
-
-      {/* Tabs */}
-      <div className="flex space-x-4 mb-6 border-b border-gray-700">
-        {(['health', 'withdrawals', 'orphaned', 'balances'] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`pb-2 px-4 capitalize ${
-              activeTab === tab
-                ? 'border-b-2 border-white text-white font-semibold'
-                : 'text-gray-400 hover:text-gray-200'
-            }`}
-          >
-            {tab}
-          </button>
-        ))}
-      </div>
-
-      {/* Content */}
-      {activeTab === 'health' && health && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {/* System Status */}
-          <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
-            <h2 className="text-xl font-semibold mb-4 text-gray-300">System Status</h2>
-            <div className={`text-2xl font-bold mb-2 ${health.is_healthy ? 'text-green-400' : 'text-red-400'}`}>
-              {health.is_healthy ? 'HEALTHY' : 'UNHEALTHY'}
-            </div>
-            <div className="text-gray-400 text-sm mb-3">{health.health_status}</div>
-            <div className="text-xs text-gray-500">
-              Last checked: {formatDate(health.timestamp)}
+      {/* SECTION 1: Platform Overview */}
+      <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6">
+        <h2 className="text-lg font-semibold mb-3 text-gray-300">Platform Overview</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+          <div className="bg-gray-900/50 p-3 rounded">
+            <div className="text-gray-400 text-xs mb-1">Total Value Locked</div>
+            <div className="text-2xl font-mono text-white">${formatUSDT(totalTVL)}</div>
+          </div>
+          <div className="bg-gray-900/50 p-3 rounded">
+            <div className="text-gray-400 text-xs mb-1">Active Games</div>
+            <div className="text-2xl font-mono text-white">{activeGames}/4</div>
+            <div className="text-xs text-gray-500 mt-1">Dice, Plinko operational</div>
+          </div>
+          <div className="bg-gray-900/50 p-3 rounded">
+            <div className="text-gray-400 text-xs mb-1">Platform Status</div>
+            <div className={`text-2xl font-bold ${overallHealthy ? 'text-green-400' : 'text-red-400'}`}>
+              {overallHealthy ? 'HEALTHY ✓' : 'ISSUES ⚠️'}
             </div>
           </div>
+        </div>
+      </div>
 
-          {/* Financial Overview */}
-          <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
-            <h2 className="text-xl font-semibold mb-4 text-gray-300">Financials</h2>
-            <div className="space-y-3 text-sm">
+      {/* SECTION 2: Game Health Cards (Side by Side) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        {/* Dice Game Card */}
+        <GameHealthCard
+          gameName="Dice"
+          data={diceData}
+          canisterId="whchi-hyaaa-aaaao-a4ruq-cai"
+        />
+
+        {/* Plinko Game Card */}
+        <GameHealthCard
+          gameName="Plinko"
+          data={plinkoData}
+          canisterId="weupr-2qaaa-aaaap-abl3q-cai"
+        />
+      </div>
+
+      {/* SECTION 3: System Resources */}
+      <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6">
+        <h2 className="text-lg font-semibold mb-3 text-gray-300">System Resources</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+          <div className="bg-gray-900/50 p-3 rounded">
+            <div className="font-semibold text-blue-400 mb-2">Dice Backend</div>
+            <div className="space-y-1 text-xs">
               <div className="flex justify-between">
-                <span className="text-gray-400">Pool Reserve:</span>
-                <span className="font-mono">{formatUSDT(health.pool_reserve)} USDT</span>
+                <span className="text-gray-400">Heap Memory:</span>
+                <span className="font-mono">
+                  {diceData.health
+                    ? (Number(diceData.health.heap_memory_bytes) / 1024 / 1024).toFixed(2) + ' MB'
+                    : 'N/A'}
+                </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-400">User Deposits:</span>
-                <span className="font-mono">{formatUSDT(health.total_deposits)} USDT</span>
-              </div>
-              <div className="flex justify-between text-gray-300">
-                <span className="text-gray-400">Pending Withdrawals:</span>
-                <span className="font-mono">{formatUSDT(health.pending_withdrawals_total_amount)} USDT</span>
-              </div>
-              <div className="flex justify-between border-t border-gray-700 pt-2">
-                <span className="text-gray-400">Required Total:</span>
-                <span className="font-mono">{formatUSDT(health.calculated_total)} USDT</span>
-              </div>
-              <div className="flex justify-between text-yellow-400">
-                <span>Canister Balance:</span>
-                <span className="font-mono">{formatUSDT(health.canister_balance)} USDT</span>
-              </div>
-              <div className="flex justify-between pt-2 border-t border-gray-700">
-                <span className="text-gray-400">Excess:</span>
-                <span className={`font-mono ${Number(health.excess) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {formatUSDT(health.excess)} USDT
+                <span className="text-gray-400">Stable Memory:</span>
+                <span className="font-mono">
+                  {diceData.health?.stable_memory_pages?.toString() || 'N/A'} pages
                 </span>
               </div>
             </div>
           </div>
 
-          {/* Operational Metrics */}
-          <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
-            <h2 className="text-xl font-semibold mb-4 text-gray-300">Operational Metrics</h2>
-            <div className="space-y-3 text-sm">
-              <div className="flex justify-between">
-                <span className="text-gray-400">Pending Withdrawals:</span>
-                <span className="font-mono text-white">{health.pending_withdrawals_count.toString()}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Unique Users:</span>
-                <span className="font-mono text-white">{health.unique_users.toString()}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Unique LPs:</span>
-                <span className="font-mono text-white">{health.unique_lps.toString()}</span>
-              </div>
+          <div className="bg-gray-900/50 p-3 rounded">
+            <div className="font-semibold text-purple-400 mb-2">Plinko Backend</div>
+            <div className="space-y-1 text-xs">
               <div className="flex justify-between">
                 <span className="text-gray-400">Heap Memory:</span>
-                <span className="font-mono text-white">{(Number(health.heap_memory_bytes) / 1024 / 1024).toFixed(2)} MB</span>
+                <span className="font-mono">
+                  {plinkoData.health
+                    ? (Number(plinkoData.health.heap_memory_bytes) / 1024 / 1024).toFixed(2) + ' MB'
+                    : 'N/A'}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-400">Stable Memory:</span>
-                <span className="font-mono text-white">{health.stable_memory_pages.toString()} Pages</span>
+                <span className="font-mono">
+                  {plinkoData.health?.stable_memory_pages?.toString() || 'N/A'} pages
+                </span>
               </div>
             </div>
           </div>
         </div>
-      )}
+      </div>
 
-      {activeTab === 'withdrawals' && (
-        <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+      {/* SECTION 4: Pending Withdrawals (All Games Combined) */}
+      <div className="bg-gray-800 border border-gray-700 rounded-lg mb-6 overflow-hidden">
+        <div className="p-4 border-b border-gray-700 flex justify-between items-center">
+          <h2 className="text-lg font-semibold text-gray-300">
+            Pending Withdrawals ({allPendingWithdrawals.length})
+          </h2>
+          <div className="text-sm text-gray-400">
+            Dice: {diceData.pendingWithdrawals.length} • Plinko: {plinkoData.pendingWithdrawals.length}
+          </div>
+        </div>
+        {allPendingWithdrawals.length === 0 ? (
+          <div className="p-8 text-center text-gray-500">No pending withdrawals</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-xs text-gray-400 uppercase bg-gray-700/50">
+                <tr>
+                  <th className="px-4 py-3 text-left">User</th>
+                  <th className="px-4 py-3 text-left">Game</th>
+                  <th className="px-4 py-3 text-left">Type</th>
+                  <th className="px-4 py-3 text-right">Amount</th>
+                  <th className="px-4 py-3 text-right">Created</th>
+                </tr>
+              </thead>
+              <tbody className="text-gray-400">
+                {allPendingWithdrawals.map((w, i) => (
+                  <tr key={i} className="border-b border-gray-700 hover:bg-gray-700/30">
+                    <td className="px-4 py-3 font-mono text-xs" title={w.user.toString()}>
+                      {truncatePrincipal(w.user.toString())}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                        w.game === 'Dice' ? 'bg-blue-900/30 text-blue-400' : 'bg-purple-900/30 text-purple-400'
+                      }`}>
+                        {w.game}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">{w.withdrawal_type}</td>
+                    <td className="px-4 py-3 text-right font-mono text-white">
+                      {formatUSDT(w.amount)} USDT
+                    </td>
+                    <td className="px-4 py-3 text-right">{formatTimeAgo(w.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* SECTION 5: Orphaned Funds Summary */}
+      <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6">
+        <h2 className="text-lg font-semibold mb-3 text-gray-300">Orphaned Funds</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <OrphanedFundsCard gameName="Dice" report={diceData.orphanedReport} />
+          <OrphanedFundsCard gameName="Plinko" report={plinkoData.orphanedReport} />
+        </div>
+      </div>
+
+      {/* SECTION 6: Top Balances & LP Positions */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Top User Balances (All Games) */}
+        <div className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
           <div className="p-4 border-b border-gray-700">
-            <h2 className="text-xl font-semibold text-gray-300">Pending Withdrawals ({pendingWithdrawals.length})</h2>
+            <h2 className="text-lg font-semibold text-gray-300">Top User Balances</h2>
+            <p className="text-xs text-gray-500 mt-1">Combined across all games</p>
           </div>
-          {pendingWithdrawals.length === 0 ? (
-            <div className="p-8 text-center text-gray-500">No pending withdrawals found.</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm text-left text-gray-400">
-                <thead className="text-xs text-gray-400 uppercase bg-gray-700/50">
-                  <tr>
-                    <th className="px-6 py-3">User Principal</th>
-                    <th className="px-6 py-3">Type</th>
-                    <th className="px-6 py-3 text-right">Amount</th>
-                    <th className="px-6 py-3 text-right">Created At</th>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-xs text-gray-400 uppercase bg-gray-700/50">
+                <tr>
+                  <th className="px-4 py-3 text-left">User</th>
+                  <th className="px-4 py-3 text-right">Balance</th>
+                </tr>
+              </thead>
+              <tbody className="text-gray-400">
+                {allUserBalances.length === 0 ? (
+                  <tr><td colSpan={2} className="px-4 py-4 text-center">No balances</td></tr>
+                ) : allUserBalances.map((u, i) => (
+                  <tr key={i} className="border-b border-gray-700 hover:bg-gray-700/30">
+                    <td className="px-4 py-3 font-mono text-xs" title={u.user.toString()}>
+                      {truncatePrincipal(u.user.toString())}
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono text-white">
+                      {formatUSDT(u.balance)} USDT
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {pendingWithdrawals.map((w, i) => (
-                    <tr key={i} className="border-b border-gray-700 hover:bg-gray-700/30">
-                      <td className="px-6 py-4 font-mono text-xs">{w.user.toString()}</td>
-                      <td className="px-6 py-4">{w.withdrawal_type}</td>
-                      <td className="px-6 py-4 text-right font-mono text-white">{formatUSDT(w.amount)} USDT</td>
-                      <td className="px-6 py-4 text-right">{formatDate(w.created_at)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {activeTab === 'orphaned' && orphanedReport && (
-        <div className="space-y-6">
-          <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
-             <h2 className="text-xl font-semibold mb-4 text-gray-300">Orphaned Funds Summary</h2>
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-               <div className="bg-gray-900/50 p-4 rounded">
-                 <div className="text-gray-400 text-sm mb-1">Total Abandoned Amount</div>
-                 <div className="text-2xl font-mono text-yellow-500">{formatUSDT(orphanedReport.total_abandoned_amount)} USDT</div>
-               </div>
-               <div className="bg-gray-900/50 p-4 rounded">
-                 <div className="text-gray-400 text-sm mb-1">Abandoned Count</div>
-                 <div className="text-2xl font-mono text-white">{orphanedReport.abandoned_count.toString()}</div>
-               </div>
-             </div>
-          </div>
-
-          <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
-            <div className="p-4 border-b border-gray-700">
-              <h2 className="text-lg font-semibold text-gray-300">Recent Abandonments (Last 50)</h2>
-            </div>
-            {orphanedReport.recent_abandonments.length === 0 ? (
-              <div className="p-8 text-center text-gray-500">No abandoned withdrawals found.</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left text-gray-400">
-                  <thead className="text-xs text-gray-400 uppercase bg-gray-700/50">
-                    <tr>
-                      <th className="px-6 py-3">User Principal</th>
-                      <th className="px-6 py-3 text-right">Amount Lost</th>
-                      <th className="px-6 py-3 text-right">Time</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {orphanedReport.recent_abandonments.map((entry, i) => (
-                      <tr key={i} className="border-b border-gray-700 hover:bg-gray-700/30">
-                        <td className="px-6 py-4 font-mono text-xs">{entry.user.toString()}</td>
-                        <td className="px-6 py-4 text-right font-mono text-yellow-500">{formatUSDT(entry.amount)} USDT</td>
-                        <td className="px-6 py-4 text-right">{formatDate(entry.timestamp)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
-      )}
 
-      {activeTab === 'balances' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-           {/* User Balances Table */}
-           <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
-            <div className="p-4 border-b border-gray-700">
-              <h2 className="text-lg font-semibold text-gray-300">Top User Balances (First 50)</h2>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm text-left text-gray-400">
-                <thead className="text-xs text-gray-400 uppercase bg-gray-700/50">
-                  <tr>
-                    <th className="px-6 py-3">User</th>
-                    <th className="px-6 py-3 text-right">Balance (USDT)</th>
+        {/* Top LP Positions (All Games) */}
+        <div className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
+          <div className="p-4 border-b border-gray-700">
+            <h2 className="text-lg font-semibold text-gray-300">Top LP Positions</h2>
+            <p className="text-xs text-gray-500 mt-1">Combined across all games</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-xs text-gray-400 uppercase bg-gray-700/50">
+                <tr>
+                  <th className="px-4 py-3 text-left">LP</th>
+                  <th className="px-4 py-3 text-right">Shares</th>
+                </tr>
+              </thead>
+              <tbody className="text-gray-400">
+                {allLpPositions.length === 0 ? (
+                  <tr><td colSpan={2} className="px-4 py-4 text-center">No LP positions</td></tr>
+                ) : allLpPositions.map((p, i) => (
+                  <tr key={i} className="border-b border-gray-700 hover:bg-gray-700/30">
+                    <td className="px-4 py-3 font-mono text-xs" title={p.user.toString()}>
+                      {truncatePrincipal(p.user.toString())}
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono text-white">
+                      {formatUSDT(p.shares)}
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {userBalances.length === 0 ? (
-                     <tr><td colSpan={2} className="px-6 py-4 text-center">No balances found</td></tr>
-                  ) : userBalances.map((u, i) => (
-                    <tr key={i} className="border-b border-gray-700 hover:bg-gray-700/30">
-                      <td className="px-6 py-4 font-mono text-xs truncate max-w-[150px]" title={u.user.toString()}>{u.user.toString()}</td>
-                      <td className="px-6 py-4 text-right font-mono text-white">{formatUSDT(u.balance)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-           </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
-           {/* LP Positions Table */}
-           <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
-            <div className="p-4 border-b border-gray-700">
-              <h2 className="text-lg font-semibold text-gray-300">Top LP Positions (First 50)</h2>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm text-left text-gray-400">
-                <thead className="text-xs text-gray-400 uppercase bg-gray-700/50">
-                  <tr>
-                    <th className="px-6 py-3">LP</th>
-                    <th className="px-6 py-3 text-right">Shares</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lpPositions.length === 0 ? (
-                     <tr><td colSpan={2} className="px-6 py-4 text-center">No LP positions found</td></tr>
-                  ) : lpPositions.map((p, i) => (
-                    <tr key={i} className="border-b border-gray-700 hover:bg-gray-700/30">
-                      <td className="px-6 py-4 font-mono text-xs truncate max-w-[150px]" title={p.user.toString()}>{p.user.toString()}</td>
-                      <td className="px-6 py-4 text-right font-mono text-white">{formatUSDT(p.shares)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-           </div>
+// Reusable component for game health display
+const GameHealthCard: React.FC<{
+  gameName: string;
+  data: GameHealthData;
+  canisterId: string;
+}> = ({ gameName, data, canisterId }) => {
+  if (!data.health) {
+    return (
+      <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+        <h3 className="text-lg font-semibold mb-2">{gameName}</h3>
+        <p className="text-gray-500">No data available</p>
+      </div>
+    );
+  }
+
+  const h = data.health;
+
+  return (
+    <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+      <div className="flex justify-between items-start mb-3">
+        <div>
+          <h3 className="text-lg font-semibold">{gameName}</h3>
+          <p className="text-xs text-gray-500 font-mono">{canisterId}</p>
+        </div>
+        <div className={`px-3 py-1 rounded text-sm font-bold ${
+          h.is_healthy ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'
+        }`}>
+          {h.is_healthy ? '● HEALTHY' : '● ISSUE'}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 text-xs">
+        <div className="bg-gray-900/50 p-2 rounded">
+          <div className="text-gray-400 mb-1">Pool Reserve</div>
+          <div className="font-mono text-white text-sm">{formatUSDT(h.pool_reserve)} USDT</div>
+        </div>
+        <div className="bg-gray-900/50 p-2 rounded">
+          <div className="text-gray-400 mb-1">User Deposits</div>
+          <div className="font-mono text-white text-sm">{formatUSDT(h.total_deposits)} USDT</div>
+        </div>
+        <div className="bg-gray-900/50 p-2 rounded">
+          <div className="text-gray-400 mb-1">Pending W/D</div>
+          <div className="font-mono text-white text-sm">
+            {h.pending_withdrawals_count.toString()} ({formatUSDT(h.pending_withdrawals_total_amount)} USDT)
+          </div>
+        </div>
+        <div className="bg-gray-900/50 p-2 rounded">
+          <div className="text-gray-400 mb-1">Excess</div>
+          <div className={`font-mono text-sm ${
+            Number(h.excess) >= 0 ? 'text-green-400' : 'text-red-400'
+          }`}>
+            {Number(h.excess) >= 0 ? '+' : ''}{formatUSDT(h.excess)} USDT
+          </div>
+        </div>
+        <div className="bg-gray-900/50 p-2 rounded">
+          <div className="text-gray-400 mb-1">Unique Users</div>
+          <div className="font-mono text-white text-sm">{h.unique_users.toString()}</div>
+        </div>
+        <div className="bg-gray-900/50 p-2 rounded">
+          <div className="text-gray-400 mb-1">Unique LPs</div>
+          <div className="font-mono text-white text-sm">{h.unique_lps.toString()}</div>
+        </div>
+      </div>
+
+      {data.error && (
+        <div className="mt-3 p-2 bg-red-900/20 border border-red-500 rounded text-xs text-red-400">
+          Error: {data.error}
         </div>
       )}
+    </div>
+  );
+};
+
+// Reusable component for orphaned funds display
+const OrphanedFundsCard: React.FC<{
+  gameName: string;
+  report: OrphanedFundsReport | null;
+}> = ({ gameName, report }) => {
+  if (!report) {
+    return (
+      <div className="bg-gray-900/50 p-3 rounded">
+        <div className="font-semibold text-sm mb-1">{gameName}</div>
+        <div className="text-gray-500 text-xs">No data</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-gray-900/50 p-3 rounded">
+      <div className="font-semibold text-sm mb-2">{gameName}</div>
+      <div className="flex justify-between items-center">
+        <div>
+          <div className="text-xs text-gray-400">Total Abandoned</div>
+          <div className="font-mono text-yellow-500 text-lg">
+            ${formatUSDT(report.total_abandoned_amount)}
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-xs text-gray-400">Events</div>
+          <div className="font-mono text-white text-lg">
+            {report.abandoned_count.toString()}
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
