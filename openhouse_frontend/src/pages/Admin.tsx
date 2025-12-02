@@ -39,7 +39,8 @@ export const Admin: React.FC = () => {
   const isAdmin = principal === ADMIN_PRINCIPAL;
 
   const fetchData = useCallback(async () => {
-    if (!actor || !isAdmin) return;
+    // Wait for both actor AND full authentication before making admin calls
+    if (!actor || !isAdmin || !isAuthenticated) return;
     setLoading(true);
     setError(null);
 
@@ -74,10 +75,10 @@ export const Admin: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [actor, isAdmin, activeTab]);
+  }, [actor, isAdmin, isAuthenticated, activeTab]);
 
   useEffect(() => {
-    if (actor && isAdmin) {
+    if (actor && isAdmin && isAuthenticated) {
       fetchData();
     }
   }, [fetchData]);
@@ -106,10 +107,10 @@ export const Admin: React.FC = () => {
     <div className="min-h-screen bg-gray-900 text-white p-8">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Admin Dashboard</h1>
-        <button 
+        <button
           onClick={fetchData}
           disabled={loading}
-          className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded disabled:opacity-50 transition-colors"
+          className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded disabled:opacity-50 transition-colors"
         >
           {loading ? 'Refreshing...' : 'Refresh Data'}
         </button>
@@ -129,8 +130,8 @@ export const Admin: React.FC = () => {
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={`pb-2 px-4 capitalize ${
-              activeTab === tab 
-                ? 'border-b-2 border-blue-500 text-blue-400 font-semibold' 
+              activeTab === tab
+                ? 'border-b-2 border-white text-white font-semibold'
                 : 'text-gray-400 hover:text-gray-200'
             }`}
           >
@@ -166,7 +167,7 @@ export const Admin: React.FC = () => {
                 <span className="text-gray-400">User Deposits:</span>
                 <span className="font-mono">{formatUSDT(health.total_deposits)} USDT</span>
               </div>
-              <div className="flex justify-between text-blue-300">
+              <div className="flex justify-between text-gray-300">
                 <span className="text-gray-400">Pending Withdrawals:</span>
                 <span className="font-mono">{formatUSDT(health.pending_withdrawals_total_amount)} USDT</span>
               </div>

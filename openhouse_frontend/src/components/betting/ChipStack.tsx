@@ -1,25 +1,19 @@
-import React, { useMemo, useCallback } from 'react';
-import { decomposeIntoChips, ChipDenomination, CHIP_DENOMINATIONS } from '../game-specific/dice/chipConfig';
+import { useMemo, useCallback } from 'react';
+import { decomposeIntoChips, ChipDenomination } from '../game-specific/dice/chipConfig';
+import { ChipStackProps } from './types';
 
-interface InteractiveChipStackProps {
-  amount: number;
-  onRemoveChip?: (chipValue: number) => void;
-  disabled?: boolean;
-  maxChipsPerPile?: number;
-}
+// Chip stack dimensions (could move to CSS variables if needed)
+const CHIP_WIDTH = 80;
+const CHIP_HEIGHT = 40;
+const STACK_OFFSET = 6; // Vertical spacing between chips in a pile
+const PILE_OVERLAP = -12; // Horizontal overlap between piles
 
-interface ChipInStack {
-  chip: ChipDenomination;
-  index: number;
-  pileIndex: number;
-}
-
-export const InteractiveChipStack: React.FC<InteractiveChipStackProps> = ({
+export function ChipStack({
   amount,
   onRemoveChip,
   disabled = false,
   maxChipsPerPile = 12,
-}) => {
+}: ChipStackProps) {
   // Decompose amount into chip counts
   const chipData = useMemo(() => decomposeIntoChips(amount), [amount]);
 
@@ -29,12 +23,7 @@ export const InteractiveChipStack: React.FC<InteractiveChipStackProps> = ({
     onRemoveChip(chip.value);
   }, [disabled, onRemoveChip]);
 
-  // Calculate dimensions
-  const chipWidth = 80;
-  const chipHeight = 40;
-  const stackOffset = 6; // Vertical spacing between chips in a pile
-  const pileOverlap = -12; // Horizontal overlap between piles
-
+  // Empty state
   if (amount <= 0 || chipData.length === 0) {
     return (
       <div className="bet-placeholder">
@@ -45,13 +34,13 @@ export const InteractiveChipStack: React.FC<InteractiveChipStackProps> = ({
 
   // Calculate total width needed
   const totalPiles = chipData.length;
-  const totalWidth = totalPiles * chipWidth + (totalPiles - 1) * pileOverlap;
+  const totalWidth = totalPiles * CHIP_WIDTH + (totalPiles - 1) * PILE_OVERLAP;
 
   // Find max stack height for container sizing
   const maxStackHeight = Math.max(
     ...chipData.map(({ count }) => {
       const visibleCount = Math.min(count, maxChipsPerPile);
-      return chipHeight + (visibleCount - 1) * stackOffset;
+      return CHIP_HEIGHT + (visibleCount - 1) * STACK_OFFSET;
     })
   );
 
@@ -72,10 +61,8 @@ export const InteractiveChipStack: React.FC<InteractiveChipStackProps> = ({
       {chipData.map(({ chip, count }, pileIndex) => {
         const visibleCount = Math.min(count, maxChipsPerPile);
         const hasOverflow = count > maxChipsPerPile;
-        const stackHeight = chipHeight + (visibleCount - 1) * stackOffset;
-
-        // Position this pile, centered within container
-        const pileLeft = centerOffset + pileIndex * (chipWidth + pileOverlap);
+        const stackHeight = CHIP_HEIGHT + (visibleCount - 1) * STACK_OFFSET;
+        const pileLeft = centerOffset + pileIndex * (CHIP_WIDTH + PILE_OVERLAP);
 
         return (
           <div
@@ -85,7 +72,7 @@ export const InteractiveChipStack: React.FC<InteractiveChipStackProps> = ({
               position: 'absolute',
               left: pileLeft,
               bottom: 0,
-              width: chipWidth,
+              width: CHIP_WIDTH,
               height: stackHeight,
               zIndex: pileIndex + 1,
             }}
@@ -99,9 +86,9 @@ export const InteractiveChipStack: React.FC<InteractiveChipStackProps> = ({
                 className={`chip-in-pile ${disabled ? '' : 'cursor-pointer'}`}
                 onClick={() => handleChipClick(chip)}
                 style={{
-                  width: chipWidth,
+                  width: CHIP_WIDTH,
                   height: 'auto',
-                  bottom: chipIndex * stackOffset,
+                  bottom: chipIndex * STACK_OFFSET,
                   zIndex: chipIndex,
                 }}
                 title={disabled ? '' : `Click to remove $${chip.value.toFixed(2)}`}
@@ -122,6 +109,4 @@ export const InteractiveChipStack: React.FC<InteractiveChipStackProps> = ({
       })}
     </div>
   );
-};
-
-export default InteractiveChipStack;
+}

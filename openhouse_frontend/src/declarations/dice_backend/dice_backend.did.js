@@ -42,12 +42,6 @@ export const idlFactory = ({ IDL }) => {
     'pending_withdrawals_total_amount' : IDL.Nat64,
   });
   const RollDirection = IDL.Variant({ 'Over' : IDL.Null, 'Under' : IDL.Null });
-  const AccountingStats = IDL.Record({
-    'total_user_deposits' : IDL.Nat64,
-    'unique_depositors' : IDL.Nat64,
-    'house_balance' : IDL.Nat64,
-    'canister_balance' : IDL.Nat64,
-  });
   const DailySnapshot = IDL.Record({
     'day_timestamp' : IDL.Nat64,
     'daily_volume' : IDL.Nat64,
@@ -128,11 +122,6 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Variant({ 'Ok' : HealthCheck, 'Err' : IDL.Text })],
         [],
       ),
-    'audit_balances' : IDL.Func(
-        [],
-        [IDL.Variant({ 'Ok' : IDL.Text, 'Err' : IDL.Text })],
-        ['query'],
-      ),
     'calculate_payout_info' : IDL.Func(
         [IDL.Nat8, RollDirection],
         [
@@ -159,9 +148,7 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Variant({ 'Ok' : IDL.Nat, 'Err' : IDL.Text })],
         [],
       ),
-    'get_accounting_stats' : IDL.Func([], [AccountingStats], ['query']),
     'get_balance' : IDL.Func([IDL.Principal], [IDL.Nat64], ['query']),
-    'get_canister_balance' : IDL.Func([], [IDL.Nat64], []),
     'get_current_seed_hash' : IDL.Func([], [IDL.Text], ['query']),
     'get_daily_stats' : IDL.Func(
         [IDL.Nat32],
@@ -194,7 +181,6 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Variant({ 'Ok' : MinimalGameResult, 'Err' : IDL.Text })],
         [],
       ),
-    'refresh_canister_balance' : IDL.Func([], [IDL.Nat64], []),
     'retry_withdrawal' : IDL.Func(
         [],
         [IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text })],

@@ -148,26 +148,6 @@ fn get_max_allowed_payout() -> u64 {
     defi_accounting::query::get_max_allowed_payout()
 }
 
-#[update]
-async fn get_canister_balance() -> u64 {
-    defi_accounting::accounting::get_canister_balance().await
-}
-
-#[query]
-fn get_accounting_stats() -> defi_accounting::accounting::AccountingStats {
-    defi_accounting::query::get_accounting_stats()
-}
-
-#[query]
-fn audit_balances() -> Result<String, String> {
-    defi_accounting::query::audit_balances()
-}
-
-#[update]
-async fn refresh_canister_balance() -> u64 {
-    defi_accounting::accounting::refresh_canister_balance().await
-}
-
 // =============================================================================
 // ADMIN DIAGNOSTIC ENDPOINTS
 // =============================================================================

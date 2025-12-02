@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import useBlackjackActor from '@/hooks/actors/useBlackjackActor';
 import useLedgerActor from '@/hooks/actors/useLedgerActor';
-import { GameLayout, BettingRail } from '@/components/game-ui';
+import { GameLayout } from '@/components/game-ui';
+import { BettingRail } from '@/components/betting';
 import { BlackjackTable, CardData } from '@/components/game-specific/blackjack';
 import { useGameBalance } from '@/providers/GameBalanceProvider';
 import { useBalance } from '@/providers/BalanceProvider';
@@ -204,10 +205,10 @@ export function Blackjack() {
         {/* Controls */}
         {gameActive ? (
              <div className="flex gap-4 mt-8 mb-8">
-                <button 
+                <button
                     onClick={() => handleAction(() => actor!.hit(gameId!))}
                     disabled={isLoading}
-                    className="px-8 py-4 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold text-xl shadow-lg transform active:scale-95 transition disabled:opacity-50 disabled:scale-100"
+                    className="px-8 py-4 bg-gray-800 hover:bg-gray-700 rounded-xl font-bold text-xl shadow-lg transform active:scale-95 transition disabled:opacity-50 disabled:scale-100"
                 >
                     HIT
                 </button>

@@ -1,4 +1,4 @@
-use candid::{CandidType, Deserialize, Principal, Nat};
+use candid::{Principal, Nat};
 use ic_stable_structures::memory_manager::MemoryId;
 use ic_stable_structures::{StableBTreeMap, StableCell};
 use std::cell::RefCell;
@@ -58,14 +58,6 @@ thread_local! {
 
     static CACHED_CANISTER_BALANCE: RefCell<u64> = RefCell::new(0);
     static PARENT_TIMER: RefCell<Option<ic_cdk_timers::TimerId>> = RefCell::new(None);
-}
-
-#[derive(CandidType, Deserialize, Clone)]
-pub struct AccountingStats {
-    pub total_user_deposits: u64,
-    pub house_balance: u64,
-    pub canister_balance: u64,
-    pub unique_depositors: u64,
 }
 
 pub(crate) enum TransferResult {
@@ -531,39 +523,6 @@ pub(crate) fn get_max_allowed_payout_internal() -> u64 {
     (house_balance * 15) / 100
 }
 
-pub(crate) fn get_accounting_stats_internal() -> AccountingStats {
-    let total_deposits = calculate_total_deposits();
-    let unique_depositors = USER_BALANCES_STABLE.with(|balances|
-        balances.borrow().iter().count() as u64
-    );
-
-    let canister_balance = CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow());
-    let house_balance = liquidity_pool::get_pool_reserve();
-
-    AccountingStats {
-        total_user_deposits: total_deposits,
-        house_balance,
-        canister_balance,
-        unique_depositors,
-    }
-}
-
-pub(crate) fn audit_balances_internal() -> Result<String, String> {
-    let total_deposits = calculate_total_deposits();
-    let canister_balance = CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow());
-    let pool_reserve = liquidity_pool::get_pool_reserve();
-
-    let calculated_total = pool_reserve + total_deposits;
-
-    if calculated_total == canister_balance {
-        Ok(format!("✅ Audit passed: pool_reserve ({}) + deposits ({}) = canister ({})",
-                   pool_reserve, total_deposits, canister_balance))
-    } else {
-        Err(format!("❌ Audit FAILED: pool_reserve ({}) + deposits ({}) = {} != canister ({})",
-                    pool_reserve, total_deposits, calculated_total, canister_balance))
-    }
-}
-
 pub fn update_balance(user: Principal, new_balance: u64) -> Result<(), String> {
     if PENDING_WITHDRAWALS.with(|p| p.borrow().contains_key(&user)) {
         return Err("Cannot update balance: withdrawal pending".to_string());
@@ -670,31 +629,6 @@ pub async fn refresh_canister_balance() -> u64 {
     }
 }
 
-#[allow(deprecated)]
-pub async fn get_canister_balance() -> u64 {
-    let ck_usdt_principal = Principal::from_text(CKUSDT_CANISTER_ID).expect("Invalid principal constant");
-
-    let account = Account {
-        owner: ic_cdk::api::canister_self(),
-        subaccount: None,
-    };
-
-    let result: Result<(Nat,), _> = ic_cdk::api::call::call(ck_usdt_principal, "icrc1_balance_of", (account,)).await;
-
-    match result {
-        Ok((balance,)) => {
-            let bal: u64 = balance.0.try_into().unwrap_or(0);
-            CACHED_CANISTER_BALANCE.with(|cache| {
-                *cache.borrow_mut() = bal;
-            });
-            bal
-        }
-        Err(e) => {
-            ic_cdk::println!("Failed to query canister balance: {:?}", e);
-            0
-        }
-    }
-}
 
 // =============================================================================
 // ADMIN QUERY HELPERS (called by admin_query.rs)

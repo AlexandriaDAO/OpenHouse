@@ -10,4 +10,3 @@ export { GameHistory, type GameHistoryItem } from './GameHistory';
 export { GameStats, type GameStat } from './GameStats';
 export { ConnectionStatus } from './ConnectionStatus';
 export { AuthNotice } from './AuthNotice';
-export { BettingRail } from './BettingRail';

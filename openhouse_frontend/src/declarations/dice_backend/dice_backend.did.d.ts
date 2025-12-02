@@ -7,12 +7,6 @@ export interface AbandonedEntry {
   'timestamp' : bigint,
   'amount' : bigint,
 }
-export interface AccountingStats {
-  'total_user_deposits' : bigint,
-  'unique_depositors' : bigint,
-  'house_balance' : bigint,
-  'canister_balance' : bigint,
-}
 export interface ApyInfo {
   'days_calculated' : number,
   'total_volume' : bigint,
@@ -117,7 +111,6 @@ export interface _SERVICE {
     { 'Ok' : HealthCheck } |
       { 'Err' : string }
   >,
-  'audit_balances' : ActorMethod<[], { 'Ok' : string } | { 'Err' : string }>,
   'calculate_payout_info' : ActorMethod<
     [number, RollDirection],
     { 'Ok' : [number, number] } |
@@ -135,9 +128,7 @@ export interface _SERVICE {
     { 'Ok' : bigint } |
       { 'Err' : string }
   >,
-  'get_accounting_stats' : ActorMethod<[], AccountingStats>,
   'get_balance' : ActorMethod<[Principal], bigint>,
-  'get_canister_balance' : ActorMethod<[], bigint>,
   'get_current_seed_hash' : ActorMethod<[], string>,
   'get_daily_stats' : ActorMethod<[number], Array<DailySnapshot>>,
   'get_house_balance' : ActorMethod<[], bigint>,
@@ -158,7 +149,6 @@ export interface _SERVICE {
     { 'Ok' : MinimalGameResult } |
       { 'Err' : string }
   >,
-  'refresh_canister_balance' : ActorMethod<[], bigint>,
   'retry_withdrawal' : ActorMethod<[], { 'Ok' : bigint } | { 'Err' : string }>,
   'verify_game_result' : ActorMethod<
     [Uint8Array | number[], string, bigint, number],

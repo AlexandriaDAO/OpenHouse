@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import useDiceActor from '../../hooks/actors/useDiceActor';
 import useLedgerActor from '../../hooks/actors/useLedgerActor';
-import { GameLayout, BettingRail } from '../../components/game-ui';
+import { GameLayout } from '../../components/game-ui';
+import { BettingRail } from '../../components/betting';
 import { DiceAnimation, DiceControls, type DiceDirection } from '../../components/game-specific/dice';
 import { useGameBalance } from '../../providers/GameBalanceProvider';
 import { useBalance } from '../../providers/BalanceProvider';
@@ -376,7 +377,7 @@ export function DiceGame() {
                   </p>
                   <ul className="mt-1 ml-4 space-y-1 list-disc list-inside">
                     <li><span className="font-bold text-green-400">Over {targetNumber}:</span> Win if roll is {targetNumber + 1}-100</li>
-                    <li><span className="font-bold text-blue-400">Under {targetNumber}:</span> Win if roll is 0-{targetNumber - 1}</li>
+                    <li><span className="font-bold text-gray-300">Under {targetNumber}:</span> Win if roll is 0-{targetNumber - 1}</li>
                   </ul>
                 </div>
 
@@ -407,7 +408,7 @@ export function DiceGame() {
                     <ul className="mt-1 ml-4 space-y-0.5 text-xs">
                       <li>• <span className="text-green-400">Over 50:</span> 51-100 = 50 winning outcomes</li>
                       <li>• <span className="text-red-400">Exactly 50:</span> House wins (1 outcome)</li>
-                      <li>• <span className="text-blue-400">Under 50:</span> 0-49 = 50 winning outcomes</li>
+                      <li>• <span className="text-gray-300">Under 50:</span> 0-49 = 50 winning outcomes</li>
                     </ul>
                     <p className="mt-1 text-xs text-gray-300">
                       That middle slot is how the house maintains its edge!

@@ -250,7 +250,7 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
                 autoFocus
               />
               <p className="text-xs text-gray-500 mt-1">Minimum: 1 USDT</p>
-              <p className="text-xs text-blue-400 mt-2 bg-blue-900/20 border border-blue-500/20 rounded px-2 py-1">
+              <p className="text-xs text-gray-400 mt-2 bg-gray-900/50 border border-gray-700/30 rounded px-2 py-1">
                 ℹ️ Deposit requires two steps: approve spending, then transfer
               </p>
             </div>

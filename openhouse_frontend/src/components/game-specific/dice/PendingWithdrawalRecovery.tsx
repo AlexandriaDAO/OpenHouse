@@ -220,7 +220,7 @@ const PendingWithdrawalRecoveryContent: React.FC<Props> = ({ onResolved }) => {
                 onClick={handleRetry}
                 disabled={isRetrying || isAbandoning || !!success}
                 aria-label="Retry pending withdrawal transfer"
-                className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium disabled:opacity-50"
+                className="flex-1 px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded text-sm font-medium disabled:opacity-50"
                 >
                 {isRetrying ? 'Retrying...' : '🔄 Retry Transfer'}
                 </button>

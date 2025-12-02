@@ -107,3 +107,4 @@ pub fn get_all_lp_positions(offset: u64, limit: u64) -> Result<Vec<LPPositionInf
     let limit = limit.min(MAX_PAGINATION_LIMIT);
     Ok(liquidity_pool::iter_lp_positions_internal(offset as usize, limit as usize))
 }
+

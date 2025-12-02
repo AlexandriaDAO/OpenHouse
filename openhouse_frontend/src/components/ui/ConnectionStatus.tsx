@@ -26,7 +26,7 @@ export const ConnectionStatus: React.FC<ConnectionStatusProps> = ({ game }) => {
       return {
         icon: '🔄',
         text: 'Syncing...',
-        className: 'text-blue-400',
+        className: 'text-gray-400',
         pulse: true,
       };
     }
@@ -100,7 +100,7 @@ export const ConnectionStatus: React.FC<ConnectionStatusProps> = ({ game }) => {
                       await retry();
                       setShowDetails(false);
                     }}
-                    className="flex-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"
+                    className="flex-1 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors"
                   >
                     🔄 Retry
                   </button>
@@ -185,7 +185,7 @@ export const ConnectionStatusMini: React.FC<ConnectionStatusProps> = ({ game }) 
   }
 
   if (isSyncing) {
-    return <span className="text-blue-400 text-xs animate-pulse">🔄</span>;
+    return <span className="text-gray-400 text-xs animate-pulse">🔄</span>;
   }
 
   if (hasError) {

@@ -14,7 +14,7 @@ interface CardProps {
 export const Card: React.FC<CardProps> = ({ card, hidden, className = '' }) => {
   if (hidden) {
     return (
-      <div className={`w-16 h-24 bg-blue-800 border-2 border-white rounded-lg shadow-md flex items-center justify-center ${className}`}>
+      <div className={`w-16 h-24 bg-gray-800 border-2 border-white rounded-lg shadow-md flex items-center justify-center ${className}`}>
         <span className="text-2xl">?</span>
       </div>
     );

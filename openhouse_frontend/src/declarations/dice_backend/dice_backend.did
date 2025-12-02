@@ -9,13 +9,6 @@ type MinimalGameResult = record {
   payout: nat64;
 };
 
-type AccountingStats = record {
-  total_user_deposits: nat64;
-  house_balance: nat64;
-  canister_balance: nat64;
-  unique_depositors: nat64;
-};
-
 type LPPosition = record {
   shares: nat;
   pool_ownership_percent: float64;
@@ -128,10 +121,6 @@ service : {
   get_house_balance: () -> (nat64) query;
 
   get_max_allowed_payout: () -> (nat64) query;
-  get_canister_balance: () -> (nat64);
-  get_accounting_stats: () -> (AccountingStats) query;
-  audit_balances: () -> (variant { Ok: text; Err: text }) query;
-  refresh_canister_balance: () -> (nat64);
 
   // Admin endpoints
   admin_health_check: () -> (variant { Ok: HealthCheck; Err: text });

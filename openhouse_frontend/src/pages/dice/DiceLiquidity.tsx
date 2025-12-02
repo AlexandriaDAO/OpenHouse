@@ -5,7 +5,7 @@ import { useAuth } from '../../providers/AuthProvider';
 import useDiceActor from '../../hooks/actors/useDiceActor';
 import useLedgerActor from '../../hooks/actors/useLedgerActor';
 import { DECIMALS_PER_CKUSDT, TRANSFER_FEE } from '../../types/balance';
-import { HealthDashboard, DiceStatistics } from '../../components/game-specific/dice';
+import { DiceStatistics } from '../../components/game-specific/dice';
 import { PendingWithdrawalRecovery } from '../../components/game-specific/dice/PendingWithdrawalRecovery';
 import { InfoTooltip } from '../../components/InfoTooltip';
 
@@ -43,7 +43,6 @@ export function DiceLiquidity() {
   const [success, setSuccess] = useState<string | null>(null);
   const [showHowItWorks, setShowHowItWorks] = useState(false);
   const [showStats, setShowStats] = useState(false);
-  const [showHealth, setShowHealth] = useState(false);
   const [activeTab, setActiveTab] = useState<'deposit' | 'withdraw'>('deposit');
   const [showWithdrawConfirm, setShowWithdrawConfirm] = useState(false);
 
@@ -383,13 +382,6 @@ With the 1% house edge, share price trends upward over time as the house profits
         </button>
         <span className="text-gray-700">|</span>
         <button
-          onClick={() => setShowHealth(!showHealth)}
-          className="text-xs text-gray-500 hover:text-dfinity-turquoise transition"
-        >
-          {showHealth ? 'Hide' : 'System'} Health
-        </button>
-        <span className="text-gray-700">|</span>
-        <button
           onClick={() => setShowHowItWorks(true)}
           className="text-xs text-gray-500 hover:text-dfinity-turquoise transition flex items-center gap-1"
         >
@@ -399,9 +391,6 @@ With the 1% house edge, share price trends upward over time as the house profits
 
       {/* Expandable Statistics */}
       {showStats && <div className="mt-6"><DiceStatistics /></div>}
-
-      {/* Expandable Health Dashboard */}
-      {showHealth && <div className="mt-6"><HealthDashboard inline={true} /></div>}
 
       {/* HOW IT WORKS MODAL */}
       {showHowItWorks && (

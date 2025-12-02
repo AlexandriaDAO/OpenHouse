@@ -1,4 +1,6 @@
 /** @type {import('tailwindcss').Config} */
+import colors from 'tailwindcss/colors';
+
 export default {
   content: [
     "./index.html",
@@ -20,6 +22,8 @@ export default {
         // Core monochrome
         'pure-black': '#000000',
         'pure-white': '#FFFFFF',
+        // Override Tailwind's blue-tinted gray with neutral gray
+        gray: colors.neutral,
       },
       fontFamily: {
         mono: ['JetBrains Mono', 'IBM Plex Mono', 'monospace'],
@@ -27,5 +31,7 @@ export default {
       }
     },
   },
-  plugins: [],
+  plugins: [
+    require('@tailwindcss/container-queries'),
+  ],
 }
