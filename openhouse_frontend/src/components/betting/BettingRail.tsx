@@ -296,7 +296,7 @@ export function BettingRail(props: any) {
                     onAddChip={addChip}
                     canAddChip={canAddChip}
                     disabled={disabled}
-                    size="xs"
+                    size="mobile"
                   />
                 </div>
               </div>

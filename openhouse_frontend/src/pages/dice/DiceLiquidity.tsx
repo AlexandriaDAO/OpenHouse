@@ -42,8 +42,7 @@ export function DiceLiquidity() {
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [showRiskReturns, setShowRiskReturns] = useState(true);  // Default open
-  const [showAdvancedStats, setShowAdvancedStats] = useState(false);  // Default closed
+  const [showRiskReturns, setShowRiskReturns] = useState(false);  // Default closed
   const [activeTab, setActiveTab] = useState<'deposit' | 'withdraw'>('deposit');
   const [showWithdrawConfirm, setShowWithdrawConfirm] = useState(false);
 
@@ -456,29 +455,18 @@ export function DiceLiquidity() {
           )}
 
         </div>
-      </div>
 
-      {/* MODIFIED: Advanced Stats Section (Replaces footer toggle) */}
-      <div className="mt-6 bg-gray-900/40 border border-gray-700/50 rounded-2xl overflow-hidden">
-        {/* Header */}
-        <button
-          onClick={() => setShowAdvancedStats(!showAdvancedStats)}
-          aria-expanded={showAdvancedStats}
-          aria-controls="advanced-stats-content"
-          className="w-full p-4 flex items-center justify-between hover:bg-white/5 transition-all"
-        >
-          <div className="flex items-center gap-2">
-            <span className="text-gray-400 font-bold text-sm">📊 Historical Performance & Charts</span>
+        {/* INTEGRATED: Historical Performance & Charts */}
+        <div className="border-t border-gray-700/50">
+          <div className="p-4 bg-black/20 border-b border-gray-700/50">
+            <div className="flex items-center gap-2">
+              <span className="text-gray-400 font-bold text-sm">📊 Historical Performance & Charts</span>
+            </div>
           </div>
-          <span className="text-gray-500 text-xl">{showAdvancedStats ? '▼' : '▶'}</span>
-        </button>
-
-        {/* Full Stats Component */}
-        {showAdvancedStats && (
-          <div id="advanced-stats-content" className="animate-in fade-in slide-in-from-top-2 duration-200 border-t border-gray-700/50">
+          <div className="bg-black/10">
             <DiceStatistics />
           </div>
-        )}
+        </div>
       </div>
 
       {/* WITHDRAW CONFIRMATION MODAL */}

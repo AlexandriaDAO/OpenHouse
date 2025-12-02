@@ -411,8 +411,8 @@
 
 .betting-rail-mobile {
   background: linear-gradient(180deg, #1a1d21 0%, #0a0b0c 100%);
-  padding: 8px 10px;
-  padding-bottom: max(10px, env(safe-area-inset-bottom));
+  padding: 12px 12px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
   position: relative;
   overflow: visible;
   /* Curved top like desktop */
@@ -461,7 +461,7 @@
 .mobile-three-columns {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-end;
   gap: 8px;
   overflow: visible;
 }
@@ -471,7 +471,8 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
+  justify-content: flex-end;
+  gap: 10px;
   flex: 0 0 auto;
 }
 
@@ -489,7 +490,8 @@
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 4px;
+  justify-content: flex-end;
+  gap: 10px;
   flex: 0 0 auto;
 }
 
@@ -571,7 +573,7 @@
   pointer-events: auto;
   background: rgba(0, 0, 0, 0.7);
   backdrop-filter: blur(8px);
-  padding: 5px 10px;
+  padding: 8px 10px;
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   display: flex;
@@ -581,7 +583,7 @@
 
 .mobile-bet-display .amount {
   font-family: 'Roboto Mono', monospace;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   color: #fff;
   min-width: 50px;
@@ -622,11 +624,10 @@
   cursor: not-allowed;
 }
 
-/* Chip selector scroll area */
+/* Chip selector area */
 .mobile-chips-scroll {
   display: flex;
   justify-content: flex-end;
-  overflow-x: auto;
 }
 
 /* Mobile balance row with refresh button */
@@ -643,16 +644,16 @@
 }
 
 .mobile-balances-text .balance-row {
-  font-size: 9px;
+  font-size: 12px;
   font-family: 'Roboto Mono', monospace;
 }
 
 .mobile-balances-text .balance-label {
-  font-size: 7px;
+  font-size: 10px;
   color: var(--rail-text-muted);
   font-weight: 600;
   letter-spacing: 0.5px;
-  width: 34px;
+  width: 42px;
   display: inline-block;
 }
 

@@ -4,7 +4,7 @@ interface ChipSelectorProps {
   onAddChip: (chip: ChipDenomination) => void;
   canAddChip: (value: number) => boolean;
   disabled: boolean;
-  size?: 'xs' | 'sm' | 'md';
+  size?: 'xs' | 'mobile' | 'sm' | 'md';
 }
 
 export function ChipSelector({
@@ -15,9 +15,10 @@ export function ChipSelector({
 }: ChipSelectorProps) {
   // Explicit sizes for distinct layouts
   const sizeClasses = {
-    xs: { img: 'w-7 h-7', gap: 'gap-0.5' },
-    sm: { img: 'w-9 h-9', gap: 'gap-1' },
-    md: { img: 'w-12 h-12', gap: 'gap-2' },
+    xs: { img: 'w-7 h-7', gap: 'gap-0.5' },           // 28px
+    mobile: { img: 'w-[30px] h-[30px]', gap: 'gap-1' }, // 30px (~7% bigger than xs)
+    sm: { img: 'w-9 h-9', gap: 'gap-1' },             // 36px
+    md: { img: 'w-12 h-12', gap: 'gap-2' },           // 48px
   };
   const { img: imgClass, gap: gapClass } = sizeClasses[size];
 
