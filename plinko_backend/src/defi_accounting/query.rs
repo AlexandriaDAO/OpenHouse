@@ -1,5 +1,5 @@
 use candid::Principal;
-use super::accounting::{self, AccountingStats};
+use super::accounting;
 use super::liquidity_pool::{self, LPPosition, PoolStats};
 
 // =============================================================================
@@ -20,14 +20,6 @@ pub fn get_max_allowed_payout() -> u64 {
 
 pub fn get_house_balance() -> u64 {
     liquidity_pool::get_pool_reserve()
-}
-
-pub fn get_accounting_stats() -> AccountingStats {
-    accounting::get_accounting_stats_internal()
-}
-
-pub fn audit_balances() -> Result<String, String> {
-    accounting::audit_balances_internal()
 }
 
 // =============================================================================
