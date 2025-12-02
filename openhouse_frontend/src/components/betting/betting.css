@@ -489,10 +489,12 @@
 .mobile-col-right {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: center;
   justify-content: flex-end;
   gap: 10px;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-right: 4px;
 }
 
 /* Circular/arc chip pile layout */
@@ -514,19 +516,19 @@
 .mobile-action-buttons {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
 }
 
 .mobile-icon-btn {
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   transition: all 0.2s;
-  border: 1.5px solid;
+  border: 2px solid;
 }
 
 .mobile-icon-btn:disabled {
@@ -627,7 +629,7 @@
 /* Chip selector area */
 .mobile-chips-scroll {
   display: flex;
-  justify-content: flex-end;
+  justify-content: center;
 }
 
 /* Mobile balance row with refresh button */

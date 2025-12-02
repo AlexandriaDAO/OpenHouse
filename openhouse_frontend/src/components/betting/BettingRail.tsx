@@ -216,7 +216,7 @@ export function BettingRail(props: any) {
                     className={`mobile-icon-btn mobile-icon-btn--deposit ${showDepositAnimation ? 'deposit-pulse' : ''}`}
                     title="Buy Chips"
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
                       <path d="M12 5v14M5 12h14"/>
                     </svg>
                   </button>
@@ -226,7 +226,7 @@ export function BettingRail(props: any) {
                     className="mobile-icon-btn mobile-icon-btn--withdraw"
                     title="Cash Out"
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
                       <path d="M5 12h14"/>
                     </svg>
                   </button>
@@ -235,7 +235,7 @@ export function BettingRail(props: any) {
                     className="mobile-icon-btn mobile-icon-btn--house"
                     title={isLiquidityRoute ? 'Play Game' : 'Be The House'}
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M3 12l9-9 9 9"/>
                       <path d="M5 10v10a1 1 0 001 1h12a1 1 0 001-1V10"/>
                     </svg>
@@ -297,6 +297,7 @@ export function BettingRail(props: any) {
                     canAddChip={canAddChip}
                     disabled={disabled}
                     size="mobile"
+                    variant="compact"
                   />
                 </div>
               </div>

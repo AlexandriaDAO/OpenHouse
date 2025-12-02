@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../providers/AuthProvider';
 import { AuthMethodSelector } from './AuthMethodSelector';
-import { type IdentityProviderConfig, getPreferredProvider } from '../lib/ic-use-identity/config/identityProviders';
+import { type IdentityProviderConfig } from '../lib/ic-use-identity/config/identityProviders';
 
 export const AuthButton: React.FC = () => {
   const { isAuthenticated, principal, login, logout, isInitializing } = useAuth();
@@ -21,12 +21,8 @@ export const AuthButton: React.FC = () => {
   };
 
   const handleLoginClick = () => {
-    const preferredProvider = getPreferredProvider();
-    if (preferredProvider) {
-      login(undefined, preferredProvider);
-    } else {
-      setShowProviderSelector(true);
-    }
+    // Always show provider selector to let user choose
+    setShowProviderSelector(true);
   };
 
   const handleProviderSelect = (provider: IdentityProviderConfig) => {

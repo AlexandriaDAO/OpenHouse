@@ -5,6 +5,7 @@ interface ChipSelectorProps {
   canAddChip: (value: number) => boolean;
   disabled: boolean;
   size?: 'xs' | 'mobile' | 'sm' | 'md';
+  variant?: 'full' | 'compact';  // 'compact' = 3 chips for mobile (red, green, blue)
 }
 
 export function ChipSelector({
@@ -12,7 +13,13 @@ export function ChipSelector({
   canAddChip,
   disabled,
   size = 'md',
+  variant = 'full',
 }: ChipSelectorProps) {
+  // Filter chips based on variant - compact shows only $0.10, $1, $5 for mobile
+  const chips = variant === 'compact'
+    ? CHIP_DENOMINATIONS.filter(c => ['red', 'green', 'blue'].includes(c.color))
+    : CHIP_DENOMINATIONS;
+
   // Explicit sizes for distinct layouts
   const sizeClasses = {
     xs: { img: 'w-7 h-7', gap: 'gap-0.5' },           // 28px
@@ -24,7 +31,7 @@ export function ChipSelector({
 
   return (
     <div className={`flex items-center ${gapClass}`}>
-      {CHIP_DENOMINATIONS.map(chip => (
+      {chips.map(chip => (
         <button
           key={chip.color}
           onClick={() => onAddChip(chip)}
