@@ -1,4 +1,4 @@
-import { ChipDenomination } from '../game-specific/dice/chipConfig';
+import { ChipDenomination } from './chipConfig';
 
 // Rail style options
 export type RailStyle = 'classic' | 'felt' | 'royal' | 'neon' | 'gold';
@@ -31,6 +31,7 @@ export interface BettingRailProps {
   disabled?: boolean;
   multiplier: number;
   canisterId: string;
+  gameRoute?: string;
 }
 
 // Betting state returned from useBettingState hook
