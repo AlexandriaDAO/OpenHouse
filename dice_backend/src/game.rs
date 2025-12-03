@@ -1,4 +1,4 @@
-use crate::types::{MinimalGameResult, RollDirection, DECIMALS_PER_CKUSDT, MIN_BET, MAX_NUMBER};
+use crate::types::{MinimalGameResult, MultiDiceGameResult, SingleDiceResult, RollDirection, DECIMALS_PER_CKUSDT, MIN_BET, MAX_NUMBER, MAX_DICE_COUNT};
 use crate::defi_accounting::{self as accounting, liquidity_pool};
 use candid::Principal;
 
@@ -177,6 +177,200 @@ pub async fn play_dice(
         nonce,
         client_seed: client_seed.clone(),
     })
+}
+
+// =============================================================================
+// MULTI-DICE GAME LOGIC
+// =============================================================================
+
+/// Play multiple dice in a single call
+/// - dice_count: 1-3 dice
+/// - bet_per_dice: amount to bet on each individual dice
+/// - All dice share same target_number and direction
+pub async fn play_multi_dice(
+    dice_count: u8,
+    bet_per_dice: u64,
+    target_number: u8,
+    direction: RollDirection,
+    client_seed: String,
+    caller: Principal,
+) -> Result<MultiDiceGameResult, String> {
+    // VALIDATION
+    if dice_count == 0 || dice_count > MAX_DICE_COUNT {
+        return Err(format!("Dice count must be 1-{}", MAX_DICE_COUNT));
+    }
+
+    let total_bet = (dice_count as u64)
+        .checked_mul(bet_per_dice)
+        .ok_or("Bet calculation overflow")?;
+
+    // Check user balance
+    let user_balance = accounting::get_balance(caller);
+    if user_balance < total_bet {
+        return Err(format!(
+            "INSUFFICIENT_BALANCE|Your dice balance: {:.4} USDT|Total bet: {:.4} USDT ({} dice x {:.4} USDT)",
+            user_balance as f64 / DECIMALS_PER_CKUSDT as f64,
+            total_bet as f64 / DECIMALS_PER_CKUSDT as f64,
+            dice_count,
+            bet_per_dice as f64 / DECIMALS_PER_CKUSDT as f64
+        ));
+    }
+
+    // Validate per-dice bet
+    if bet_per_dice < MIN_BET {
+        return Err(format!("Minimum bet per dice is {} USDT", MIN_BET as f64 / DECIMALS_PER_CKUSDT as f64));
+    }
+
+    // Validate target number (same logic as single dice)
+    match direction {
+        RollDirection::Over => {
+            if target_number >= MAX_NUMBER {
+                return Err(format!("Target must be less than {} for Over rolls", MAX_NUMBER));
+            }
+            if target_number < 1 {
+                return Err("Target must be at least 1 for Over rolls".to_string());
+            }
+        }
+        RollDirection::Under => {
+            if target_number == 0 {
+                return Err("Target must be greater than 0 for Under rolls".to_string());
+            }
+            if target_number > MAX_NUMBER {
+                return Err(format!("Target must be at most {} for Under rolls", MAX_NUMBER));
+            }
+        }
+    }
+
+    // Calculate multiplier (same for all dice)
+    let multiplier = calculate_multiplier_direct(target_number, &direction);
+
+    // AGGREGATE MAX PAYOUT CHECK (worst case: all dice win)
+    let max_payout_per_dice = (bet_per_dice as f64 * multiplier) as u64;
+    let max_aggregate_payout = max_payout_per_dice
+        .checked_mul(dice_count as u64)
+        .ok_or("Max payout calculation overflow")?;
+
+    let max_allowed = accounting::get_max_allowed_payout();
+    if max_allowed == 0 {
+        return Err("House balance not yet initialized. Please try again in a moment.".to_string());
+    }
+    if max_aggregate_payout > max_allowed {
+        return Err(format!(
+            "Max potential payout of {} USDT (if all {} dice win) exceeds house limit of {} USDT (15% of house balance). Reduce bet or dice count.",
+            max_aggregate_payout as f64 / DECIMALS_PER_CKUSDT as f64,
+            dice_count,
+            max_allowed as f64 / DECIMALS_PER_CKUSDT as f64
+        ));
+    }
+
+    if client_seed.len() > 256 {
+        return Err("Client seed too long (max 256 characters)".to_string());
+    }
+
+    // VRF GENERATION (single call for all dice)
+    let (rolled_numbers, server_seed, nonce) =
+        crate::seed::generate_multi_dice_roll_vrf(dice_count, &client_seed).await?;
+    let server_seed_hash = crate::seed::hash_server_seed(&server_seed);
+
+    // DEDUCT TOTAL BET
+    let balance_after_bet = user_balance.checked_sub(total_bet).ok_or("Balance underflow")?;
+    accounting::update_balance(caller, balance_after_bet)?;
+
+    crate::defi_accounting::record_bet_volume(total_bet);
+
+    // PROCESS EACH DICE
+    let mut dice_results = Vec::with_capacity(dice_count as usize);
+    let mut total_wins: u8 = 0;
+    let mut total_payout: u64 = 0;
+
+    for rolled_number in rolled_numbers.iter().copied() {
+        let is_house_hit = rolled_number == target_number;
+        let is_win = if is_house_hit {
+            false
+        } else {
+            match direction {
+                RollDirection::Over => rolled_number > target_number,
+                RollDirection::Under => rolled_number < target_number,
+            }
+        };
+
+        let payout = if is_win {
+            (bet_per_dice as f64 * multiplier) as u64
+        } else {
+            0
+        };
+
+        if is_win {
+            total_wins += 1;
+        }
+        total_payout += payout;
+
+        dice_results.push(SingleDiceResult {
+            rolled_number,
+            is_win,
+            payout,
+        });
+    }
+
+    // CREDIT TOTAL PAYOUT
+    let current_balance = accounting::get_balance(caller);
+    let new_balance = current_balance.checked_add(total_payout).ok_or("Balance overflow")?;
+    accounting::update_balance(caller, new_balance)?;
+
+    // SETTLE WITH POOL
+    if let Err(e) = liquidity_pool::settle_bet(total_bet, total_payout) {
+        // Rollback on pool failure
+        let refund_balance = current_balance.checked_add(total_bet).ok_or("Refund overflow")?;
+        accounting::update_balance(caller, refund_balance)?;
+
+        ic_cdk::println!("CRITICAL: Multi-dice payout failure. Refunded {} to {}", total_bet, caller);
+
+        return Err(format!(
+            "House cannot afford payout. Your bet of {} USDT has been REFUNDED. {}",
+            total_bet as f64 / DECIMALS_PER_CKUSDT as f64,
+            e
+        ));
+    }
+
+    let net_result = (total_payout as i64) - (total_bet as i64);
+
+    Ok(MultiDiceGameResult {
+        dice_results,
+        dice_count,
+        total_wins,
+        total_payout,
+        total_bet,
+        net_result,
+        server_seed,
+        server_seed_hash,
+        nonce,
+        client_seed,
+    })
+}
+
+/// Calculate max bet per dice considering aggregate payout
+pub fn calculate_max_bet_per_dice(
+    dice_count: u8,
+    target_number: u8,
+    direction: &RollDirection,
+) -> Result<u64, String> {
+    if dice_count == 0 || dice_count > MAX_DICE_COUNT {
+        return Err(format!("Dice count must be 1-{}", MAX_DICE_COUNT));
+    }
+
+    let multiplier = calculate_multiplier_direct(target_number, direction);
+    if multiplier <= 0.0 {
+        return Err("Invalid multiplier".to_string());
+    }
+
+    let max_allowed = accounting::get_max_allowed_payout();
+    if max_allowed == 0 {
+        return Err("House not initialized".to_string());
+    }
+
+    // max_allowed / (dice_count * multiplier)
+    let max_bet_per_dice = (max_allowed as f64) / (dice_count as f64 * multiplier);
+    Ok(max_bet_per_dice as u64)
 }
 
 // =============================================================================
