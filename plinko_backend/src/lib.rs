@@ -39,7 +39,69 @@ pub struct MultiBallResult {
     pub average_multiplier: f64,
 }
 
+// ============================================================================
+// CONSTANTS
+// ============================================================================
 
+/// Multiplier precision: 10000 basis points = 1.0x multiplier
+/// Example: 65200 BP = 6.52x, 2000 BP = 0.2x
+pub const MULTIPLIER_SCALE: u64 = 10_000;
+
+/// Number of rows in the Plinko board (fixed configuration)
+pub const ROWS: u8 = 8;
+
+/// Number of possible final positions (0 to ROWS inclusive)
+pub const NUM_POSITIONS: u8 = ROWS + 1;
+
+/// Center position of the board
+pub const CENTER_POSITION: u8 = ROWS / 2;
+
+/// Minimum multiplier in basis points (center position = highest loss)
+/// 2000 BP = 0.2x (80% loss at most probable position)
+pub const MIN_MULTIPLIER_BP: u64 = 2_000;
+
+/// Quadratic scaling factor in basis points
+/// Derived: 6.32 * 10000 / 16 = 3950
+/// This achieves exactly 0.99 expected value (1% house edge)
+pub const QUADRATIC_FACTOR_BP: u64 = 3_950;
+
+/// Binomial coefficients for 8 rows (Pascal's triangle row 8)
+/// Used for probability calculations and EV verification
+pub const BINOMIAL_COEFFICIENTS: [u64; 9] = [1, 8, 28, 56, 70, 56, 28, 8, 1];
+
+/// Total paths through 8-row board (2^8 = 256)
+pub const TOTAL_PATHS: u64 = 256;
+
+// ============================================================================
+// CORE LOGIC
+// ============================================================================
+
+/// Calculate multiplier in basis points using pure integer arithmetic.
+/// Returns multiplier scaled by MULTIPLIER_SCALE (10000).
+///
+/// Formula: M_bp(k) = MIN_MULTIPLIER_BP + QUADRATIC_FACTOR_BP × d²
+/// Where d = |k - CENTER_POSITION|
+///
+/// Example: position 0 → 65200 BP (6.52x)
+pub fn calculate_multiplier_bp(position: u8) -> Result<u64, String> {
+    if position > ROWS {
+        return Err(format!(
+            "Invalid position {}: must be 0-{} for {}-row board",
+            position, ROWS, ROWS
+        ));
+    }
+
+    // Distance from center (0-4 for 8-row board)
+    let distance = if position > CENTER_POSITION {
+        position - CENTER_POSITION
+    } else {
+        CENTER_POSITION - position
+    } as u64;
+
+    // Pure integer formula: no floating point
+    let distance_squared = distance * distance;
+    Ok(MIN_MULTIPLIER_BP + QUADRATIC_FACTOR_BP * distance_squared)
+}
 
 // Memory management for future upgrades
 #[init]
@@ -64,8 +126,6 @@ fn post_upgrade() {
 /// No parameters - fixed configuration for simplicity
 #[update]
 async fn drop_ball() -> Result<PlinkoResult, String> {
-    const ROWS: u8 = 8;
-
     // Get randomness - fail safely if unavailable
     let random_bytes = raw_rand().await
         .map_err(|e| format!("Randomness unavailable: {:?}", e))?
@@ -101,7 +161,6 @@ async fn drop_ball() -> Result<PlinkoResult, String> {
 /// Efficient: uses single VRF call for up to 32 balls
 #[update]
 async fn drop_multiple_balls(count: u8) -> Result<MultiBallResult, String> {
-    const ROWS: u8 = 8;
     const MAX_BALLS: u8 = 30;
 
     // Validation
@@ -160,58 +219,65 @@ async fn drop_multiple_balls(count: u8) -> Result<MultiBallResult, String> {
 
 
 
-/// Get all multipliers for display
-/// Returns exactly 9 values for positions 0-8
+/// Get all multipliers in basis points for positions 0-8.
+/// Returns exactly 9 values. Panics on invalid state (should never happen).
 #[query]
-fn get_multipliers() -> Vec<f64> {
-    (0..=8)
-        .map(|pos| calculate_multiplier(pos).unwrap_or(0.0))
+fn get_multipliers_bp() -> Vec<u64> {
+    (0..=ROWS)
+        .map(|pos| {
+            calculate_multiplier_bp(pos)
+                .expect("Position 0-8 should always be valid")
+        })
         .collect()
 }
 
-/// Get the mathematical formula as a string
-/// Allows frontend to display the formula
+/// Get all multipliers as f64 for display (backward compatible).
+/// Returns exactly 9 values.
+#[query]
+fn get_multipliers() -> Vec<f64> {
+    (0..=ROWS)
+        .map(|pos| {
+            calculate_multiplier(pos)
+                .expect("Position 0-8 should always be valid")
+        })
+        .collect()
+}
+
+/// Get the mathematical formula as a string.
+/// Generated from constants to stay in sync with implementation.
 #[query]
 fn get_formula() -> String {
-    "M(k) = 0.2 + 6.32 × ((k - 4) / 4)²".to_string()
+    format!(
+        "M(k) = {} + {} × ((k - {}) / {})² [scale: {} BP = 1.0x]",
+        MIN_MULTIPLIER_BP as f64 / MULTIPLIER_SCALE as f64,  // 0.2
+        QUADRATIC_FACTOR_BP as f64 * 16.0 / MULTIPLIER_SCALE as f64,  // 6.32
+        CENTER_POSITION,  // 4
+        CENTER_POSITION,  // 4
+        MULTIPLIER_SCALE  // 10000
+    )
 }
 
 /// Get expected value for transparency
 /// Should always return 0.99 (1% house edge)
 #[query]
 fn get_expected_value() -> f64 {
-    // Binomial coefficients for 8 rows
-    let coefficients = [1, 8, 28, 56, 70, 56, 28, 8, 1];
-    let total_paths = 256.0;
-
-    coefficients.iter()
+    BINOMIAL_COEFFICIENTS.iter()
         .enumerate()
         .map(|(pos, &coeff)| {
-            let probability = coeff as f64 / total_paths;
+            let probability = coeff as f64 / TOTAL_PATHS as f64;
             let multiplier = calculate_multiplier(pos as u8).unwrap_or(0.0);
             probability * multiplier
         })
         .sum()
 }
 
-/// Calculate multiplier using pure mathematical formula
-/// M(k) = 0.2 + 6.32 × ((k - 4) / 4)²
+/// Calculate multiplier as f64 (for backward compatibility).
+/// Delegates to integer function and converts.
 ///
-/// Returns error for invalid positions (must be 0-8 for 8-row board)
+/// DEPRECATED: Use calculate_multiplier_bp() for financial calculations.
 pub fn calculate_multiplier(position: u8) -> Result<f64, String> {
-    // Validate position
-    if position > 8 {
-        return Err(format!("Invalid position {}: must be 0-8 for 8-row board", position));
-    }
-
-    // Pure mathematical formula
-    let k = position as f64;
-    let center = 4.0;
-    let distance = (k - center).abs();
-    let normalized = distance / 4.0; // Normalize to [0, 1]
-
-    // Quadratic formula with precise constants
-    Ok(0.2 + 6.32 * normalized * normalized)
+    let bp = calculate_multiplier_bp(position)?;
+    Ok(bp as f64 / MULTIPLIER_SCALE as f64)
 }
 
 #[query]
@@ -232,6 +298,44 @@ mod tests {
     // ------------------------------------------------------------------------
     mod multipliers {
         use super::*;
+
+        #[test]
+        fn test_exact_multipliers_bp() {
+            // Integer basis point values - no floating point tolerance needed
+            let expected_bp: [u64; 9] = [65200, 37550, 17800, 5950, 2000, 5950, 17800, 37550, 65200];
+
+            for (pos, &expected) in expected_bp.iter().enumerate() {
+                let calculated = calculate_multiplier_bp(pos as u8).expect("Valid position");
+                assert_eq!(
+                    calculated, expected,
+                    "Position {}: expected {} BP, got {} BP",
+                    pos, expected, calculated
+                );
+            }
+        }
+
+        #[test]
+        fn test_bp_to_f64_conversion_matches() {
+            // Verify integer and float functions agree
+            for pos in 0..=ROWS {
+                let bp = calculate_multiplier_bp(pos).expect("Valid");
+                let f64_val = calculate_multiplier(pos).expect("Valid");
+                let converted = bp as f64 / MULTIPLIER_SCALE as f64;
+                assert!(
+                    (f64_val - converted).abs() < 0.0001,
+                    "Position {}: f64={} converted={}",
+                    pos, f64_val, converted
+                );
+            }
+        }
+
+        #[test]
+        fn test_constants_consistency() {
+            // Verify constants are internally consistent
+            assert_eq!(NUM_POSITIONS as usize, BINOMIAL_COEFFICIENTS.len());
+            assert_eq!(TOTAL_PATHS, BINOMIAL_COEFFICIENTS.iter().sum::<u64>());
+            assert_eq!(CENTER_POSITION, ROWS / 2);
+        }
 
         #[test]
         fn test_exact_multipliers() {
