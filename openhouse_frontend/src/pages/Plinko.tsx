@@ -14,6 +14,7 @@ import type { PlinkoGameResult as BackendPlinkoResult } from '../declarations/pl
 const ROWS = 8;
 const ANIMATION_SAFETY_TIMEOUT_MS = 15000;
 const PLINKO_BACKEND_CANISTER_ID = 'weupr-2qaaa-aaaap-abl3q-cai';
+const MAX_BET_SAFETY_MARGIN = 0.9;
 
 interface PlinkoGameResult {
   path: boolean[];
@@ -81,9 +82,9 @@ export const Plinko: React.FC = () => {
       if (!actor) return;
 
       try {
+        const actorAny = actor as any;
         const [multsBp, formulaText, ev] = await Promise.all([
-          // @ts-ignore
-          actor.get_multipliers_bp ? actor.get_multipliers_bp() : actor.get_multipliers(),
+          actorAny.get_multipliers_bp ? actorAny.get_multipliers_bp() : actor.get_multipliers(),
           actor.get_formula(),
           actor.get_expected_value()
         ]);
@@ -114,7 +115,7 @@ export const Plinko: React.FC = () => {
         const result = await actor.get_max_bet_per_ball(ballCount);
         if ('Ok' in result) {
           // 90% safety margin for UI
-          const maxBetUSDT = (Number(result.Ok) / DECIMALS_PER_CKUSDT) * 0.9;
+          const maxBetUSDT = (Number(result.Ok) / DECIMALS_PER_CKUSDT) * MAX_BET_SAFETY_MARGIN;
           const newMaxBet = Math.max(1, maxBetUSDT); // Min 1 USDT
           setMaxBet(newMaxBet);
           setBetAmount(prev => Math.min(prev, newMaxBet));
@@ -148,7 +149,7 @@ export const Plinko: React.FC = () => {
   }, [isPlaying]);
 
   const dropBalls = async () => {
-    if (!actor) return;
+    if (!actor || isPlaying) return;
 
     // Auth check
     if (!isAuthenticated) {
@@ -163,7 +164,7 @@ export const Plinko: React.FC = () => {
     }
 
     // Calculate bet in e8s (6 decimals for ckUSDT)
-    const betPerBallE8s = BigInt(Math.floor(betAmount * DECIMALS_PER_CKUSDT));
+    const betPerBallE8s = BigInt(Math.round(betAmount * DECIMALS_PER_CKUSDT));
     const totalBetE8s = betPerBallE8s * BigInt(ballCount);
 
     // Validate total bet against balance
