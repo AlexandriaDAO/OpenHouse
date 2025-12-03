@@ -163,6 +163,9 @@ pub async fn play_dice(
     accounting::update_balance(caller, new_balance)?;
 
     // Settle bet with pool
+    // Race note: If pool drains during VRF (~2-4s), settle_bet can fail and user gets
+    // only bet refund. Requires 6-7 concurrent max-wins or large LP withdrawal—attacker
+    // scenario only. Refusing payout under attack is correct; accounting stays consistent.
     if let Err(e) = liquidity_pool::settle_bet(bet_amount, payout) {
         // Pool couldn't afford payout - rollback user balance and refund bet
         let refund_balance = current_balance.checked_add(bet_amount)
@@ -312,7 +315,7 @@ pub async fn play_multi_dice(
     let new_balance = current_balance.checked_add(total_payout).ok_or("Error: balance overflow")?;
     accounting::update_balance(caller, new_balance)?;
 
-    // Settle with pool
+    // Settle with pool (see race condition note in play_dice)
     if let Err(e) = liquidity_pool::settle_bet(total_bet, total_payout) {
         // Rollback on pool failure
         let refund_balance = current_balance.checked_add(total_bet).ok_or("Error: refund overflow")?;
