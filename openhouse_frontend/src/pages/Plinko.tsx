@@ -33,7 +33,6 @@ export const Plinko: React.FC = () => {
   const [gameError, setGameError] = useState('');
   const [ballCount, setBallCount] = useState<number>(1);
   const [multiBallResult, setMultiBallResult] = useState<MultiBallBackendResult | null>(null);
-  const [currentBallIndex, setCurrentBallIndex] = useState<number>(0);
 
   // Fixed configuration - no user choices
   const ROWS = 8;
@@ -65,15 +64,6 @@ export const Plinko: React.FC = () => {
     loadGameData();
   }, [actor]);
 
-  const animateNextBall = (results: any[], index: number) => {
-    if (index < results.length) {
-      setCurrentResult({
-        ...results[index],
-        timestamp: Date.now(),
-      });
-    }
-  };
-
   // Drop multiple balls (or single)
   const dropMultipleBalls = async () => {
     if (!actor) return;
@@ -81,7 +71,6 @@ export const Plinko: React.FC = () => {
     setIsPlaying(true);
     setGameError('');
     setMultiBallResult(null);
-    setCurrentBallIndex(0);
     setCurrentResult(null);
 
     try {
@@ -94,6 +83,7 @@ export const Plinko: React.FC = () => {
             ...result.Ok,
             timestamp: Date.now(),
           };
+          // Set result immediately for state, but animation will handle visual timing
           setCurrentResult(gameResult);
         } else {
           setGameError(result.Err);
@@ -106,8 +96,7 @@ export const Plinko: React.FC = () => {
 
         if ('Ok' in result) {
           setMultiBallResult(result.Ok);
-          // Start sequential animation
-          animateNextBall(result.Ok.results, 0);
+          // No sequential animation needed anymore - PlinkoBoard handles it
         } else {
           setGameError(result.Err);
           setIsPlaying(false);
@@ -121,19 +110,8 @@ export const Plinko: React.FC = () => {
   };
 
   const handleAnimationComplete = useCallback(() => {
-    if (multiBallResult && currentBallIndex < multiBallResult.results.length - 1) {
-      // Animate next ball
-      const nextIndex = currentBallIndex + 1;
-      setCurrentBallIndex(nextIndex);
-      // Small delay between balls
-      setTimeout(() => {
-        animateNextBall(multiBallResult.results, nextIndex);
-      }, 100);
-    } else {
-      // All balls animated
-      setIsPlaying(false);
-    }
-  }, [multiBallResult, currentBallIndex]);
+    setIsPlaying(false);
+  }, []);
 
   // Calculate stats
   const houseEdge = ((1 - expectedValue) * 100).toFixed(2);
@@ -222,10 +200,18 @@ export const Plinko: React.FC = () => {
       <div className="card max-w-4xl mx-auto">
         <PlinkoBoard
           rows={ROWS}
-          path={currentResult?.path || null}
+          paths={
+             isPlaying 
+               ? (ballCount === 1 && currentResult ? [currentResult.path] : multiBallResult?.results.map(r => r.path) || null)
+               : null
+          }
           isDropping={isPlaying}
           onAnimationComplete={handleAnimationComplete}
-          finalPosition={currentResult?.final_position}
+          finalPositions={
+            ballCount === 1 
+              ? (currentResult ? [currentResult.final_position] : [])
+              : (multiBallResult?.results.map(r => r.final_position) || [])
+          }
         />
 
         {/* Multiplier Display with Win/Loss Indicators */}
