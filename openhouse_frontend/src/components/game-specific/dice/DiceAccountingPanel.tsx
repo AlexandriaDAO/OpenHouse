@@ -38,6 +38,15 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  // Calculate max: wallet balance minus two fees (approval + transfer = 0.02 USDT)
+  const handleMaxClick = () => {
+    if (!walletBalance) return;
+    const twoFees = BigInt(2 * TRANSFER_FEE); // 0.02 USDT
+    const maxAmount = walletBalance > twoFees ? walletBalance - twoFees : BigInt(0);
+    const maxUSDT = Number(maxAmount) / DECIMALS_PER_CKUSDT;
+    setDepositAmount(maxUSDT.toFixed(2));
+  };
+
   // Handle deposit
   const handleDeposit = async () => {
     if (!actor || !ledgerActor || !isAuthenticated) return;
@@ -238,17 +247,30 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
 
             <div className="mb-4">
               <label className="block text-sm text-gray-400 mb-2">Amount (USDT)</label>
-              <input
-                type="number"
-                value={depositAmount}
-                onChange={(e) => setDepositAmount(e.target.value)}
-                className="w-full bg-gray-900/50 border border-gray-700 rounded px-4 py-2 text-white"
-                placeholder="Enter amount"
-                min="1"
-                step="1"
-                disabled={isDepositing}
-                autoFocus
-              />
+              <div className="relative">
+                <input
+                  type="number"
+                  value={depositAmount}
+                  onChange={(e) => setDepositAmount(e.target.value)}
+                  className="w-full bg-gray-900/50 border border-gray-700 rounded px-4 py-2 pr-24 text-white"
+                  placeholder="Enter amount"
+                  min="1"
+                  step="1"
+                  disabled={isDepositing}
+                  autoFocus
+                />
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleMaxClick}
+                    disabled={isDepositing || !walletBalance}
+                    className="px-2 py-1 text-xs font-bold bg-dfinity-turquoise/20 hover:bg-dfinity-turquoise/30 text-dfinity-turquoise rounded border border-dfinity-turquoise/30 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                  >
+                    MAX
+                  </button>
+                  <span className="text-gray-500 font-mono text-sm">USDT</span>
+                </div>
+              </div>
               <p className="text-xs text-gray-500 mt-1">Minimum: 1 USDT</p>
               <p className="text-xs text-gray-400 mt-2 bg-gray-900/50 border border-gray-700/30 rounded px-2 py-1">
                 ℹ️ Deposit requires two steps: approve spending, then transfer

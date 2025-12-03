@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Principal } from '@dfinity/principal';
 import { useAuth } from '../../providers/AuthProvider';
+import { useBalance } from '../../providers/BalanceProvider';
 import useDiceActor from '../../hooks/actors/useDiceActor';
 import useLedgerActor from '../../hooks/actors/useLedgerActor';
 import { DECIMALS_PER_CKUSDT, TRANSFER_FEE } from '../../types/balance';
@@ -31,6 +32,7 @@ const DICE_BACKEND_CANISTER_ID = 'whchi-hyaaa-aaaao-a4ruq-cai';
 export function DiceLiquidity() {
   const navigate = useNavigate();
   const { isAuthenticated, principal } = useAuth();
+  const { balance: walletBalance } = useBalance();
   const { actor: diceActor } = useDiceActor();
   const { actor: ledgerActor } = useLedgerActor();
 
@@ -48,6 +50,15 @@ export function DiceLiquidity() {
 
   // Fetch APY data for stats bar using lightweight hook
   const { apy7, isLoading: apyLoading, error: apyError } = useApyData();
+
+  // Calculate max: wallet balance minus two fees (approval + transfer = 0.02 USDT)
+  const handleMaxClick = () => {
+    if (!walletBalance) return;
+    const twoFees = BigInt(2 * TRANSFER_FEE); // 0.02 USDT
+    const maxAmount = walletBalance > twoFees ? walletBalance - twoFees : BigInt(0);
+    const maxUSDT = Number(maxAmount) / DECIMALS_PER_CKUSDT;
+    setDepositAmount(maxUSDT.toFixed(2));
+  };
 
   // Load pool stats
   useEffect(() => {
@@ -393,14 +404,24 @@ export function DiceLiquidity() {
                         type="number"
                         value={depositAmount}
                         onChange={(e) => setDepositAmount(e.target.value)}
-                        className="w-full bg-gray-950/50 border border-gray-700 rounded-lg px-4 py-3 pr-16 text-white font-mono focus:ring-2 focus:ring-dfinity-turquoise/50 outline-none"
+                        className="w-full bg-gray-950/50 border border-gray-700 rounded-lg px-4 py-3 pr-24 text-white font-mono focus:ring-2 focus:ring-dfinity-turquoise/50 outline-none"
                         placeholder="10"
                         min="10"
                         disabled={isDepositing}
                       />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm font-bold pointer-events-none select-none bg-transparent">
-                        USDT
-                      </span>
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleMaxClick}
+                          disabled={isDepositing || !walletBalance}
+                          className="px-2 py-1 text-xs font-bold bg-dfinity-turquoise/20 hover:bg-dfinity-turquoise/30 text-dfinity-turquoise rounded border border-dfinity-turquoise/30 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                        >
+                          MAX
+                        </button>
+                        <span className="text-gray-500 text-sm font-bold pointer-events-none select-none">
+                          USDT
+                        </span>
+                      </div>
                     </div>
                     <button
                       onClick={handleDeposit}

@@ -33,6 +33,7 @@ const games: GameInfo[] = [
     houseEdge: 1,
     path: '/crash',
     icon: '🚀',
+    comingSoon: true,
   },
   {
     id: 'blackjack',
@@ -43,6 +44,7 @@ const games: GameInfo[] = [
     houseEdge: 1,
     path: '/blackjack',
     icon: '🃏',
+    comingSoon: true,
   },
 ];
 

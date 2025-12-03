@@ -16,4 +16,5 @@ export interface GameInfo {
   path: string;
   icon: string;
   badge?: string;
+  comingSoon?: boolean;
 }

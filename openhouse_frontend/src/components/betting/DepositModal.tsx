@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom';
-import { formatUSDT } from '../../types/balance';
+import { formatUSDT, DECIMALS_PER_CKUSDT, TRANSFER_FEE } from '../../types/balance';
 import type { DepositFlowState } from './types';
 
 interface DepositModalProps {
@@ -19,6 +19,15 @@ export function DepositModal({ deposit }: DepositModalProps) {
     walletBalance,
   } = deposit;
 
+  // Calculate max: wallet balance minus two fees (approval + transfer = 0.02 USDT)
+  const handleMaxClick = () => {
+    if (!walletBalance) return;
+    const twoFees = BigInt(2 * TRANSFER_FEE); // 0.02 USDT
+    const maxAmount = walletBalance > twoFees ? walletBalance - twoFees : BigInt(0);
+    const maxUSDT = Number(maxAmount) / DECIMALS_PER_CKUSDT;
+    setDepositAmount(maxUSDT.toFixed(2));
+  };
+
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
@@ -37,14 +46,24 @@ export function DepositModal({ deposit }: DepositModalProps) {
               type="number"
               value={depositAmount}
               onChange={(e) => setDepositAmount(e.target.value)}
-              className="w-full bg-black/50 border border-gray-600 rounded-lg px-4 py-3 text-white text-lg focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500/50 transition"
+              className="w-full bg-black/50 border border-gray-600 rounded-lg px-4 py-3 pr-24 text-white text-lg focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500/50 transition"
               placeholder="1.0"
               min="1"
               step="1"
               disabled={isDepositing}
               autoFocus
             />
-            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 font-mono">USDT</span>
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleMaxClick}
+                disabled={isDepositing || !walletBalance}
+                className="px-2 py-1 text-xs font-bold bg-green-600/20 hover:bg-green-600/30 text-green-400 rounded border border-green-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition"
+              >
+                MAX
+              </button>
+              <span className="text-gray-500 font-mono text-sm">USDT</span>
+            </div>
           </div>
           <div className="flex justify-between items-center mt-2 text-xs text-gray-500">
             <span>Wallet: {formatUSDT(walletBalance)}</span>

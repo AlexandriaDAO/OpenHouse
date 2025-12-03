@@ -9,20 +9,31 @@ interface GameCardProps {
 export const GameCard: React.FC<GameCardProps> = ({ game }) => {
   const navigate = useNavigate();
 
+  const handleClick = () => {
+    if (!game.comingSoon) {
+      navigate(game.path);
+    }
+  };
+
   return (
     <div
-      className="game-card"
-      onClick={() => navigate(game.path)}
+      className={`game-card relative ${game.comingSoon ? 'opacity-60 cursor-not-allowed' : ''}`}
+      onClick={handleClick}
       role="button"
       tabIndex={0}
       onKeyPress={(e) => {
-        if (e.key === 'Enter') navigate(game.path);
+        if (e.key === 'Enter' && !game.comingSoon) navigate(game.path);
       }}
     >
+      {game.comingSoon && (
+        <div className="absolute top-4 right-4 bg-yellow-500 text-black px-3 py-1 rounded-full text-xs font-bold">
+          COMING SOON
+        </div>
+      )}
       <div className="text-4xl mb-4">{game.icon}</div>
       <div className="flex items-center justify-center gap-2 mb-2">
         <h2 className="text-2xl font-bold">{game.name}</h2>
-        {game.badge && (
+        {game.badge && !game.comingSoon && (
           <span className="bg-purple-600 text-white px-2 py-1 rounded text-xs font-semibold">
             {game.badge}
           </span>
