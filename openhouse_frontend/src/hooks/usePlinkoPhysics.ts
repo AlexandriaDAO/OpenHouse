@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
+import Matter from 'matter-js';
 
 interface PhysicsConfig {
   rows: number;
@@ -22,184 +23,272 @@ function calculateFinalSlot(path: boolean[]): number {
 const BOARD_WIDTH = 1000;
 const DROP_ZONE_HEIGHT = 100;
 
+// Collision categories for filtering
+const CATEGORY_PEG = 0x0001;
+const CATEGORY_BALL = 0x0002;
+const CATEGORY_WALL = 0x0004;
+
 export function usePlinkoPhysics(
   canvasRef: React.RefObject<HTMLCanvasElement>,
   config: PhysicsConfig,
   onBallLanded: (ballId: number, position: number) => void
 ) {
-  const runnerRef = useRef<{ stop: () => void }>();
-  const ballsRef = useRef<Map<number, { x: number; y: number; vx: number; vy: number; path: boolean[]; id: number; slot: number; landed: boolean }>>(new Map());
+  const engineRef = useRef<Matter.Engine | null>(null);
+  const renderRef = useRef<Matter.Render | null>(null);
+  const runnerRef = useRef<Matter.Runner | null>(null);
+  const ballsRef = useRef<Map<number, { body: Matter.Body; path: boolean[]; slot: number; landed: boolean }>>(new Map());
   const configRef = useRef(config);
+  const onBallLandedRef = useRef(onBallLanded);
+
   configRef.current = config;
+  onBallLandedRef.current = onBallLanded;
 
   const centerX = BOARD_WIDTH / 2;
+  const canvasHeight = DROP_ZONE_HEIGHT + config.rows * config.pegSpacingY + 120;
 
+  // Initialize Matter.js engine and renderer
   useEffect(() => {
     if (!canvasRef.current) return;
 
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const canvasHeight = DROP_ZONE_HEIGHT + config.rows * config.pegSpacingY + 120;
 
     // Set canvas dimensions
     canvas.width = BOARD_WIDTH;
     canvas.height = canvasHeight;
 
-    // Calculate peg positions
-    const pegs: { x: number; y: number }[] = [];
+    // Create engine
+    const engine = Matter.Engine.create({
+      gravity: { x: 0, y: 0.5 }
+    });
+    engineRef.current = engine;
+
+    // Create renderer attached to our canvas
+    const render = Matter.Render.create({
+      canvas: canvas,
+      engine: engine,
+      options: {
+        width: BOARD_WIDTH,
+        height: canvasHeight,
+        wireframes: false,
+        background: 'transparent',
+        pixelRatio: window.devicePixelRatio || 1
+      }
+    });
+    renderRef.current = render;
+
+    // Create pegs
+    const pegs: Matter.Body[] = [];
     for (let row = 0; row <= config.rows; row++) {
       const pegsInRow = row + 1;
       for (let col = 0; col < pegsInRow; col++) {
         const x = centerX + (col - row / 2) * config.pegSpacingX;
         const y = DROP_ZONE_HEIGHT + row * config.pegSpacingY;
-        pegs.push({ x, y });
+
+        const peg = Matter.Bodies.circle(x, y, config.pegRadius, {
+          isStatic: true,
+          restitution: 0.5,
+          friction: 0.1,
+          render: {
+            fillStyle: '#e8e8e8'
+          },
+          collisionFilter: {
+            category: CATEGORY_PEG,
+            mask: CATEGORY_BALL
+          },
+          label: 'peg'
+        });
+        pegs.push(peg);
       }
     }
 
-    // Animation loop
-    let animationId: number;
-    const gravity = 0.12;      // Slower falling (was 0.3)
-    const bounce = 0.45;       // Less bouncy (was 0.6)
-    const hFriction = 0.92;    // More horizontal dampening (was 0.98)
+    // Create boundary walls (invisible)
+    const leftWallX = centerX - (config.rows / 2 + 1.5) * config.pegSpacingX;
+    const rightWallX = centerX + (config.rows / 2 + 1.5) * config.pegSpacingX;
 
-    const animate = () => {
-      ctx.clearRect(0, 0, BOARD_WIDTH, canvasHeight);
+    const leftWall = Matter.Bodies.rectangle(
+      leftWallX, canvasHeight / 2, 20, canvasHeight,
+      {
+        isStatic: true,
+        render: { visible: false },
+        collisionFilter: {
+          category: CATEGORY_WALL,
+          mask: CATEGORY_BALL
+        }
+      }
+    );
 
-      // Draw pegs - minimal white style
-      pegs.forEach(peg => {
-        ctx.beginPath();
-        ctx.arc(peg.x, peg.y, config.pegRadius, 0, Math.PI * 2);
-        ctx.fillStyle = '#e8e8e8';
-        ctx.fill();
+    const rightWall = Matter.Bodies.rectangle(
+      rightWallX, canvasHeight / 2, 20, canvasHeight,
+      {
+        isStatic: true,
+        render: { visible: false },
+        collisionFilter: {
+          category: CATEGORY_WALL,
+          mask: CATEGORY_BALL
+        }
+      }
+    );
+
+    // Create slot dividers at the bottom to guide balls into slots
+    const bottomY = DROP_ZONE_HEIGHT + config.rows * config.pegSpacingY + 30;
+    const slotDividers: Matter.Body[] = [];
+    for (let i = 0; i <= config.rows + 1; i++) {
+      const x = centerX + (i - config.rows / 2 - 0.5) * config.pegSpacingX;
+      const divider = Matter.Bodies.rectangle(x, bottomY + 30, 4, 60, {
+        isStatic: true,
+        render: { visible: false },
+        collisionFilter: {
+          category: CATEGORY_WALL,
+          mask: CATEGORY_BALL
+        }
       });
+      slotDividers.push(divider);
+    }
 
-      // Update and draw balls
+    // Add all bodies to world
+    Matter.Composite.add(engine.world, [...pegs, leftWall, rightWall, ...slotDividers]);
+
+    // Create runner
+    const runner = Matter.Runner.create();
+    runnerRef.current = runner;
+
+    // Track ball positions for landing detection
+    const checkLandings = () => {
       const cfg = configRef.current;
+      const landingY = DROP_ZONE_HEIGHT + cfg.rows * cfg.pegSpacingY + 40;
 
-      ballsRef.current.forEach((ball) => {
-        if (ball.landed) return;
+      ballsRef.current.forEach((ballData, ballId) => {
+        if (ballData.landed) return;
 
-        // Apply gravity
-        ball.vy += gravity;
+        const ball = ballData.body;
 
-        // Calculate which row we're approaching
-        const nextY = ball.y + ball.vy;
-        const currentRow = Math.floor((ball.y - DROP_ZONE_HEIGHT + cfg.pegSpacingY / 2) / cfg.pegSpacingY);
-        const nextRow = Math.floor((nextY - DROP_ZONE_HEIGHT + cfg.pegSpacingY / 2) / cfg.pegSpacingY);
+        // Check if ball has landed
+        if (ball.position.y > landingY && Math.abs(ball.velocity.y) < 2) {
+          ballData.landed = true;
 
-        // If crossing into a new row, apply the path direction with lerping for smooth transition
-        if (nextRow > currentRow && currentRow >= 0 && currentRow < ball.path.length) {
-          const goRight = ball.path[currentRow];
-          const targetVx = goRight ? 1.5 : -1.5;
-          // Lerp toward target for smooth, natural movement
-          ball.vx = ball.vx * 0.5 + targetVx * 0.5;
-        }
+          // Snap ball to slot center
+          const slotX = centerX + (ballData.slot - cfg.rows / 2) * cfg.pegSpacingX;
+          Matter.Body.setPosition(ball, { x: slotX, y: landingY });
+          Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+          Matter.Body.setStatic(ball, true);
 
-        // Apply friction to horizontal movement
-        ball.vx *= hFriction;
+          onBallLandedRef.current(ballId, ballData.slot);
 
-        // Move ball
-        ball.x += ball.vx;
-        ball.y += ball.vy;
-
-        // Bounce off pegs (smooth collision)
-        pegs.forEach(peg => {
-          const dx = ball.x - peg.x;
-          const dy = ball.y - peg.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          const minDist = cfg.ballRadius + cfg.pegRadius;
-
-          if (dist < minDist && dist > 0) {
-            // Collision! Push ball out with slight extra clearance
-            const overlap = minDist - dist;
-            const nx = dx / dist;
-            const ny = dy / dist;
-
-            ball.x += nx * (overlap + 1);
-            ball.y += ny * (overlap + 1);
-
-            // Slower, more controlled bounce
-            const dot = ball.vx * nx + ball.vy * ny;
-            ball.vx = (ball.vx - 1.8 * dot * nx) * bounce;
-            ball.vy = Math.max(0.5, (ball.vy - 1.8 * dot * ny) * bounce);
-          }
-        });
-
-        // Keep ball in bounds horizontally
-        const minX = centerX - (cfg.rows / 2 + 1) * cfg.pegSpacingX;
-        const maxX = centerX + (cfg.rows / 2 + 1) * cfg.pegSpacingX;
-        if (ball.x < minX) {
-          ball.x = minX;
-          ball.vx = Math.abs(ball.vx) * bounce;
-        }
-        if (ball.x > maxX) {
-          ball.x = maxX;
-          ball.vx = -Math.abs(ball.vx) * bounce;
-        }
-
-        // Check for landing
-        const bottomY = DROP_ZONE_HEIGHT + cfg.rows * cfg.pegSpacingY + 30;
-        if (ball.y > bottomY) {
-          ball.landed = true;
-          // Snap to predetermined slot
-          ball.x = centerX + (ball.slot - cfg.rows / 2) * cfg.pegSpacingX;
-          ball.y = bottomY;
-          onBallLanded(ball.id, ball.slot);
-
-          // Remove after delay
+          // Remove ball after delay
           setTimeout(() => {
-            ballsRef.current.delete(ball.id);
+            if (engineRef.current) {
+              Matter.Composite.remove(engineRef.current.world, ball);
+            }
+            ballsRef.current.delete(ballId);
           }, 600);
         }
-
-        // Draw ball - simple gold style
-        ctx.beginPath();
-        ctx.arc(ball.x, ball.y, cfg.ballRadius, 0, Math.PI * 2);
-        const gradient = ctx.createRadialGradient(
-          ball.x - cfg.ballRadius * 0.25, ball.y - cfg.ballRadius * 0.25, 0,
-          ball.x, ball.y, cfg.ballRadius
-        );
-        gradient.addColorStop(0, '#ffd54f');   // Light gold highlight
-        gradient.addColorStop(0.5, '#d4a817'); // Gold
-        gradient.addColorStop(1, '#b8860b');   // Dark gold edge
-        ctx.fillStyle = gradient;
-        ctx.fill();
       });
-
-      animationId = requestAnimationFrame(animate);
     };
 
-    animate();
+    // Apply guiding forces to balls based on their path
+    const applyGuidingForces = () => {
+      const cfg = configRef.current;
 
-    runnerRef.current = {
-      stop: () => cancelAnimationFrame(animationId)
+      ballsRef.current.forEach((ballData) => {
+        if (ballData.landed) return;
+
+        const ball = ballData.body;
+        const y = ball.position.y;
+
+        // Determine which row we're near
+        const rowFloat = (y - DROP_ZONE_HEIGHT) / cfg.pegSpacingY;
+        const currentRow = Math.floor(rowFloat);
+
+        // Only apply force when between rows and we have path data
+        if (currentRow >= 0 && currentRow < ballData.path.length) {
+          const goRight = ballData.path[currentRow];
+
+          // Calculate target x for this row transition
+          const forceMagnitude = 0.0003;
+          const forceX = goRight ? forceMagnitude : -forceMagnitude;
+
+          // Apply gentle horizontal force
+          Matter.Body.applyForce(ball, ball.position, { x: forceX, y: 0 });
+        }
+
+        // As ball gets closer to bottom, apply stronger centering force to slot
+        if (currentRow >= cfg.rows - 2) {
+          const targetX = centerX + (ballData.slot - cfg.rows / 2) * cfg.pegSpacingX;
+          const dx = targetX - ball.position.x;
+          const centeringForce = dx * 0.00002;
+          Matter.Body.applyForce(ball, ball.position, { x: centeringForce, y: 0 });
+        }
+      });
     };
+
+    // Event listener for engine updates
+    Matter.Events.on(engine, 'afterUpdate', () => {
+      applyGuidingForces();
+      checkLandings();
+    });
+
+    // Start the engine and renderer
+    Matter.Runner.run(runner, engine);
+    Matter.Render.run(render);
 
     return () => {
-      cancelAnimationFrame(animationId);
+      Matter.Render.stop(render);
+      Matter.Runner.stop(runner);
+      Matter.Engine.clear(engine);
+      Matter.Composite.clear(engine.world, false);
       ballsRef.current.clear();
     };
-  }, [config.rows, config.pegSpacingX, config.pegSpacingY, config.pegRadius, config.ballRadius, centerX, onBallLanded]);
+  }, [config.rows, config.pegSpacingX, config.pegSpacingY, config.pegRadius, config.ballRadius, centerX, canvasHeight]);
 
   const dropBall = useCallback((ballData: BallPath) => {
+    if (!engineRef.current) return;
+
+    const cfg = configRef.current;
     const finalSlot = calculateFinalSlot(ballData.path);
-    const randomX = (Math.random() - 0.5) * 4;
+    const randomX = (Math.random() - 0.5) * 8;
+
+    // Create ball with gold gradient-like appearance
+    const ball = Matter.Bodies.circle(
+      centerX + randomX,
+      DROP_ZONE_HEIGHT - 20,
+      cfg.ballRadius,
+      {
+        restitution: 0.5,
+        friction: 0.05,
+        frictionAir: 0.01,
+        density: 0.001,
+        render: {
+          fillStyle: '#d4a817',
+          strokeStyle: '#b8860b',
+          lineWidth: 2
+        },
+        collisionFilter: {
+          category: CATEGORY_BALL,
+          mask: CATEGORY_PEG | CATEGORY_WALL | CATEGORY_BALL
+        },
+        label: `ball-${ballData.id}`
+      }
+    );
+
+    // Add small random initial velocity
+    Matter.Body.setVelocity(ball, { x: (Math.random() - 0.5) * 0.5, y: 1 });
+
+    Matter.Composite.add(engineRef.current.world, ball);
 
     ballsRef.current.set(ballData.id, {
-      x: centerX + randomX,
-      y: DROP_ZONE_HEIGHT - 20,
-      vx: 0,
-      vy: 0,
+      body: ball,
       path: ballData.path,
-      id: ballData.id,
       slot: finalSlot,
       landed: false
     });
   }, [centerX]);
 
   const clearBalls = useCallback(() => {
+    if (!engineRef.current) return;
+
+    ballsRef.current.forEach((ballData) => {
+      Matter.Composite.remove(engineRef.current!.world, ballData.body);
+    });
     ballsRef.current.clear();
   }, []);
 
