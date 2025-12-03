@@ -2,10 +2,19 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import usePlinkoActor from '../hooks/actors/usePlinkoActor';
 import { GameLayout } from '../components/game-ui';
 import { PlinkoBoard } from '../components/game-specific/plinko';
+import useLedgerActor from '../hooks/actors/useLedgerActor';
+import { BettingRail } from '../components/betting';
+import { useGameBalance } from '../providers/GameBalanceProvider';
+import { useBalance } from '../providers/BalanceProvider';
+import { useAuth } from '../providers/AuthProvider';
+import { DECIMALS_PER_CKUSDT, formatUSDT } from '../types/balance';
+import type { PlinkoGameResult as BackendPlinkoResult } from '../declarations/plinko_backend/plinko_backend.did';
 
 // Game Constants
 const ROWS = 8;
 const ANIMATION_SAFETY_TIMEOUT_MS = 15000;
+const PLINKO_BACKEND_CANISTER_ID = 'weupr-2qaaa-aaaap-abl3q-cai';
+const MAX_BET_SAFETY_MARGIN = 0.9;
 
 type GamePhase = 'idle' | 'filling' | 'releasing' | 'animating' | 'complete';
 
@@ -15,6 +24,9 @@ interface PlinkoGameResult {
   multiplier: number;
   win: boolean;
   timestamp: number;
+  bet_amount?: number;
+  payout?: number;
+  profit?: number;
 }
 
 interface MultiBallBackendResult {
@@ -27,6 +39,9 @@ interface MultiBallBackendResult {
   total_balls: number;
   total_wins: number;
   average_multiplier: number;
+  total_bet?: number;
+  total_payout?: number;
+  net_profit?: number;
 }
 
 // Helper to delay execution
@@ -34,6 +49,12 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const Plinko: React.FC = () => {
   const { actor } = usePlinkoActor();
+  const { actor: ledgerActor } = useLedgerActor();
+  const { isAuthenticated } = useAuth();
+  const { balance: walletBalance, refreshBalance: refreshWalletBalance } = useBalance();
+  const gameBalanceContext = useGameBalance('plinko');
+  const { refresh: refreshGameBalance } = gameBalanceContext;
+  const balance = gameBalanceContext.balance;
 
   // Game phase state machine
   const [gamePhase, setGamePhase] = useState<GamePhase>('idle');
@@ -52,8 +73,23 @@ export const Plinko: React.FC = () => {
   const [multiBallResult, setMultiBallResult] = useState<MultiBallBackendResult | null>(null);
   const [showInfoModal, setShowInfoModal] = useState(false);
 
+  // Betting state
+  const [betAmount, setBetAmount] = useState(1);  // Per-ball bet (min 1 USDT)
+  const [maxBet, setMaxBet] = useState(100);
+
   // Ref to track if fill animation is complete
   const fillCompleteRef = useRef(false);
+
+  const handleBalanceRefresh = useCallback(async () => {
+    try {
+      await Promise.all([
+        refreshWalletBalance(),
+        refreshGameBalance()
+      ]);
+    } catch (err) {
+      console.error('Failed to refresh balances:', err);
+    }
+  }, [refreshWalletBalance, refreshGameBalance]);
 
   // Load game data on mount
   useEffect(() => {
@@ -61,9 +97,9 @@ export const Plinko: React.FC = () => {
       if (!actor) return;
 
       try {
+        const actorAny = actor as any;
         const [multsBp, formulaText, ev] = await Promise.all([
-          // @ts-ignore
-          actor.get_multipliers_bp ? actor.get_multipliers_bp() : actor.get_multipliers(),
+          actorAny.get_multipliers_bp ? actorAny.get_multipliers_bp() : actor.get_multipliers(),
           actor.get_formula(),
           actor.get_expected_value()
         ]);
@@ -85,6 +121,34 @@ export const Plinko: React.FC = () => {
 
     loadGameData();
   }, [actor]);
+
+  // Max bet calculation
+  useEffect(() => {
+    const updateMaxBet = async () => {
+      if (!actor) return;
+      try {
+        const result = await actor.get_max_bet_per_ball(ballCount);
+        if ('Ok' in result) {
+          // 90% safety margin for UI
+          const maxBetUSDT = (Number(result.Ok) / DECIMALS_PER_CKUSDT) * MAX_BET_SAFETY_MARGIN;
+          const newMaxBet = Math.max(1, maxBetUSDT); // Min 1 USDT
+          setMaxBet(newMaxBet);
+          setBetAmount(prev => Math.min(prev, newMaxBet));
+        }
+      } catch (err) {
+        console.error('Failed to get max bet:', err);
+        setMaxBet(100); // Fallback
+      }
+    };
+    updateMaxBet();
+  }, [actor, ballCount]);
+
+  // Balance auto-refresh
+  useEffect(() => {
+    if (actor && isAuthenticated) {
+      refreshGameBalance().catch(console.error);
+    }
+  }, [actor, isAuthenticated, refreshGameBalance]);
 
   // Safety timeout
   useEffect(() => {
@@ -118,7 +182,29 @@ export const Plinko: React.FC = () => {
   };
 
   const dropBalls = async () => {
-    if (!actor) return;
+    if (!actor || isPlaying) return;
+
+    // Auth check
+    if (!isAuthenticated) {
+      setGameError('Please log in to play.');
+      return;
+    }
+
+    // Balance check
+    if (balance.game === 0n) {
+      setGameError('No chips! Use the + button below to deposit.');
+      return;
+    }
+
+    // Calculate bet in e8s (6 decimals for ckUSDT)
+    const betPerBallE8s = BigInt(Math.round(betAmount * DECIMALS_PER_CKUSDT));
+    const totalBetE8s = betPerBallE8s * BigInt(ballCount);
+
+    // Validate total bet against balance
+    if (totalBetE8s > balance.game) {
+      setGameError(`Insufficient balance. Total bet: $${(betAmount * ballCount).toFixed(2)}`);
+      return;
+    }
 
     // Reset state
     setGamePhase('filling');
@@ -127,16 +213,17 @@ export const Plinko: React.FC = () => {
     setIsWaitingForBackend(false);
     setPendingPaths(null);
     fillCompleteRef.current = false;
+    
     setIsPlaying(true);
     setGameError('');
     setMultiBallResult(null);
     setCurrentResult(null);
 
     try {
-      // Start backend request
+      // Start backend request (Betting Endpoints)
       const backendPromise = ballCount === 1
-        ? actor.drop_ball()
-        : actor.drop_multiple_balls(ballCount);
+        ? actor.play_plinko(betPerBallE8s)
+        : actor.play_multi_plinko(ballCount, betPerBallE8s);
 
       // Run fill animation in parallel
       const fillPromise = runFillAnimation(ballCount);
@@ -156,13 +243,23 @@ export const Plinko: React.FC = () => {
       let extractedPaths: boolean[][] = [];
 
       if (ballCount === 1) {
+        // Single ball with betting
         if ('Ok' in result) {
           const gameResult: PlinkoGameResult = {
-            ...result.Ok,
+            path: result.Ok.path,
+            final_position: result.Ok.final_position,
+            multiplier: result.Ok.multiplier,
+            win: result.Ok.is_win,
             timestamp: Date.now(),
+            bet_amount: Number(result.Ok.bet_amount) / DECIMALS_PER_CKUSDT,
+            payout: Number(result.Ok.payout) / DECIMALS_PER_CKUSDT,
+            profit: Number(result.Ok.profit) / DECIMALS_PER_CKUSDT,
           };
           setCurrentResult(gameResult);
           extractedPaths = [gameResult.path];
+          
+          // Refresh balance after game
+          refreshGameBalance().catch(console.error);
         } else {
           setGameError(result.Err);
           setGamePhase('idle');
@@ -171,9 +268,27 @@ export const Plinko: React.FC = () => {
           return;
         }
       } else {
+        // Multi-ball with betting
         if ('Ok' in result) {
-          setMultiBallResult(result.Ok);
-          extractedPaths = result.Ok.results.map(r => r.path);
+          const multiBallGameResult = {
+            results: result.Ok.results.map((r: BackendPlinkoResult) => ({
+              path: r.path,
+              final_position: r.final_position,
+              multiplier: r.multiplier,
+              win: r.is_win,
+            })),
+            total_balls: result.Ok.total_balls,
+            total_wins: result.Ok.results.filter((r: BackendPlinkoResult) => r.is_win).length,
+            average_multiplier: result.Ok.average_multiplier,
+            total_bet: Number(result.Ok.total_bet) / DECIMALS_PER_CKUSDT,
+            total_payout: Number(result.Ok.total_payout) / DECIMALS_PER_CKUSDT,
+            net_profit: Number(result.Ok.net_profit) / DECIMALS_PER_CKUSDT,
+          };
+          setMultiBallResult(multiBallGameResult);
+          extractedPaths = result.Ok.results.map((r: BackendPlinkoResult) => r.path);
+
+          // Refresh balance after game
+          refreshGameBalance().catch(console.error);
         } else {
           setGameError(result.Err);
           setGamePhase('idle');
@@ -200,8 +315,8 @@ export const Plinko: React.FC = () => {
       setGamePhase('animating');
 
     } catch (err) {
-      console.error('Failed to drop balls:', err);
-      setGameError(err instanceof Error ? err.message : 'Failed to drop balls');
+      console.error('Failed to play plinko:', err);
+      setGameError(err instanceof Error ? err.message : 'Failed to play');
       setGamePhase('idle');
       setIsPlaying(false);
       setFillProgress(0);
@@ -217,6 +332,7 @@ export const Plinko: React.FC = () => {
   }, []);
 
   const houseEdge = ((1 - expectedValue) * 100).toFixed(2);
+  const CENTER_BUCKET_INDEX = Math.floor(multipliers.length / 2);
 
   return (
     <GameLayout hideFooter noScroll>
@@ -232,12 +348,20 @@ export const Plinko: React.FC = () => {
               max="30"
               value={ballCount}
               onChange={(e) => setBallCount(Number(e.target.value))}
-              disabled={isPlaying}
+              disabled={isPlaying || balance.game === 0n}
               className="flex-1 h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer
                        disabled:opacity-50 disabled:cursor-not-allowed"
             />
             <span className="text-sm text-white font-mono w-6 text-right">{ballCount}</span>
           </div>
+          
+          {/* Bet info for multi-ball */}
+          {ballCount > 1 && (
+            <div className="flex justify-center items-center gap-4 py-1 text-xs text-gray-400">
+              <span>Per ball: ${betAmount.toFixed(2)}</span>
+              <span className="text-white font-semibold">Total: ${(betAmount * ballCount).toFixed(2)}</span>
+            </div>
+          )}
         </div>
 
         {/* Game Board with integrated bucket */}
@@ -268,12 +392,22 @@ export const Plinko: React.FC = () => {
           {!isPlaying && currentResult && (
             <span className={`text-sm font-bold ${currentResult.win ? 'text-green-400' : 'text-red-400'}`}>
               {currentResult.win ? 'WIN' : 'LOST'} {currentResult.multiplier.toFixed(2)}x
+              {currentResult.profit !== undefined && (
+                <span className="ml-2">
+                  {currentResult.profit >= 0 ? '+' : ''}{currentResult.profit.toFixed(2)} USDT
+                </span>
+              )}
             </span>
           )}
           {!isPlaying && multiBallResult && (
             <span className="text-xs text-gray-300">
               AVG {multiBallResult.average_multiplier.toFixed(2)}x
               ({multiBallResult.total_wins}/{multiBallResult.total_balls} wins)
+              {multiBallResult.net_profit !== undefined && (
+                <span className={`ml-2 font-bold ${multiBallResult.net_profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {multiBallResult.net_profit >= 0 ? '+' : ''}{multiBallResult.net_profit.toFixed(2)} USDT
+                </span>
+              )}
             </span>
           )}
         </div>
@@ -295,6 +429,23 @@ export const Plinko: React.FC = () => {
             ?
           </button>
         </div>
+        
+        {/* BettingRail */}
+        <BettingRail
+          betAmount={betAmount}
+          onBetChange={setBetAmount}
+          maxBet={maxBet}
+          gameBalance={balance.game}
+          walletBalance={walletBalance}
+          houseBalance={balance.house}
+          ledgerActor={ledgerActor}
+          gameActor={actor}
+          onBalanceRefresh={handleBalanceRefresh}
+          disabled={isPlaying}
+          multiplier={multipliers[CENTER_BUCKET_INDEX] || 0.2}
+          canisterId={PLINKO_BACKEND_CANISTER_ID}
+          gameRoute="/plinko"
+        />
       </div>
 
       {/* Info Modal */}

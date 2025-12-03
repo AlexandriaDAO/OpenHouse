@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { ChipDenomination } from '../../game-specific/dice/chipConfig';
+import { ChipDenomination } from '../chipConfig';
 import { DECIMALS_PER_CKUSDT } from '../../../types/balance';
 import { RailStyle, BettingState, BettingRailProps } from '../types';
 

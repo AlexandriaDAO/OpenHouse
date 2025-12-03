@@ -43,6 +43,8 @@ export function BettingRail(props: any) {
     showDepositAnimation,
   } = betting;
 
+  const { gameRoute = '/dice' } = props;
+
   const atMax = betAmount >= maxBet || betAmount >= gameBalanceUSDT;
 
   // Handle cash out with confirmation
@@ -104,7 +106,7 @@ export function BettingRail(props: any) {
       </button>
 
       <button
-        onClick={() => navigate(isLiquidityRoute ? '/dice' : '/dice/liquidity')}
+        onClick={() => navigate(isLiquidityRoute ? gameRoute : `${gameRoute}/liquidity`)}
         className="icon-btn icon-btn--house"
         title={isLiquidityRoute ? 'Play Game' : 'Be The House'}
       >
@@ -231,7 +233,7 @@ export function BettingRail(props: any) {
                     </svg>
                   </button>
                   <button
-                    onClick={() => navigate(isLiquidityRoute ? '/dice' : '/dice/liquidity')}
+                    onClick={() => navigate(isLiquidityRoute ? gameRoute : `${gameRoute}/liquidity`)}
                     className="mobile-icon-btn mobile-icon-btn--house"
                     title={isLiquidityRoute ? 'Play Game' : 'Be The House'}
                   >
