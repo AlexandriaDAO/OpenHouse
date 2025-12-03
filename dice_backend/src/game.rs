@@ -40,6 +40,37 @@ pub fn calculate_multiplier_direct(target: u8, direction: &RollDirection) -> f64
     100.0 / winning_numbers  // Clean round numbers: 2x, 4x, 5x, 10x, 20x, 50x, 100x
 }
 
+/// Calculate payout for a bet with given multiplier (P0 fix: ensures consistent rounding)
+/// This helper guarantees identical payout calculation across max_payout checks and actual payouts
+#[inline]
+pub fn calculate_payout(bet_amount: u64, multiplier: f64) -> u64 {
+    (bet_amount as f64 * multiplier).round() as u64
+}
+
+/// Validate target number based on direction (P3 fix: shared validation logic)
+/// Returns Ok(()) if valid, Err with message if invalid
+pub fn validate_target_number(target: u8, direction: &RollDirection) -> Result<(), String> {
+    match direction {
+        RollDirection::Over => {
+            if target >= MAX_NUMBER {
+                return Err(format!("Invalid target: must be less than {} for Over rolls", MAX_NUMBER));
+            }
+            if target < 1 {
+                return Err("Invalid target: must be at least 1 for Over rolls".to_string());
+            }
+        }
+        RollDirection::Under => {
+            if target == 0 {
+                return Err("Invalid target: must be greater than 0 for Under rolls".to_string());
+            }
+            if target > MAX_NUMBER {
+                return Err(format!("Invalid target: must be at most {} for Under rolls", MAX_NUMBER));
+            }
+        }
+    }
+    Ok(())
+}
+
 // =============================================================================
 // MAIN GAME LOGIC
 // =============================================================================
@@ -55,51 +86,33 @@ pub async fn play_dice(
     // Check user has sufficient internal balance
     let user_balance = accounting::get_balance(caller);
     if user_balance < bet_amount {
-        let user_balance_usdt = user_balance as f64 / DECIMALS_PER_CKUSDT as f64;
-        let needed_usdt = bet_amount as f64 / DECIMALS_PER_CKUSDT as f64;
         return Err(format!(
             "INSUFFICIENT_BALANCE|Your dice balance: {:.4} USDT|Bet amount: {:.4} USDT|This bet was not placed and no funds were deducted.",
-            user_balance_usdt, needed_usdt
+            user_balance as f64 / DECIMALS_PER_CKUSDT as f64,
+            bet_amount as f64 / DECIMALS_PER_CKUSDT as f64
         ));
     }
 
-    // Validate input
+    // Validate bet amount
     if bet_amount < MIN_BET {
-        return Err(format!("Minimum bet is {} USDT", MIN_BET as f64 / DECIMALS_PER_CKUSDT as f64));
+        return Err(format!("Invalid bet: minimum is {:.2} USDT", MIN_BET as f64 / DECIMALS_PER_CKUSDT as f64));
     }
 
-    // Validate target number based on direction
-    match direction {
-        RollDirection::Over => {
-            if target_number >= MAX_NUMBER {
-                return Err(format!("Target must be less than {} for Over rolls", MAX_NUMBER));
-            }
-            if target_number < 1 {
-                return Err("Target must be at least 1 for Over rolls".to_string());
-            }
-        }
-        RollDirection::Under => {
-            if target_number == 0 {
-                return Err("Target must be greater than 0 for Under rolls".to_string());
-            }
-            if target_number > MAX_NUMBER {
-                return Err(format!("Target must be at most {} for Under rolls", MAX_NUMBER));
-            }
-        }
-    }
+    // Validate target number (P3: uses shared helper)
+    validate_target_number(target_number, &direction)?;
 
-    // Calculate win chance and multiplier for this specific bet
+    // Calculate multiplier for this specific bet
     let multiplier = calculate_multiplier_direct(target_number, &direction);
 
-    // NEW SIMPLIFIED CHECK - 10% house limit (uses cached balance for speed)
-    let max_payout = (bet_amount as f64 * multiplier).round() as u64;
+    // Check house limit (P0: uses shared payout calculator)
+    let max_payout = calculate_payout(bet_amount, multiplier);
     let max_allowed = accounting::get_max_allowed_payout();
     if max_allowed == 0 {
-        return Err("House balance not yet initialized. Please try again in a moment.".to_string());
+        return Err("Error: house balance not initialized, please try again".to_string());
     }
     if max_payout > max_allowed {
         return Err(format!(
-            "Max payout of {} USDT exceeds house limit of {} USDT (15% of house balance)",
+            "Invalid bet: max payout {:.2} USDT exceeds house limit {:.2} USDT (15% of pool)",
             max_payout as f64 / DECIMALS_PER_CKUSDT as f64,
             max_allowed as f64 / DECIMALS_PER_CKUSDT as f64
         ));
@@ -107,7 +120,7 @@ pub async fn play_dice(
 
     // Validate client seed length (DoS protection)
     if client_seed.len() > 256 {
-        return Err("Client seed too long (max 256 characters)".to_string());
+        return Err("Invalid seed: max 256 characters".to_string());
     }
 
     // Generate roll BEFORE deducting balance using per-game VRF
@@ -116,10 +129,10 @@ pub async fn play_dice(
 
     // Deduct bet AFTER all validations and fallible operations pass
     let balance_after_bet = user_balance.checked_sub(bet_amount)
-        .ok_or("Balance underflow")?;
+        .ok_or("Error: balance underflow")?;
     accounting::update_balance(caller, balance_after_bet)?;
 
-    // Record volume for daily statistics (game-agnostic)
+    // Record volume for daily statistics
     crate::defi_accounting::record_bet_volume(bet_amount);
 
     // Check for exact hit (house wins on exact target match - 0.99% edge)
@@ -135,8 +148,9 @@ pub async fn play_dice(
         }
     };
 
+    // Calculate payout (P0: uses shared calculator for consistency)
     let payout = if is_win {
-        (bet_amount as f64 * multiplier).round() as u64
+        calculate_payout(bet_amount, multiplier)
     } else {
         0
     };
@@ -148,21 +162,17 @@ pub async fn play_dice(
         .ok_or("Balance overflow when adding winnings")?;
     accounting::update_balance(caller, new_balance)?;
 
-    // Settle bet with pool using generic API
-    // settle_bet handles all payout scenarios mathematically:
-    // - payout > bet: pool pays profit
-    // - payout < bet: pool gains difference (handles partial payouts like Plinko 0.2x)
-    // - payout == bet: no pool change (push)
+    // Settle bet with pool
     if let Err(e) = liquidity_pool::settle_bet(bet_amount, payout) {
         // Pool couldn't afford payout - rollback user balance and refund bet
         let refund_balance = current_balance.checked_add(bet_amount)
-            .ok_or("Balance overflow on refund")?;
+            .ok_or("Error: balance overflow on refund")?;
         accounting::update_balance(caller, refund_balance)?;
 
         ic_cdk::println!("CRITICAL: Payout failure. Refunded {} to {}", bet_amount, caller);
 
         return Err(format!(
-            "House cannot afford payout. Your bet of {} USDT has been REFUNDED. {}",
+            "Error: house cannot afford payout. Your bet of {:.2} USDT has been refunded. {}",
             bet_amount as f64 / DECIMALS_PER_CKUSDT as f64,
             e
         ));
@@ -195,14 +205,14 @@ pub async fn play_multi_dice(
     client_seed: String,
     caller: Principal,
 ) -> Result<MultiDiceGameResult, String> {
-    // VALIDATION
+    // Validate dice count
     if dice_count == 0 || dice_count > MAX_DICE_COUNT {
-        return Err(format!("Dice count must be 1-{}", MAX_DICE_COUNT));
+        return Err(format!("Invalid dice count: must be 1-{}", MAX_DICE_COUNT));
     }
 
     let total_bet = (dice_count as u64)
         .checked_mul(bet_per_dice)
-        .ok_or("Bet calculation overflow")?;
+        .ok_or("Error: bet calculation overflow")?;
 
     // Check user balance
     let user_balance = accounting::get_balance(caller);
@@ -218,67 +228,51 @@ pub async fn play_multi_dice(
 
     // Validate per-dice bet
     if bet_per_dice < MIN_BET {
-        return Err(format!("Minimum bet per dice is {} USDT", MIN_BET as f64 / DECIMALS_PER_CKUSDT as f64));
+        return Err(format!("Invalid bet: minimum per dice is {:.2} USDT", MIN_BET as f64 / DECIMALS_PER_CKUSDT as f64));
     }
 
-    // Validate target number (same logic as single dice)
-    match direction {
-        RollDirection::Over => {
-            if target_number >= MAX_NUMBER {
-                return Err(format!("Target must be less than {} for Over rolls", MAX_NUMBER));
-            }
-            if target_number < 1 {
-                return Err("Target must be at least 1 for Over rolls".to_string());
-            }
-        }
-        RollDirection::Under => {
-            if target_number == 0 {
-                return Err("Target must be greater than 0 for Under rolls".to_string());
-            }
-            if target_number > MAX_NUMBER {
-                return Err(format!("Target must be at most {} for Under rolls", MAX_NUMBER));
-            }
-        }
-    }
+    // Validate target number (P3: uses shared helper)
+    validate_target_number(target_number, &direction)?;
 
     // Calculate multiplier (same for all dice)
     let multiplier = calculate_multiplier_direct(target_number, &direction);
 
-    // AGGREGATE MAX PAYOUT CHECK (worst case: all dice win)
-    let max_payout_per_dice = (bet_per_dice as f64 * multiplier).round() as u64;
+    // Aggregate max payout check - worst case: all dice win (P0: uses shared calculator)
+    let max_payout_per_dice = calculate_payout(bet_per_dice, multiplier);
     let max_aggregate_payout = max_payout_per_dice
         .checked_mul(dice_count as u64)
-        .ok_or("Max payout calculation overflow")?;
+        .ok_or("Error: max payout calculation overflow")?;
 
     let max_allowed = accounting::get_max_allowed_payout();
     if max_allowed == 0 {
-        return Err("House balance not yet initialized. Please try again in a moment.".to_string());
+        return Err("Error: house balance not initialized, please try again".to_string());
     }
     if max_aggregate_payout > max_allowed {
         return Err(format!(
-            "Max potential payout of {} USDT (if all {} dice win) exceeds house limit of {} USDT (15% of house balance). Reduce bet or dice count.",
+            "Invalid bet: max payout {:.2} USDT (all {} dice win) exceeds house limit {:.2} USDT (15% of pool)",
             max_aggregate_payout as f64 / DECIMALS_PER_CKUSDT as f64,
             dice_count,
             max_allowed as f64 / DECIMALS_PER_CKUSDT as f64
         ));
     }
 
+    // Validate client seed
     if client_seed.len() > 256 {
-        return Err("Client seed too long (max 256 characters)".to_string());
+        return Err("Invalid seed: max 256 characters".to_string());
     }
 
-    // VRF GENERATION (single call for all dice)
+    // VRF generation (single call for all dice)
     let (rolled_numbers, server_seed, nonce) =
         crate::seed::generate_multi_dice_roll_vrf(dice_count, &client_seed).await?;
     let server_seed_hash = crate::seed::hash_server_seed(&server_seed);
 
-    // DEDUCT TOTAL BET
-    let balance_after_bet = user_balance.checked_sub(total_bet).ok_or("Balance underflow")?;
+    // Deduct total bet
+    let balance_after_bet = user_balance.checked_sub(total_bet).ok_or("Error: balance underflow")?;
     accounting::update_balance(caller, balance_after_bet)?;
 
     crate::defi_accounting::record_bet_volume(total_bet);
 
-    // PROCESS EACH DICE
+    // Process each dice
     let mut dice_results = Vec::with_capacity(dice_count as usize);
     let mut total_wins: u8 = 0;
     let mut total_payout: u64 = 0;
@@ -294,8 +288,9 @@ pub async fn play_multi_dice(
             }
         };
 
+        // P0: uses shared calculator for consistency
         let payout = if is_win {
-            (bet_per_dice as f64 * multiplier).round() as u64
+            calculate_payout(bet_per_dice, multiplier)
         } else {
             0
         };
@@ -312,21 +307,21 @@ pub async fn play_multi_dice(
         });
     }
 
-    // CREDIT TOTAL PAYOUT
+    // Credit total payout
     let current_balance = accounting::get_balance(caller);
-    let new_balance = current_balance.checked_add(total_payout).ok_or("Balance overflow")?;
+    let new_balance = current_balance.checked_add(total_payout).ok_or("Error: balance overflow")?;
     accounting::update_balance(caller, new_balance)?;
 
-    // SETTLE WITH POOL
+    // Settle with pool
     if let Err(e) = liquidity_pool::settle_bet(total_bet, total_payout) {
         // Rollback on pool failure
-        let refund_balance = current_balance.checked_add(total_bet).ok_or("Refund overflow")?;
+        let refund_balance = current_balance.checked_add(total_bet).ok_or("Error: refund overflow")?;
         accounting::update_balance(caller, refund_balance)?;
 
         ic_cdk::println!("CRITICAL: Multi-dice payout failure. Refunded {} to {}", total_bet, caller);
 
         return Err(format!(
-            "House cannot afford payout. Your bet of {} USDT has been REFUNDED. {}",
+            "Error: house cannot afford payout. Your bet of {:.2} USDT has been refunded. {}",
             total_bet as f64 / DECIMALS_PER_CKUSDT as f64,
             e
         ));
@@ -355,17 +350,17 @@ pub fn calculate_max_bet_per_dice(
     direction: &RollDirection,
 ) -> Result<u64, String> {
     if dice_count == 0 || dice_count > MAX_DICE_COUNT {
-        return Err(format!("Dice count must be 1-{}", MAX_DICE_COUNT));
+        return Err(format!("Invalid dice count: must be 1-{}", MAX_DICE_COUNT));
     }
 
     let multiplier = calculate_multiplier_direct(target_number, direction);
     if multiplier <= 0.0 {
-        return Err("Invalid multiplier".to_string());
+        return Err("Invalid target: multiplier is zero".to_string());
     }
 
     let max_allowed = accounting::get_max_allowed_payout();
     if max_allowed == 0 {
-        return Err("House not initialized".to_string());
+        return Err("Error: house not initialized".to_string());
     }
 
     // max_allowed / (dice_count * multiplier)
@@ -379,18 +374,8 @@ pub fn calculate_max_bet_per_dice(
 
 // Calculate what the multiplier would be for given parameters (helper for UI)
 pub fn calculate_payout_info(target_number: u8, direction: RollDirection) -> Result<(f64, f64), String> {
-    match direction {
-        RollDirection::Over => {
-            if !(1..MAX_NUMBER).contains(&target_number) {
-                return Err("Invalid target number for Over direction".to_string());
-            }
-        }
-        RollDirection::Under => {
-            if target_number == 0 || target_number > MAX_NUMBER {
-                return Err("Invalid target number for Under direction".to_string());
-            }
-        }
-    }
+    // Use shared validation (P3)
+    validate_target_number(target_number, &direction)?;
 
     let win_chance = calculate_win_chance(target_number, &direction);
     let multiplier = calculate_multiplier_direct(target_number, &direction);

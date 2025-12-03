@@ -29,7 +29,9 @@ pub async fn generate_dice_roll_vrf(client_seed: &str) -> Result<(u8, [u8; 32], 
     let hash = hasher.finalize();
 
     // Convert to 0-100 range
-    let rand_u64 = u64::from_be_bytes(hash[0..8].try_into().unwrap());
+    let rand_u64 = u64::from_be_bytes(
+        hash[0..8].try_into().expect("SHA256 always produces 32 bytes, slice [0..8] is always valid")
+    );
     let roll = (rand_u64 % (MAX_NUMBER as u64 + 1)) as u8;
 
     Ok((roll, server_seed, nonce))
@@ -49,7 +51,9 @@ pub fn verify_game_result(
     hasher.update(nonce.to_be_bytes());
     let hash = hasher.finalize();
 
-    let rand_u64 = u64::from_be_bytes(hash[0..8].try_into().unwrap());
+    let rand_u64 = u64::from_be_bytes(
+        hash[0..8].try_into().expect("SHA256 always produces 32 bytes, slice [0..8] is always valid")
+    );
     let calculated_roll = (rand_u64 % (MAX_NUMBER as u64 + 1)) as u8;
 
     Ok(calculated_roll == expected_roll)
@@ -81,7 +85,9 @@ fn derive_single_roll(
     hasher.update([dice_index]); // Critical: include dice index for independence
     let hash = hasher.finalize();
 
-    let rand_u64 = u64::from_be_bytes(hash[0..8].try_into().unwrap());
+    let rand_u64 = u64::from_be_bytes(
+        hash[0..8].try_into().expect("SHA256 always produces 32 bytes, slice [0..8] is always valid")
+    );
     (rand_u64 % (MAX_NUMBER as u64 + 1)) as u8
 }
 
