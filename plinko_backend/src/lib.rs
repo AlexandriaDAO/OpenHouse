@@ -84,7 +84,9 @@ async fn drop_ball() -> Result<PlinkoResult, String> {
     let final_position = path.iter().filter(|&&d| d).count() as u8;
 
     // Calculate multiplier using pure formula
-    let multiplier = calculate_multiplier(final_position);
+    let multiplier = calculate_multiplier(final_position)
+        .map_err(|e| format!("Multiplier calculation failed: {}", e))?;
+
     let win = multiplier >= 1.0;
 
     Ok(PlinkoResult {
@@ -131,7 +133,8 @@ async fn drop_multiple_balls(count: u8) -> Result<MultiBallResult, String> {
 
         // Calculate result
         let final_position = path.iter().filter(|&&d| d).count() as u8;
-        let multiplier = calculate_multiplier(final_position);
+        let multiplier = calculate_multiplier(final_position)
+            .map_err(|e| format!("Multiplier calculation failed for ball {}: {}", i, e))?;
         let win = multiplier >= 1.0;
 
         results.push(PlinkoResult {
@@ -161,7 +164,9 @@ async fn drop_multiple_balls(count: u8) -> Result<MultiBallResult, String> {
 /// Returns exactly 9 values for positions 0-8
 #[query]
 fn get_multipliers() -> Vec<f64> {
-    (0..=8).map(calculate_multiplier).collect()
+    (0..=8)
+        .map(|pos| calculate_multiplier(pos).unwrap_or(0.0))
+        .collect()
 }
 
 /// Get the mathematical formula as a string
@@ -183,7 +188,7 @@ fn get_expected_value() -> f64 {
         .enumerate()
         .map(|(pos, &coeff)| {
             let probability = coeff as f64 / total_paths;
-            let multiplier = calculate_multiplier(pos as u8);
+            let multiplier = calculate_multiplier(pos as u8).unwrap_or(0.0);
             probability * multiplier
         })
         .sum()
@@ -192,14 +197,11 @@ fn get_expected_value() -> f64 {
 /// Calculate multiplier using pure mathematical formula
 /// M(k) = 0.2 + 6.32 × ((k - 4) / 4)²
 ///
-/// This formula creates a quadratic distribution where:
-/// - Center (k=4) has minimum multiplier of 0.2 (80% loss)
-/// - Edges (k=0,8) have maximum multiplier of 6.52 (big win)
-/// - Expected value is exactly 0.99 (1% house edge)
-pub fn calculate_multiplier(position: u8) -> f64 {
+/// Returns error for invalid positions (must be 0-8 for 8-row board)
+pub fn calculate_multiplier(position: u8) -> Result<f64, String> {
     // Validate position
     if position > 8 {
-        return 0.0; // Invalid position
+        return Err(format!("Invalid position {}: must be 0-8 for 8-row board", position));
     }
 
     // Pure mathematical formula
@@ -209,7 +211,7 @@ pub fn calculate_multiplier(position: u8) -> f64 {
     let normalized = distance / 4.0; // Normalize to [0, 1]
 
     // Quadratic formula with precise constants
-    0.2 + 6.32 * normalized * normalized
+    Ok(0.2 + 6.32 * normalized * normalized)
 }
 
 #[query]
@@ -237,13 +239,22 @@ mod tests {
             let expected = [6.52, 3.755, 1.78, 0.595, 0.2, 0.595, 1.78, 3.755, 6.52];
 
             for (pos, &expected_mult) in expected.iter().enumerate() {
-                let calculated = calculate_multiplier(pos as u8);
+                let calculated = calculate_multiplier(pos as u8).expect("Valid position should not fail");
                 assert!(
                     (calculated - expected_mult).abs() < 0.001,
                     "Position {}: expected {}, got {}",
                     pos, expected_mult, calculated
                 );
             }
+        }
+
+        #[test]
+        fn test_invalid_position_returns_error() {
+            assert!(calculate_multiplier(9).is_err());
+            assert!(calculate_multiplier(255).is_err());
+
+            let err = calculate_multiplier(9).unwrap_err();
+            assert!(err.contains("Invalid position"));
         }
 
         #[test]
@@ -271,8 +282,8 @@ mod tests {
         fn test_multiplier_symmetry() {
             // Verify perfect symmetry
             for i in 0..=4 {
-                let left = calculate_multiplier(i);
-                let right = calculate_multiplier(8 - i);
+                let left = calculate_multiplier(i).expect("Valid position");
+                let right = calculate_multiplier(8 - i).expect("Valid position");
                 assert!(
                     (left - right).abs() < 0.0001,
                     "Asymmetry at position {}: {} != {}",
@@ -328,7 +339,7 @@ mod tests {
             let final_position = path.iter().filter(|&&d| d).count() as u8;
 
             // Calculate multiplier
-            let multiplier = calculate_multiplier(final_position);
+            let multiplier = calculate_multiplier(final_position).expect("Valid position");
 
             // For 1 unit bet, payout is multiplier
             let payout = multiplier;
