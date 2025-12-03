@@ -8,6 +8,7 @@ import { useGameBalance } from '../providers/GameBalanceProvider';
 import { useBalance } from '../providers/BalanceProvider';
 import { useAuth } from '../providers/AuthProvider';
 import { DECIMALS_PER_CKUSDT, formatUSDT } from '../types/balance';
+import type { PlinkoGameResult as BackendPlinkoResult } from '../declarations/plinko_backend/plinko_backend.did';
 
 // Game Constants
 const ROWS = 8;
@@ -46,6 +47,7 @@ export const Plinko: React.FC = () => {
   const { isAuthenticated } = useAuth();
   const { balance: walletBalance, refreshBalance: refreshWalletBalance } = useBalance();
   const gameBalanceContext = useGameBalance('plinko');
+  const { refresh: refreshGameBalance } = gameBalanceContext;
   const balance = gameBalanceContext.balance;
 
   const [isPlaying, setIsPlaying] = useState(false);
@@ -62,10 +64,16 @@ export const Plinko: React.FC = () => {
   const [betAmount, setBetAmount] = useState(1);  // Per-ball bet (min 1 USDT)
   const [maxBet, setMaxBet] = useState(100);
 
-  const handleBalanceRefresh = useCallback(() => {
-    refreshWalletBalance();
-    gameBalanceContext.refresh();
-  }, [refreshWalletBalance, gameBalanceContext]);
+  const handleBalanceRefresh = useCallback(async () => {
+    try {
+      await Promise.all([
+        refreshWalletBalance(),
+        refreshGameBalance()
+      ]);
+    } catch (err) {
+      console.error('Failed to refresh balances:', err);
+    }
+  }, [refreshWalletBalance, refreshGameBalance]);
 
   // Load game data on mount
   useEffect(() => {
@@ -107,10 +115,9 @@ export const Plinko: React.FC = () => {
         if ('Ok' in result) {
           // 90% safety margin for UI
           const maxBetUSDT = (Number(result.Ok) / DECIMALS_PER_CKUSDT) * 0.9;
-          setMaxBet(Math.max(1, maxBetUSDT)); // Min 1 USDT
-          if (betAmount > maxBetUSDT) {
-            setBetAmount(Math.min(betAmount, maxBetUSDT));
-          }
+          const newMaxBet = Math.max(1, maxBetUSDT); // Min 1 USDT
+          setMaxBet(newMaxBet);
+          setBetAmount(prev => Math.min(prev, newMaxBet));
         }
       } catch (err) {
         console.error('Failed to get max bet:', err);
@@ -118,14 +125,14 @@ export const Plinko: React.FC = () => {
       }
     };
     updateMaxBet();
-  }, [actor, ballCount, betAmount]);
+  }, [actor, ballCount]);
 
   // Balance auto-refresh
   useEffect(() => {
     if (actor && isAuthenticated) {
-      gameBalanceContext.refresh().catch(console.error);
+      refreshGameBalance().catch(console.error);
     }
-  }, [actor, isAuthenticated, gameBalanceContext]);
+  }, [actor, isAuthenticated, refreshGameBalance]);
 
   // Safety timeout
   useEffect(() => {
@@ -187,7 +194,7 @@ export const Plinko: React.FC = () => {
           };
           setCurrentResult(gameResult);
           // Refresh balance after game
-          gameBalanceContext.refresh().catch(console.error);
+          refreshGameBalance().catch(console.error);
         } else {
           setGameError(result.Err);
           setIsPlaying(false);
@@ -197,14 +204,14 @@ export const Plinko: React.FC = () => {
         const result = await actor.play_multi_plinko(ballCount, betPerBallE8s);
         if ('Ok' in result) {
           const multiBallGameResult = {
-            results: result.Ok.results.map((r: any) => ({
+            results: result.Ok.results.map((r: BackendPlinkoResult) => ({
               path: r.path,
               final_position: r.final_position,
               multiplier: r.multiplier,
               win: r.is_win,
             })),
             total_balls: result.Ok.total_balls,
-            total_wins: result.Ok.results.filter((r: any) => r.is_win).length,
+            total_wins: result.Ok.results.filter((r: BackendPlinkoResult) => r.is_win).length,
             average_multiplier: result.Ok.average_multiplier,
             total_bet: Number(result.Ok.total_bet) / DECIMALS_PER_CKUSDT,
             total_payout: Number(result.Ok.total_payout) / DECIMALS_PER_CKUSDT,
@@ -212,7 +219,7 @@ export const Plinko: React.FC = () => {
           };
           setMultiBallResult(multiBallGameResult);
           // Refresh balance after game
-          gameBalanceContext.refresh().catch(console.error);
+          refreshGameBalance().catch(console.error);
         } else {
           setGameError(result.Err);
           setIsPlaying(false);
@@ -230,6 +237,7 @@ export const Plinko: React.FC = () => {
   }, []);
 
   const houseEdge = ((1 - expectedValue) * 100).toFixed(2);
+  const CENTER_BUCKET_INDEX = Math.floor(multipliers.length / 2);
 
   return (
     <GameLayout hideFooter noScroll>
@@ -339,7 +347,7 @@ export const Plinko: React.FC = () => {
           gameActor={actor}
           onBalanceRefresh={handleBalanceRefresh}
           disabled={isPlaying}
-          multiplier={multipliers[4] || 0.2}
+          multiplier={multipliers[CENTER_BUCKET_INDEX] || 0.2}
           canisterId={PLINKO_BACKEND_CANISTER_ID}
           gameRoute="/plinko"
         />
