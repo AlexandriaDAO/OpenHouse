@@ -16,10 +16,10 @@ interface ChartProps {
   height?: number;
 }
 
-const CustomTooltip = ({ active, payload, label, valuePrefix = '', valueSuffix = '', decimals = 2 }: any) => {
+const CustomTooltip = ({ active, payload, label, valuePrefix = '', valueSuffix = '', decimals = 2, multiplier = 1 }: any) => {
   if (!active || !payload || !payload.length) return null;
 
-  const value = payload[0].value;
+  const value = payload[0].value * multiplier;
   const formattedValue = new Intl.NumberFormat('en-US', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals
@@ -53,6 +53,8 @@ export const SharePriceChart: React.FC<ChartProps> = ({ data, height = 220 }) =>
           variant="badge"
           content="Share Price = Pool Reserve ÷ Total Shares
 
+Displayed in micro-USDT (μUSDT) where 1 μUSDT = 0.000001 USDT
+
 When you deposit liquidity, you receive shares representing your ownership percentage of the pool.
 
 ↗ Share price RISES when players lose bets (pool grows)
@@ -63,7 +65,7 @@ With the 1% house edge, share price trends upward over time as the house profits
 Your total value = your shares × current share price"
         />
         <div className="text-[10px] text-dfinity-turquoise bg-dfinity-turquoise/10 px-2 py-0.5 rounded-full">
-          Current: {data[data.length - 1]?.sharePrice.toFixed(6)} USDT
+          Current: {(data[data.length - 1]?.sharePrice * 1_000_000).toFixed(2)} μUSDT
         </div>
       </div>
     </div>
@@ -83,10 +85,10 @@ Your total value = your shares × current share price"
           axisLine={false}
           tickLine={false}
           width={40}
-          tickFormatter={(val) => `${(val * 1_000_000).toFixed(1)}`}
-          label={{ value: '×10⁻⁶', position: 'top', fill: COLORS.text, fontSize: 10, offset: 10 }}
+          tickFormatter={(val) => `${(val * 1_000_000).toFixed(2)}`}
+          label={{ value: 'μUSDT', position: 'top', fill: COLORS.text, fontSize: 10, offset: 10 }}
         />
-        <Tooltip content={<CustomTooltip valueSuffix=" USDT" decimals={6} />} cursor={{ stroke: 'rgba(255,255,255,0.1)' }} />
+        <Tooltip content={<CustomTooltip valueSuffix=" μUSDT" decimals={2} multiplier={1_000_000} />} cursor={{ stroke: 'rgba(255,255,255,0.1)' }} />
         <Line
           type="monotone"
           dataKey="sharePrice"

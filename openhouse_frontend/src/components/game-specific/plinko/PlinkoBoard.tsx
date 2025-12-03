@@ -2,6 +2,8 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { usePlinkoPhysics } from '../../../hooks/usePlinkoPhysics';
 import './PlinkoBoard.css';
 
+type GamePhase = 'idle' | 'filling' | 'releasing' | 'animating' | 'complete';
+
 interface PlinkoBoardProps {
   rows: number;
   paths: boolean[][] | null;
@@ -12,7 +14,13 @@ interface PlinkoBoardProps {
   ballCount: number;
   onDrop: () => void;
   disabled: boolean;
+  // New props for bucket animation
+  gamePhase: GamePhase;
+  fillProgress: number;
+  doorOpen: boolean;
+  isWaitingForBackend: boolean;
 }
+
 
 export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
   rows,
@@ -24,23 +32,26 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
   ballCount,
   onDrop,
   disabled,
+  gamePhase,
+  fillProgress,
+  doorOpen,
+  isWaitingForBackend,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [landedBalls, setLandedBalls] = useState<Set<number>>(new Set());
-  const [isReleasing, setIsReleasing] = useState(false);
 
-  // Physics configuration - must match CSS slot positioning
-  // Slots use: left: calc(50% + ${(i - rows / 2) * 40}px)
+  // Physics configuration - larger dimensions for better visibility
+  // Must match CSS slot positioning: left: calc(50% + ${(i - rows / 2) * 60}px)
   const physicsConfig = {
     rows,
-    pegSpacingX: 40,  // Must match CSS slot spacing
-    pegSpacingY: 50,
-    ballRadius: 8,
-    pegRadius: 4
+    pegSpacingX: 60,  // Increased from 40
+    pegSpacingY: 70,  // Increased from 50
+    ballRadius: 14,   // Increased from 8
+    pegRadius: 7      // Increased from 4
   };
 
   // Handle ball landing
-  const handleBallLanded = useCallback((ballId: number, position: number) => {
+  const handleBallLanded = useCallback((ballId: number, _position: number) => {
     setLandedBalls(prev => {
       const newSet = new Set(prev);
       newSet.add(ballId);
@@ -48,102 +59,108 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
     });
   }, []);
 
-  // Initialize Matter.js physics
+  // Initialize physics
   const { dropBall, clearBalls } = usePlinkoPhysics(
     canvasRef,
     physicsConfig,
     handleBallLanded
   );
 
-  // Drop balls when paths arrive
+  // Drop balls when entering animating phase
   useEffect(() => {
-    if (!paths || paths.length === 0 || !isDropping) {
-      if (!isDropping) {
+    if (gamePhase !== 'animating' || !paths || paths.length === 0) {
+      if (gamePhase === 'idle') {
         clearBalls();
         setLandedBalls(new Set());
-        setIsReleasing(false);
       }
       return;
     }
 
-    // Trigger release animation
-    setIsReleasing(true);
-
-    // Drop each ball with stagger - starting after brief delay for gate animation
-    const dropDelay = 150; // ms before first ball drops
+    // Drop each ball with stagger
     paths.forEach((path, index) => {
       setTimeout(() => {
         dropBall({ id: index, path });
-      }, dropDelay + index * 150); // 150ms stagger between balls
+      }, index * 200); // 200ms stagger between balls for slower pacing
     });
-
-    // Reset release state after all balls dropped
-    const totalDropTime = dropDelay + paths.length * 150;
-    const timer = setTimeout(() => setIsReleasing(false), totalDropTime + 200);
-    return () => clearTimeout(timer);
-  }, [paths, isDropping, dropBall, clearBalls]);
+  }, [gamePhase, paths, dropBall, clearBalls]);
 
   // Check if all balls landed
   useEffect(() => {
-    if (paths && landedBalls.size >= paths.length && isDropping) {
-      // Add a small delay to ensure visuals catch up
+    if (paths && landedBalls.size >= paths.length && gamePhase === 'animating') {
+      // Add delay to ensure visuals catch up
       const timer = setTimeout(() => {
         onAnimationComplete?.();
       }, 500);
       return () => clearTimeout(timer);
     }
-  }, [landedBalls, paths, isDropping, onAnimationComplete]);
+  }, [landedBalls, paths, gamePhase, onAnimationComplete]);
 
-  const handleBucketClick = () => {
-    if (disabled || isDropping) return;
+  const handleDropClick = () => {
+    if (disabled || gamePhase !== 'idle') return;
     onDrop();
   };
 
-  // Calculate board height for container - must match physics hook
-  // DROP_ZONE_HEIGHT (60) + rows * pegSpacingY (50) + bottom padding (120)
-  const boardHeight = 60 + rows * physicsConfig.pegSpacingY + 120;
+  // Calculate board height - DROP_ZONE_HEIGHT (100) + rows * pegSpacingY (70) + bottom padding (150)
+  const boardHeight = 100 + rows * physicsConfig.pegSpacingY + 150;
+
+  // Determine button text
+  const getButtonText = () => {
+    switch (gamePhase) {
+      case 'filling':
+        return 'LOADING...';
+      case 'releasing':
+      case 'animating':
+        return 'DROPPING...';
+      default:
+        return ballCount > 1 ? `DROP ${ballCount}` : 'DROP';
+    }
+  };
 
   return (
     <div className="plinko-board-container">
       <div className="plinko-board" style={{ height: `${boardHeight}px` }}>
 
-        {/* Ball Dispenser (React UI) */}
-        <div
-          className={`plinko-bucket ${disabled || isDropping ? 'bucket-disabled' : ''} ${isReleasing ? 'bucket-releasing' : ''}`}
-          onClick={handleBucketClick}
-        >
-          <div className="bucket-body">
-            <div className="bucket-balls">
-              {!isReleasing && Array.from({ length: Math.min(ballCount, 8) }).map((_, i) => (
+        {/* Bucket with door */}
+        <div className="plinko-bucket">
+          <div className="bucket-container">
+            {/* Ball reservoir showing fill progress */}
+            <div className="bucket-balls-reservoir">
+              {Array.from({ length: Math.min(fillProgress, 50) }).map((_, i) => (
                 <div
                   key={i}
-                  className="bucket-ball"
-                  style={{
-                    left: `${8 + (i % 4) * 13}px`,
-                    bottom: `${6 + Math.floor(i / 4) * 14}px`,
-                  }}
+                  className={`bucket-ball-item ${isWaitingForBackend ? 'waiting' : ''}`}
+                  style={isWaitingForBackend ? { animationDelay: `${(i % 10) * 40}ms` } : undefined}
                 />
               ))}
             </div>
-            {!isReleasing && ballCount > 8 && (
-              <span className="bucket-count">+{ballCount - 8}</span>
-            )}
+
+            {/* Door at bottom */}
+            <div className={`bucket-door ${doorOpen ? 'open' : ''}`}>
+              <div className="door-left" />
+              <div className="door-right" />
+            </div>
           </div>
-          <div className="bucket-label">
-            {isDropping ? 'DROPPING' : ballCount > 1 ? `×${ballCount}` : 'DROP'}
-          </div>
+
+          {/* Drop button */}
+          <button
+            className="bucket-drop-button"
+            onClick={handleDropClick}
+            disabled={disabled || gamePhase !== 'idle'}
+          >
+            {getButtonText()}
+          </button>
         </div>
 
-        {/* Matter.js Canvas (Physics Rendering) */}
+        {/* Physics Canvas */}
         <canvas
           ref={canvasRef}
           className="plinko-physics-canvas"
         />
 
-        {/* Landing slots (React UI) - positioned to align with physics */}
+        {/* Landing slots */}
         <div
           className="plinko-slots"
-          style={{ top: `${60 + rows * physicsConfig.pegSpacingY + 30}px` }}
+          style={{ top: `${100 + rows * physicsConfig.pegSpacingY + 30}px` }}
         >
           {Array.from({ length: rows + 1 }, (_, i) => (
             <div
@@ -163,11 +180,11 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
           ))}
         </div>
 
-        {/* Multiplier labels (React UI) */}
+        {/* Multiplier labels */}
         {multipliers && multipliers.length > 0 && (
           <div
             className="plinko-multiplier-labels"
-            style={{ top: `${60 + rows * physicsConfig.pegSpacingY + 70}px` }}
+            style={{ top: `${100 + rows * physicsConfig.pegSpacingY + 85}px` }}
           >
             {multipliers.map((mult, index) => {
               const isHighlighted = !isDropping && finalPositions?.includes(index);

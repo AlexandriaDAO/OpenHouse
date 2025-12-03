@@ -1,21 +1,24 @@
+/* ===== PLINKO MINIMAL DARK THEME ===== */
+
+/* Container */
 .plinko-board-container {
   width: 100%;
-  overflow: visible;
-  padding: 0;
   display: flex;
   justify-content: center;
-  min-height: 100vh; /* Ensure full height */
+  padding: 20px 0;
+  background: #0a0a0a;
+  min-height: 100vh;
 }
 
 .plinko-board {
   position: relative;
-  width: 800px;
+  width: 1000px;
   max-width: 100%;
   margin: 0 auto;
   background: transparent;
 }
 
-/* Matter.js canvas - explicit dimensions set by JS */
+/* Canvas */
 .plinko-physics-canvas {
   position: absolute;
   top: 0;
@@ -25,126 +28,156 @@
   z-index: 5;
 }
 
-/* Ball Dispenser (formerly Tipping Bucket) */
+/* ===== BUCKET WITH DOOR ===== */
 .plinko-bucket {
   position: absolute;
-  top: 5px;
+  top: 10px;
   left: 50%;
   transform: translateX(-50%);
-  cursor: pointer;
   z-index: 20;
-  transition: filter 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
-.plinko-bucket:hover:not(.bucket-disabled) {
-  filter: brightness(1.2);
-}
-
-.plinko-bucket.bucket-disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.bucket-body {
+.bucket-container {
   position: relative;
-  width: 60px;
-  height: 45px;
-  background: linear-gradient(180deg, #1f2937 0%, #111827 100%);
-  border: 2px solid #FFD700;
-  border-radius: 8px 8px 4px 4px;
+  width: 120px;
+  height: 80px;
+  background: #1a1a1a;
+  border: 2px solid #333;
+  border-radius: 12px 12px 4px 4px;
   overflow: hidden;
-  box-shadow: 0 4px 12px rgba(255, 215, 0, 0.3), inset 0 0 20px rgba(255, 215, 0, 0.1);
 }
 
-/* Gate at bottom that "opens" */
-.bucket-body::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 20px;
-  height: 4px;
-  background: #FFD700;
-  border-radius: 0 0 4px 4px;
-  transition: all 0.3s ease;
-}
-
-.plinko-bucket.bucket-releasing .bucket-body::after {
-  width: 30px;
-  background: transparent;
-  border: 2px solid #FFD700;
-  border-top: none;
-}
-
-.bucket-body::before {
+/* Rim at top */
+.bucket-container::before {
   content: '';
   position: absolute;
   top: -2px;
   left: -2px;
   right: -2px;
-  height: 8px;
-  background: linear-gradient(180deg, #FFD700 0%, #FFA500 100%);
-  border-radius: 8px 8px 0 0;
+  height: 6px;
+  background: #333;
+  border-radius: 12px 12px 0 0;
 }
 
-.bucket-balls {
+/* Ball reservoir - where balls stack up */
+.bucket-balls-reservoir {
   position: absolute;
-  bottom: 0;
+  bottom: 20px;
   left: 0;
   right: 0;
-  height: 100%;
+  top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-end;
+  justify-content: center;
+  gap: 2px;
+  padding: 4px;
+  overflow: hidden;
 }
 
-.bucket-ball {
-  position: absolute;
+.bucket-ball-item {
   width: 12px;
   height: 12px;
-  background: radial-gradient(circle at 30% 30%, #fff 0%, #FFD700 40%, #FFA500 100%);
-  border: 1px solid #FFA500;
+  background: radial-gradient(circle at 30% 30%, #ffd54f 0%, #d4a817 50%, #b8860b 100%);
   border-radius: 50%;
-  box-shadow: 0 0 8px rgba(255, 215, 0, 0.8), inset 0 -2px 4px rgba(0,0,0,0.3);
+  flex-shrink: 0;
 }
 
-.bucket-count {
+/* Gentle wobble when waiting for backend */
+@keyframes ball-wobble {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+
+.bucket-ball-item.waiting {
+  animation: ball-wobble 0.4s ease-in-out infinite;
+}
+
+/* Door mechanism */
+.bucket-door {
   position: absolute;
-  bottom: 2px;
-  right: 2px;
-  font-size: 9px;
-  font-weight: bold;
-  color: #48D1CC;
-  font-family: 'JetBrains Mono', monospace;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 50px;
+  height: 18px;
+  display: flex;
+  overflow: hidden;
 }
 
-.bucket-label {
-  text-align: center;
+.door-left,
+.door-right {
+  width: 50%;
+  height: 100%;
+  background: #252525;
+  border-top: 2px solid #333;
+  transition: transform 0.3s ease-out;
+}
+
+.door-left {
+  border-radius: 0 0 0 4px;
+  transform-origin: left center;
+}
+
+.door-right {
+  border-radius: 0 0 4px 0;
+  transform-origin: right center;
+}
+
+/* Door open animation */
+.bucket-door.open .door-left {
+  transform: translateX(-100%) rotate(-30deg);
+}
+
+.bucket-door.open .door-right {
+  transform: translateX(100%) rotate(30deg);
+}
+
+/* Drop button integrated below bucket */
+.bucket-drop-button {
+  margin-top: 12px;
+  padding: 10px 24px;
+  background: #1a1a1a;
+  border: 1px solid #d4a817;
+  border-radius: 8px;
+  color: #d4a817;
   font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.bucket-drop-button:hover:not(:disabled) {
+  background: #d4a817;
+  color: #0a0a0a;
+}
+
+.bucket-drop-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Ball count badge */
+.bucket-ball-count {
+  position: absolute;
+  bottom: 22px;
+  right: 6px;
   font-size: 10px;
-  font-weight: 700;
-  color: #9CA3AF;
-  margin-top: 4px;
-  text-transform: uppercase;
+  font-weight: 600;
+  color: #d4a817;
+  font-family: 'JetBrains Mono', monospace;
 }
 
-.plinko-bucket:hover:not(.bucket-disabled) .bucket-label {
-  color: #FFD700;
-}
-
-/* Animation when releasing balls */
-.plinko-bucket.bucket-releasing .bucket-balls {
-  animation: balls-fall 0.4s ease-out forwards;
-}
-
-@keyframes balls-fall {
-  0% { opacity: 1; transform: translateY(0); }
-  100% { opacity: 0; transform: translateY(20px); }
-}
-
-/* Landing Slots */
+/* ===== LANDING SLOTS ===== */
 .plinko-slots {
   position: absolute;
   width: 100%;
-  height: 35px;
+  height: 50px;
   display: flex;
   justify-content: center;
   pointer-events: none;
@@ -152,42 +185,40 @@
 
 .plinko-slot {
   position: absolute;
-  width: 32px;
-  height: 35px;
-  background: linear-gradient(180deg, rgba(17, 24, 39, 0.8) 0%, rgba(31, 41, 55, 0.6) 100%);
-  border: 2px solid rgba(255, 215, 0, 0.3);
+  width: 50px;
+  height: 50px;
+  background: #111;
+  border: 1px solid #222;
   border-top: none;
-  border-radius: 0 0 6px 6px;
+  border-radius: 0 0 8px 8px;
   transform: translateX(-50%);
   transition: all 0.3s ease;
 }
 
 .plinko-slot-active {
-  border-color: #FFD700;
-  background: rgba(255, 215, 0, 0.25);
-  box-shadow: 0 0 20px rgba(255, 215, 0, 0.5), inset 0 0 15px rgba(255, 215, 0, 0.2);
-  transform: translateX(-50%) scale(1.05);
+  border-color: #d4a817;
+  background: rgba(212, 168, 23, 0.1);
 }
 
 .slot-count {
-  font-size: 10px;
-  font-weight: bold;
-  color: #111;
-  background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+  font-size: 11px;
+  font-weight: 600;
+  color: #0a0a0a;
+  background: #d4a817;
   border-radius: 50%;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
   position: absolute;
-  top: -10px;
+  top: -12px;
   left: 50%;
   transform: translateX(-50%);
-  box-shadow: 0 2px 6px rgba(255, 165, 0, 0.5);
+  font-family: 'JetBrains Mono', monospace;
 }
 
-/* Multiplier labels */
+/* ===== MULTIPLIER LABELS ===== */
 .plinko-multiplier-labels {
   position: absolute;
   width: 100%;
@@ -199,39 +230,58 @@
 .plinko-multiplier-label {
   position: absolute;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 2px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 8px;
   border-radius: 4px;
   transform: translateX(-50%);
   white-space: nowrap;
   transition: all 0.3s ease;
+  background: transparent;
 }
 
 .plinko-multiplier-label.win-multiplier {
-  color: #22C55E;
-  background: rgba(34, 197, 94, 0.1);
+  color: #4ade80;
 }
 
 .plinko-multiplier-label.lose-multiplier {
-  color: #EF4444;
-  background: rgba(239, 68, 68, 0.1);
+  color: #666;
 }
 
 .plinko-multiplier-label.highlighted {
-  transform: translateX(-50%) scale(1.15);
-  background: rgba(57, 255, 20, 0.2);
-  box-shadow: 0 0 10px rgba(57, 255, 20, 0.4);
+  color: #d4a817;
+  transform: translateX(-50%) scale(1.1);
 }
 
-/* Responsive */
-@media (max-width: 900px) {
+/* ===== RESPONSIVE ===== */
+@media (max-width: 1100px) {
+  .plinko-board {
+    width: 800px;
+  }
+
+  .bucket-container {
+    width: 100px;
+    height: 70px;
+  }
+}
+
+@media (max-width: 850px) {
   .plinko-board {
     width: 600px;
   }
 
-  .bucket-body {
-    width: 55px;
+  .bucket-container {
+    width: 80px;
+    height: 60px;
+  }
+
+  .plinko-multiplier-label {
+    font-size: 10px;
+    padding: 2px 4px;
+  }
+
+  .plinko-slot {
+    width: 40px;
     height: 40px;
   }
 }
@@ -242,18 +292,28 @@
     overflow-x: auto;
   }
 
-  .plinko-multiplier-label {
-    font-size: 8px;
-    padding: 1px 3px;
+  .bucket-container {
+    width: 70px;
+    height: 50px;
   }
 
-  .bucket-body {
-    width: 48px;
-    height: 35px;
-  }
-
-  .bucket-ball {
+  .bucket-ball-item {
     width: 10px;
     height: 10px;
+  }
+
+  .plinko-multiplier-label {
+    font-size: 8px;
+  }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .bucket-ball-item,
+  .bucket-ball-item.waiting,
+  .door-left,
+  .door-right {
+    animation: none;
+    transition: none;
   }
 }

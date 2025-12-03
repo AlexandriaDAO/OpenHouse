@@ -19,8 +19,8 @@ function calculateFinalSlot(path: boolean[]): number {
 }
 
 // Fixed board width - must match CSS
-const BOARD_WIDTH = 800;
-const DROP_ZONE_HEIGHT = 60;
+const BOARD_WIDTH = 1000;
+const DROP_ZONE_HEIGHT = 100;
 
 export function usePlinkoPhysics(
   canvasRef: React.RefObject<HTMLCanvasElement>,
@@ -60,22 +60,19 @@ export function usePlinkoPhysics(
 
     // Animation loop
     let animationId: number;
-    const gravity = 0.3;
-    const bounce = 0.6;
-    const friction = 0.98;
+    const gravity = 0.12;      // Slower falling (was 0.3)
+    const bounce = 0.45;       // Less bouncy (was 0.6)
+    const hFriction = 0.92;    // More horizontal dampening (was 0.98)
 
     const animate = () => {
       ctx.clearRect(0, 0, BOARD_WIDTH, canvasHeight);
 
-      // Draw pegs
+      // Draw pegs - minimal white style
       pegs.forEach(peg => {
         ctx.beginPath();
         ctx.arc(peg.x, peg.y, config.pegRadius, 0, Math.PI * 2);
-        ctx.fillStyle = '#FFD700';
+        ctx.fillStyle = '#e8e8e8';
         ctx.fill();
-        ctx.strokeStyle = '#FFA500';
-        ctx.lineWidth = 1;
-        ctx.stroke();
       });
 
       // Update and draw balls
@@ -92,21 +89,22 @@ export function usePlinkoPhysics(
         const currentRow = Math.floor((ball.y - DROP_ZONE_HEIGHT + cfg.pegSpacingY / 2) / cfg.pegSpacingY);
         const nextRow = Math.floor((nextY - DROP_ZONE_HEIGHT + cfg.pegSpacingY / 2) / cfg.pegSpacingY);
 
-        // If crossing into a new row, apply the path direction
+        // If crossing into a new row, apply the path direction with lerping for smooth transition
         if (nextRow > currentRow && currentRow >= 0 && currentRow < ball.path.length) {
           const goRight = ball.path[currentRow];
-          // Give horizontal velocity based on path
-          ball.vx = goRight ? 2.5 : -2.5;
+          const targetVx = goRight ? 1.5 : -1.5;
+          // Lerp toward target for smooth, natural movement
+          ball.vx = ball.vx * 0.5 + targetVx * 0.5;
         }
 
         // Apply friction to horizontal movement
-        ball.vx *= friction;
+        ball.vx *= hFriction;
 
         // Move ball
         ball.x += ball.vx;
         ball.y += ball.vy;
 
-        // Bounce off pegs (simple collision)
+        // Bounce off pegs (smooth collision)
         pegs.forEach(peg => {
           const dx = ball.x - peg.x;
           const dy = ball.y - peg.y;
@@ -114,18 +112,18 @@ export function usePlinkoPhysics(
           const minDist = cfg.ballRadius + cfg.pegRadius;
 
           if (dist < minDist && dist > 0) {
-            // Collision! Push ball out and bounce
+            // Collision! Push ball out with slight extra clearance
             const overlap = minDist - dist;
             const nx = dx / dist;
             const ny = dy / dist;
 
-            ball.x += nx * overlap;
-            ball.y += ny * overlap;
+            ball.x += nx * (overlap + 1);
+            ball.y += ny * (overlap + 1);
 
-            // Reflect velocity
+            // Slower, more controlled bounce
             const dot = ball.vx * nx + ball.vy * ny;
-            ball.vx = (ball.vx - 2 * dot * nx) * bounce;
-            ball.vy = (ball.vy - 2 * dot * ny) * bounce;
+            ball.vx = (ball.vx - 1.8 * dot * nx) * bounce;
+            ball.vy = Math.max(0.5, (ball.vy - 1.8 * dot * ny) * bounce);
           }
         });
 
@@ -156,21 +154,18 @@ export function usePlinkoPhysics(
           }, 600);
         }
 
-        // Draw ball
+        // Draw ball - simple gold style
         ctx.beginPath();
         ctx.arc(ball.x, ball.y, cfg.ballRadius, 0, Math.PI * 2);
         const gradient = ctx.createRadialGradient(
-          ball.x - cfg.ballRadius * 0.3, ball.y - cfg.ballRadius * 0.3, 0,
+          ball.x - cfg.ballRadius * 0.25, ball.y - cfg.ballRadius * 0.25, 0,
           ball.x, ball.y, cfg.ballRadius
         );
-        gradient.addColorStop(0, '#FFFFFF');
-        gradient.addColorStop(0.3, '#FFD700');
-        gradient.addColorStop(1, '#FFA500');
+        gradient.addColorStop(0, '#ffd54f');   // Light gold highlight
+        gradient.addColorStop(0.5, '#d4a817'); // Gold
+        gradient.addColorStop(1, '#b8860b');   // Dark gold edge
         ctx.fillStyle = gradient;
         ctx.fill();
-        ctx.strokeStyle = '#FFA500';
-        ctx.lineWidth = 2;
-        ctx.stroke();
       });
 
       animationId = requestAnimationFrame(animate);
