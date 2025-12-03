@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import usePlinkoActor from '../hooks/actors/usePlinkoActor';
 import { GameLayout } from '../components/game-ui';
 import { PlinkoBoard } from '../components/game-specific/plinko';
@@ -15,6 +15,8 @@ const ROWS = 8;
 const ANIMATION_SAFETY_TIMEOUT_MS = 15000;
 const PLINKO_BACKEND_CANISTER_ID = 'weupr-2qaaa-aaaap-abl3q-cai';
 const MAX_BET_SAFETY_MARGIN = 0.9;
+
+type GamePhase = 'idle' | 'filling' | 'releasing' | 'animating' | 'complete';
 
 interface PlinkoGameResult {
   path: boolean[];
@@ -42,6 +44,9 @@ interface MultiBallBackendResult {
   net_profit?: number;
 }
 
+// Helper to delay execution
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export const Plinko: React.FC = () => {
   const { actor } = usePlinkoActor();
   const { actor: ledgerActor } = useLedgerActor();
@@ -50,6 +55,13 @@ export const Plinko: React.FC = () => {
   const gameBalanceContext = useGameBalance('plinko');
   const { refresh: refreshGameBalance } = gameBalanceContext;
   const balance = gameBalanceContext.balance;
+
+  // Game phase state machine
+  const [gamePhase, setGamePhase] = useState<GamePhase>('idle');
+  const [fillProgress, setFillProgress] = useState(0);
+  const [doorOpen, setDoorOpen] = useState(false);
+  const [isWaitingForBackend, setIsWaitingForBackend] = useState(false);
+  const [pendingPaths, setPendingPaths] = useState<boolean[][] | null>(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [gameError, setGameError] = useState('');
@@ -64,6 +76,9 @@ export const Plinko: React.FC = () => {
   // Betting state
   const [betAmount, setBetAmount] = useState(1);  // Per-ball bet (min 1 USDT)
   const [maxBet, setMaxBet] = useState(100);
+
+  // Ref to track if fill animation is complete
+  const fillCompleteRef = useRef(false);
 
   const handleBalanceRefresh = useCallback(async () => {
     try {
@@ -148,6 +163,24 @@ export const Plinko: React.FC = () => {
     return () => clearTimeout(timeoutId);
   }, [isPlaying]);
 
+  // Run fill animation - fills bucket during backend delay
+  const runFillAnimation = async (targetCount: number): Promise<void> => {
+    return new Promise(resolve => {
+      let filled = 0;
+      const intervalTime = Math.max(40, 1200 / targetCount); // 1.2 seconds total, min 40ms between balls
+
+      const interval = setInterval(() => {
+        filled++;
+        setFillProgress(filled);
+        if (filled >= targetCount) {
+          clearInterval(interval);
+          fillCompleteRef.current = true;
+          resolve();
+        }
+      }, intervalTime);
+    });
+  };
+
   const dropBalls = async () => {
     if (!actor || isPlaying) return;
 
@@ -173,15 +206,44 @@ export const Plinko: React.FC = () => {
       return;
     }
 
+    // Reset state
+    setGamePhase('filling');
+    setFillProgress(0);
+    setDoorOpen(false);
+    setIsWaitingForBackend(false);
+    setPendingPaths(null);
+    fillCompleteRef.current = false;
+    
     setIsPlaying(true);
     setGameError('');
     setMultiBallResult(null);
     setCurrentResult(null);
 
     try {
+      // Start backend request (Betting Endpoints)
+      const backendPromise = ballCount === 1
+        ? actor.play_plinko(betPerBallE8s)
+        : actor.play_multi_plinko(ballCount, betPerBallE8s);
+
+      // Run fill animation in parallel
+      const fillPromise = runFillAnimation(ballCount);
+
+      // Wait for fill to complete
+      await fillPromise;
+
+      // If backend not ready yet, show waiting state
+      setIsWaitingForBackend(true);
+
+      // Wait for backend
+      const result = await backendPromise;
+
+      setIsWaitingForBackend(false);
+
+      // Handle result
+      let extractedPaths: boolean[][] = [];
+
       if (ballCount === 1) {
         // Single ball with betting
-        const result = await actor.play_plinko(betPerBallE8s);
         if ('Ok' in result) {
           const gameResult: PlinkoGameResult = {
             path: result.Ok.path,
@@ -194,15 +256,19 @@ export const Plinko: React.FC = () => {
             profit: Number(result.Ok.profit) / DECIMALS_PER_CKUSDT,
           };
           setCurrentResult(gameResult);
+          extractedPaths = [gameResult.path];
+          
           // Refresh balance after game
           refreshGameBalance().catch(console.error);
         } else {
           setGameError(result.Err);
+          setGamePhase('idle');
           setIsPlaying(false);
+          setFillProgress(0);
+          return;
         }
       } else {
         // Multi-ball with betting
-        const result = await actor.play_multi_plinko(ballCount, betPerBallE8s);
         if ('Ok' in result) {
           const multiBallGameResult = {
             results: result.Ok.results.map((r: BackendPlinkoResult) => ({
@@ -219,22 +285,50 @@ export const Plinko: React.FC = () => {
             net_profit: Number(result.Ok.net_profit) / DECIMALS_PER_CKUSDT,
           };
           setMultiBallResult(multiBallGameResult);
+          extractedPaths = result.Ok.results.map((r: BackendPlinkoResult) => r.path);
+
           // Refresh balance after game
           refreshGameBalance().catch(console.error);
         } else {
           setGameError(result.Err);
+          setGamePhase('idle');
           setIsPlaying(false);
+          setFillProgress(0);
+          return;
         }
       }
+
+      // Store paths for physics
+      setPendingPaths(extractedPaths);
+
+      // Open door and start release animation
+      setGamePhase('releasing');
+      setDoorOpen(true);
+
+      // Wait for door to open and balls to fall through
+      await delay(400);
+
+      // Clear balls from bucket (they've animated out)
+      setFillProgress(0);
+
+      // Start physics animation
+      setGamePhase('animating');
+
     } catch (err) {
       console.error('Failed to play plinko:', err);
       setGameError(err instanceof Error ? err.message : 'Failed to play');
+      setGamePhase('idle');
       setIsPlaying(false);
+      setFillProgress(0);
     }
   };
 
   const handleAnimationComplete = useCallback(() => {
     setIsPlaying(false);
+    setGamePhase('complete');
+    setDoorOpen(false);
+    // Reset to idle after a brief moment
+    setTimeout(() => setGamePhase('idle'), 500);
   }, []);
 
   const houseEdge = ((1 - expectedValue) * 100).toFixed(2);
@@ -274,12 +368,8 @@ export const Plinko: React.FC = () => {
         <div className="flex-1 flex justify-center items-start py-2 min-h-0">
           <PlinkoBoard
             rows={ROWS}
-            paths={
-              isPlaying
-                ? (ballCount === 1 && currentResult ? [currentResult.path] : multiBallResult?.results.map(r => r.path) || null)
-                : null
-            }
-            isDropping={isPlaying}
+            paths={pendingPaths}
+            isDropping={gamePhase === 'animating'}
             onAnimationComplete={handleAnimationComplete}
             finalPositions={
               ballCount === 1
@@ -289,7 +379,11 @@ export const Plinko: React.FC = () => {
             multipliers={multipliers}
             ballCount={ballCount}
             onDrop={dropBalls}
-            disabled={!actor || isPlaying}
+            disabled={!actor || gamePhase !== 'idle'}
+            gamePhase={gamePhase}
+            fillProgress={fillProgress}
+            doorOpen={doorOpen}
+            isWaitingForBackend={isWaitingForBackend}
           />
         </div>
 

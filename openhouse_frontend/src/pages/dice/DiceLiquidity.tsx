@@ -232,10 +232,10 @@ export function DiceLiquidity() {
           <div className="p-4 text-center border-b md:border-b-0 md:border-r border-gray-700/50">
              <div className="text-gray-500 text-xs uppercase tracking-wider mb-1 flex items-center justify-center gap-1">
                Share Price
-               <InfoTooltip content="Share price = Pool Value ÷ Total Shares. Trends upward over time as the house profits." />
+               <InfoTooltip content="Share price in micro-USDT (1 μUSDT = 0.000001 USDT). Calculated as Pool Value ÷ Total Shares. Trends upward as house profits." />
              </div>
              <div className="text-xl md:text-2xl font-mono font-bold text-purple-400">
-               ${poolStats ? (Number(poolStats.share_price) / 100_000_000).toFixed(6) : '---'}
+               {poolStats ? ((Number(poolStats.share_price) / 100_000_000) * 1_000_000).toFixed(2) : '---'} μUSDT
              </div>
           </div>
           {/* NEW: Third column - 7-Day APY */}
