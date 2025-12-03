@@ -70,8 +70,13 @@ export function isLiquidityActor(actor: unknown): actor is LiquidityActorInterfa
   return (
     typeof a.get_pool_stats === 'function' &&
     typeof a.get_my_lp_position === 'function' &&
+    typeof a.get_pool_apy === 'function' &&
+    typeof a.get_daily_stats === 'function' &&
     typeof a.deposit_liquidity === 'function' &&
-    typeof a.withdraw_all_liquidity === 'function'
+    typeof a.withdraw_all_liquidity === 'function' &&
+    typeof a.get_my_withdrawal_status === 'function' &&
+    typeof a.retry_withdrawal === 'function' &&
+    typeof a.abandon_withdrawal === 'function'
   );
 }
 

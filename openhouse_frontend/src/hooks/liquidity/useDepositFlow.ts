@@ -36,7 +36,16 @@ export function useDepositFlow(gameId: GameType, onSuccess?: () => void) {
     clearMessages();
 
     try {
-      const amount = BigInt(Math.floor(parseFloat(depositAmount) * DECIMALS_PER_CKUSDT));
+      // Validate input before processing
+      const parsedAmount = parseFloat(depositAmount);
+      if (isNaN(parsedAmount) || !isFinite(parsedAmount)) {
+        throw new Error('Please enter a valid number');
+      }
+      if (parsedAmount <= 0) {
+        throw new Error('Deposit amount must be positive');
+      }
+
+      const amount = BigInt(Math.floor(parsedAmount * DECIMALS_PER_CKUSDT));
       const minDeposit = BigInt(config.liquidity.minDeposit * DECIMALS_PER_CKUSDT);
 
       if (amount < minDeposit) {

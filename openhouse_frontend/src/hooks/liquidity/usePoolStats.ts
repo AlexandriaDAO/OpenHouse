@@ -41,9 +41,15 @@ export function usePoolStats(gameId: GameType, refreshInterval = 30000): UsePool
     }
   }, [actor, isReady, gameId, isAuthenticated]);
 
+  // Initial load and interval
   useEffect(() => {
-    refresh();
-    const interval = setInterval(refresh, refreshInterval);
+    refresh(); // Initial load
+    
+    // Set up interval
+    const interval = setInterval(() => {
+      refresh();
+    }, refreshInterval);
+    
     return () => clearInterval(interval);
   }, [refresh, refreshInterval]);
 
