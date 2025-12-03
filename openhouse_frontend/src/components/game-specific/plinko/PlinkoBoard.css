@@ -15,59 +15,77 @@
   background: transparent;
 }
 
-/* Matter.js canvas */
+/* Matter.js canvas - explicit dimensions set by JS */
 .plinko-physics-canvas {
   position: absolute;
   top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  left: 50%;
+  transform: translateX(-50%);
   pointer-events: none;
   z-index: 5;
 }
 
-/* Tipping Bucket */
+/* Ball Dispenser (formerly Tipping Bucket) */
 .plinko-bucket {
   position: absolute;
-  top: 0;
+  top: 5px;
   left: 50%;
-  transform-origin: bottom center;
-  transform: translateX(-50%) rotate(0deg);
+  transform: translateX(-50%);
   cursor: pointer;
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   z-index: 20;
+  transition: filter 0.2s ease;
 }
 
 .plinko-bucket:hover:not(.bucket-disabled) {
-  transform: translateX(-50%) rotate(-8deg);
+  filter: brightness(1.2);
 }
 
 .plinko-bucket.bucket-disabled {
   cursor: not-allowed;
-  opacity: 0.6;
+  opacity: 0.5;
 }
 
 .bucket-body {
   position: relative;
-  width: 70px;
-  height: 40px;
-  background: linear-gradient(180deg, #374151 0%, #1f2937 100%);
-  border: 2px solid #48D1CC;
-  border-radius: 0 0 8px 8px;
-  border-top: none;
+  width: 60px;
+  height: 45px;
+  background: linear-gradient(180deg, #1f2937 0%, #111827 100%);
+  border: 2px solid #FFD700;
+  border-radius: 8px 8px 4px 4px;
   overflow: hidden;
+  box-shadow: 0 4px 12px rgba(255, 215, 0, 0.3), inset 0 0 20px rgba(255, 215, 0, 0.1);
+}
+
+/* Gate at bottom that "opens" */
+.bucket-body::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 20px;
+  height: 4px;
+  background: #FFD700;
+  border-radius: 0 0 4px 4px;
+  transition: all 0.3s ease;
+}
+
+.plinko-bucket.bucket-releasing .bucket-body::after {
+  width: 30px;
+  background: transparent;
+  border: 2px solid #FFD700;
+  border-top: none;
 }
 
 .bucket-body::before {
   content: '';
   position: absolute;
-  top: -8px;
-  left: -6px;
-  right: -6px;
-  height: 10px;
-  background: linear-gradient(180deg, #4B5563 0%, #374151 100%);
-  border: 2px solid #48D1CC;
-  border-radius: 4px 4px 0 0;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  height: 8px;
+  background: linear-gradient(180deg, #FFD700 0%, #FFA500 100%);
+  border-radius: 8px 8px 0 0;
 }
 
 .bucket-balls {
@@ -80,11 +98,12 @@
 
 .bucket-ball {
   position: absolute;
-  width: 10px;
-  height: 10px;
-  background: radial-gradient(circle at 30% 30%, #fff 0%, #FFD700 50%, #FFA500 100%);
+  width: 12px;
+  height: 12px;
+  background: radial-gradient(circle at 30% 30%, #fff 0%, #FFD700 40%, #FFA500 100%);
+  border: 1px solid #FFA500;
   border-radius: 50%;
-  box-shadow: 0 0 6px rgba(255, 215, 0, 0.6);
+  box-shadow: 0 0 8px rgba(255, 215, 0, 0.8), inset 0 -2px 4px rgba(0,0,0,0.3);
 }
 
 .bucket-count {
@@ -108,41 +127,53 @@
 }
 
 .plinko-bucket:hover:not(.bucket-disabled) .bucket-label {
-  color: #48D1CC;
+  color: #FFD700;
 }
 
-/* Slots */
+/* Animation when releasing balls */
+.plinko-bucket.bucket-releasing .bucket-balls {
+  animation: balls-fall 0.4s ease-out forwards;
+}
+
+@keyframes balls-fall {
+  0% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(20px); }
+}
+
+/* Landing Slots */
 .plinko-slots {
   position: absolute;
   width: 100%;
-  height: 30px;
+  height: 35px;
   display: flex;
   justify-content: center;
-  pointer-events: none; /* Let clicks pass through to canvas if needed, though canvas is also pointer-events none */
+  pointer-events: none;
 }
 
 .plinko-slot {
   position: absolute;
-  width: 30px;
-  height: 30px;
-  border: 2px solid rgba(72, 209, 204, 0.5);
-  border-radius: 4px;
+  width: 32px;
+  height: 35px;
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.8) 0%, rgba(31, 41, 55, 0.6) 100%);
+  border: 2px solid rgba(255, 215, 0, 0.3);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
   transform: translateX(-50%);
   transition: all 0.3s ease;
 }
 
 .plinko-slot-active {
-  border-color: rgba(255, 215, 0, 1);
-  background: rgba(255, 215, 0, 0.2);
-  box-shadow: 0 0 20px rgba(255, 215, 0, 0.6);
-  transform: translateX(-50%) scale(1.1);
+  border-color: #FFD700;
+  background: rgba(255, 215, 0, 0.25);
+  box-shadow: 0 0 20px rgba(255, 215, 0, 0.5), inset 0 0 15px rgba(255, 215, 0, 0.2);
+  transform: translateX(-50%) scale(1.05);
 }
 
 .slot-count {
   font-size: 10px;
   font-weight: bold;
-  color: #000;
-  background: #48D1CC;
+  color: #111;
+  background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
   border-radius: 50%;
   width: 18px;
   height: 18px;
@@ -153,6 +184,7 @@
   top: -10px;
   left: 50%;
   transform: translateX(-50%);
+  box-shadow: 0 2px 6px rgba(255, 165, 0, 0.5);
 }
 
 /* Multiplier labels */
@@ -197,18 +229,17 @@
   .plinko-board {
     width: 600px;
   }
-  
-  /* Adjust bucket size for smaller screens */
+
   .bucket-body {
-    width: 60px;
-    height: 35px;
+    width: 55px;
+    height: 40px;
   }
 }
 
 @media (max-width: 650px) {
   .plinko-board {
-    width: 100%; /* Allow full width on mobile */
-    overflow-x: auto; /* Scroll if needed */
+    width: 100%;
+    overflow-x: auto;
   }
 
   .plinko-multiplier-label {
@@ -217,12 +248,12 @@
   }
 
   .bucket-body {
-    width: 50px;
-    height: 30px;
+    width: 48px;
+    height: 35px;
   }
 
   .bucket-ball {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
   }
 }

@@ -27,12 +27,13 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [landedBalls, setLandedBalls] = useState<Set<number>>(new Set());
-  const [bucketTilt, setBucketTilt] = useState(0);
+  const [isReleasing, setIsReleasing] = useState(false);
 
-  // Physics configuration
+  // Physics configuration - must match CSS slot positioning
+  // Slots use: left: calc(50% + ${(i - rows / 2) * 40}px)
   const physicsConfig = {
     rows,
-    pegSpacingX: 40,
+    pegSpacingX: 40,  // Must match CSS slot spacing
     pegSpacingY: 50,
     ballRadius: 8,
     pegRadius: 4
@@ -41,9 +42,9 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
   // Handle ball landing
   const handleBallLanded = useCallback((ballId: number, position: number) => {
     setLandedBalls(prev => {
-        const newSet = new Set(prev);
-        newSet.add(ballId);
-        return newSet;
+      const newSet = new Set(prev);
+      newSet.add(ballId);
+      return newSet;
     });
   }, []);
 
@@ -60,21 +61,26 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
       if (!isDropping) {
         clearBalls();
         setLandedBalls(new Set());
-        setBucketTilt(0);
+        setIsReleasing(false);
       }
       return;
     }
 
-    // Tilt bucket
-    setBucketTilt(45);
-    setTimeout(() => setBucketTilt(0), 400);
+    // Trigger release animation
+    setIsReleasing(true);
 
-    // Drop each ball with stagger
+    // Drop each ball with stagger - starting after brief delay for gate animation
+    const dropDelay = 150; // ms before first ball drops
     paths.forEach((path, index) => {
       setTimeout(() => {
         dropBall({ id: index, path });
-      }, index * 200); // 200ms stagger between balls
+      }, dropDelay + index * 150); // 150ms stagger between balls
     });
+
+    // Reset release state after all balls dropped
+    const totalDropTime = dropDelay + paths.length * 150;
+    const timer = setTimeout(() => setIsReleasing(false), totalDropTime + 200);
+    return () => clearTimeout(timer);
   }, [paths, isDropping, dropBall, clearBalls]);
 
   // Check if all balls landed
@@ -93,38 +99,38 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
     onDrop();
   };
 
-  // Calculate board height for container
-  const boardHeight = 60 + rows * 50 + 120;
+  // Calculate board height for container - must match physics hook
+  // DROP_ZONE_HEIGHT (60) + rows * pegSpacingY (50) + bottom padding (120)
+  const boardHeight = 60 + rows * physicsConfig.pegSpacingY + 120;
 
   return (
     <div className="plinko-board-container">
       <div className="plinko-board" style={{ height: `${boardHeight}px` }}>
 
-        {/* Tipping Bucket (React UI) */}
+        {/* Ball Dispenser (React UI) */}
         <div
-          className={`plinko-bucket ${disabled || isDropping ? 'bucket-disabled' : ''}`}
-          style={{ transform: `rotate(${bucketTilt}deg)` }}
+          className={`plinko-bucket ${disabled || isDropping ? 'bucket-disabled' : ''} ${isReleasing ? 'bucket-releasing' : ''}`}
           onClick={handleBucketClick}
         >
           <div className="bucket-body">
             <div className="bucket-balls">
-              {Array.from({ length: Math.min(ballCount, 10) }).map((_, i) => (
+              {!isReleasing && Array.from({ length: Math.min(ballCount, 8) }).map((_, i) => (
                 <div
                   key={i}
                   className="bucket-ball"
                   style={{
-                    left: `${10 + (i % 5) * 12}px`,
-                    bottom: `${4 + Math.floor(i / 5) * 10}px`,
+                    left: `${8 + (i % 4) * 13}px`,
+                    bottom: `${6 + Math.floor(i / 4) * 14}px`,
                   }}
                 />
               ))}
             </div>
-            {ballCount > 10 && (
-              <span className="bucket-count">+{ballCount - 10}</span>
+            {!isReleasing && ballCount > 8 && (
+              <span className="bucket-count">+{ballCount - 8}</span>
             )}
           </div>
           <div className="bucket-label">
-            {isDropping ? '...' : ballCount > 1 ? `×${ballCount}` : 'TAP'}
+            {isDropping ? 'DROPPING' : ballCount > 1 ? `×${ballCount}` : 'DROP'}
           </div>
         </div>
 
@@ -134,10 +140,10 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
           className="plinko-physics-canvas"
         />
 
-        {/* Landing slots (React UI) */}
+        {/* Landing slots (React UI) - positioned to align with physics */}
         <div
           className="plinko-slots"
-          style={{ top: `${60 + rows * 50 + 30}px` }}
+          style={{ top: `${60 + rows * physicsConfig.pegSpacingY + 30}px` }}
         >
           {Array.from({ length: rows + 1 }, (_, i) => (
             <div
@@ -146,7 +152,7 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
                 !isDropping && finalPositions?.includes(i) ? 'plinko-slot-active' : ''
               }`}
               style={{
-                left: `calc(50% + ${(i - rows / 2) * 40}px)`,
+                left: `calc(50% + ${(i - rows / 2) * physicsConfig.pegSpacingX}px)`,
               }}
             >
               {!isDropping && finalPositions && (() => {
@@ -161,7 +167,7 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
         {multipliers && multipliers.length > 0 && (
           <div
             className="plinko-multiplier-labels"
-            style={{ top: `${60 + rows * 50 + 70}px` }}
+            style={{ top: `${60 + rows * physicsConfig.pegSpacingY + 70}px` }}
           >
             {multipliers.map((mult, index) => {
               const isHighlighted = !isDropping && finalPositions?.includes(index);
@@ -172,7 +178,7 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
                   key={`mult-${index}`}
                   className={`plinko-multiplier-label ${isWin ? 'win-multiplier' : 'lose-multiplier'} ${isHighlighted ? 'highlighted' : ''}`}
                   style={{
-                    left: `calc(50% + ${(index - rows / 2) * 40}px)`,
+                    left: `calc(50% + ${(index - rows / 2) * physicsConfig.pegSpacingX}px)`,
                   }}
                 >
                   {mult.toFixed(2)}x

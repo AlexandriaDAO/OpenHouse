@@ -7,7 +7,20 @@ const ANIMATION_CONFIG = {
   FAST_INTERVAL: 50,            // Fast rolling interval
   SLOWDOWN_DELAYS: [100, 150, 250, 400, 600], // Progressive slowdown steps
   STAGGER_DELAY: 500,           // Delay between each dice reveal
+  FINAL_REVEAL_PAUSE: 150,      // Pause before showing final number for visual clarity
 } as const;
+
+// Generate a number that converges toward the target
+// As progress (0-1) increases, the result gets closer to the target
+const generateConvergingNumber = (target: number, progress: number): number => {
+  // Start with full range (0-100), progressively narrow toward target
+  const maxDeviation = Math.floor(50 * (1 - progress));
+  if (maxDeviation === 0) return target;
+
+  const min = Math.max(0, target - maxDeviation);
+  const max = Math.min(100, target + maxDeviation);
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+};
 
 // Dice size scaling based on count
 const DICE_SCALE = {
@@ -79,7 +92,7 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
     }, ANIMATION_CONFIG.FAST_INTERVAL);
   }, []);
 
-  // Reveal a specific dice with slowdown animation
+  // Reveal a specific dice with slowdown animation that converges to result
   const revealDice = useCallback((diceIndex: number, result: SingleDiceResult) => {
     // Stop rolling interval for this dice
     if (intervalRefs.current[diceIndex]) {
@@ -87,16 +100,22 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
       intervalRefs.current[diceIndex] = null;
     }
 
-    // Slowdown sequence
+    const targetNumber = result.rolled_number;
+    const totalSteps = ANIMATION_CONFIG.SLOWDOWN_DELAYS.length;
+
+    // Slowdown sequence - numbers converge toward the final result
     let totalDelay = 0;
-    ANIMATION_CONFIG.SLOWDOWN_DELAYS.forEach((delay) => {
+    ANIMATION_CONFIG.SLOWDOWN_DELAYS.forEach((delay, stepIndex) => {
       totalDelay += delay;
+      // Progress from 0 to ~0.9 (save 1.0 for final reveal)
+      const progress = (stepIndex + 1) / (totalSteps + 1);
+
       const timeout = setTimeout(() => {
         setDiceStates(prev => {
           const newStates = [...prev];
           newStates[diceIndex] = {
             ...newStates[diceIndex],
-            displayNumber: Math.floor(Math.random() * 101)
+            displayNumber: generateConvergingNumber(targetNumber, progress)
           };
           return newStates;
         });
@@ -104,8 +123,8 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
       timeoutRefs.current.push(timeout);
     });
 
-    // Final reveal
-    totalDelay += ANIMATION_CONFIG.SLOWDOWN_DELAYS[ANIMATION_CONFIG.SLOWDOWN_DELAYS.length - 1];
+    // Final reveal with a brief pause for visual clarity
+    totalDelay += ANIMATION_CONFIG.FINAL_REVEAL_PAUSE;
     const finalTimeout = setTimeout(() => {
       setDiceStates(prev => {
         const newStates = [...prev];
@@ -163,7 +182,7 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
       // Call onAnimationComplete after all dice are revealed
       const totalDuration = (results.length - 1) * ANIMATION_CONFIG.STAGGER_DELAY +
         ANIMATION_CONFIG.SLOWDOWN_DELAYS.reduce((a, b) => a + b, 0) +
-        ANIMATION_CONFIG.SLOWDOWN_DELAYS[ANIMATION_CONFIG.SLOWDOWN_DELAYS.length - 1];
+        ANIMATION_CONFIG.FINAL_REVEAL_PAUSE;
 
       const completeTimeout = setTimeout(() => {
         setAllRevealed(true);
