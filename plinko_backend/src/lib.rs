@@ -61,7 +61,8 @@ pub const CENTER_POSITION: u8 = ROWS / 2;
 pub const MIN_MULTIPLIER_BP: u64 = 2_000;
 
 /// Quadratic scaling factor in basis points
-/// Derived: 6.32 * 10000 / 16 = 3950
+/// Derived: 6.32 * MULTIPLIER_SCALE / (ROWS/2)² = 6.32 * 10000 / 4² = 3950
+/// The (ROWS/2)² denominator normalizes distance to [0,1] before squaring
 /// This achieves exactly 0.99 expected value (1% house edge)
 pub const QUADRATIC_FACTOR_BP: u64 = 3_950;
 
@@ -99,8 +100,15 @@ pub fn calculate_multiplier_bp(position: u8) -> Result<u64, String> {
     } as u64;
 
     // Pure integer formula: no floating point
-    let distance_squared = distance * distance;
-    Ok(MIN_MULTIPLIER_BP + QUADRATIC_FACTOR_BP * distance_squared)
+    // Use checked arithmetic to prevent overflow (though unlikely with current constants)
+    let distance_squared = distance.checked_mul(distance)
+        .ok_or("Overflow in distance calculation")?;
+    
+    let quad_term = QUADRATIC_FACTOR_BP.checked_mul(distance_squared)
+        .ok_or("Overflow in quadratic term calculation")?;
+        
+    MIN_MULTIPLIER_BP.checked_add(quad_term)
+        .ok_or("Overflow in final multiplier calculation".to_string())
 }
 
 // Memory management for future upgrades
@@ -144,8 +152,11 @@ async fn drop_ball() -> Result<PlinkoResult, String> {
     let final_position = path.iter().filter(|&&d| d).count() as u8;
 
     // Calculate multiplier using pure formula
-    let multiplier = calculate_multiplier(final_position)
+    // Use integer precision internally, then convert for display
+    let multiplier_bp = calculate_multiplier_bp(final_position)
         .map_err(|e| format!("Multiplier calculation failed: {}", e))?;
+    
+    let multiplier = multiplier_bp as f64 / MULTIPLIER_SCALE as f64;
 
     let win = multiplier >= 1.0;
 
@@ -192,8 +203,12 @@ async fn drop_multiple_balls(count: u8) -> Result<MultiBallResult, String> {
 
         // Calculate result
         let final_position = path.iter().filter(|&&d| d).count() as u8;
-        let multiplier = calculate_multiplier(final_position)
+        
+        let multiplier_bp = calculate_multiplier_bp(final_position)
             .map_err(|e| format!("Multiplier calculation failed for ball {}: {}", i, e))?;
+        
+        let multiplier = multiplier_bp as f64 / MULTIPLIER_SCALE as f64;
+        
         let win = multiplier >= 1.0;
 
         results.push(PlinkoResult {
@@ -237,14 +252,19 @@ fn get_multipliers_bp() -> Vec<u64> {
 fn get_multipliers() -> Vec<f64> {
     (0..=ROWS)
         .map(|pos| {
-            calculate_multiplier(pos)
-                .expect("Position 0-8 should always be valid")
+            let bp = calculate_multiplier_bp(pos)
+                .expect("Position 0-8 should always be valid");
+            bp as f64 / MULTIPLIER_SCALE as f64
         })
         .collect()
 }
 
 /// Get the mathematical formula as a string.
 /// Generated from constants to stay in sync with implementation.
+/// Note: If constants change, update this formula to match:
+/// - 0.2 = MIN_MULTIPLIER_BP / MULTIPLIER_SCALE
+/// - 6.32 = QUADRATIC_FACTOR_BP * 16 / MULTIPLIER_SCALE
+/// - 4 = ROWS / 2
 #[query]
 fn get_formula() -> String {
     "M(k) = 0.2 + 6.32 × ((k - 4) / 4)²".to_string()
@@ -258,7 +278,8 @@ fn get_expected_value() -> f64 {
         .enumerate()
         .map(|(pos, &coeff)| {
             let probability = coeff as f64 / TOTAL_PATHS as f64;
-            let multiplier = calculate_multiplier(pos as u8).unwrap_or(0.0);
+            let multiplier_bp = calculate_multiplier_bp(pos as u8).unwrap_or(0);
+            let multiplier = multiplier_bp as f64 / MULTIPLIER_SCALE as f64;
             probability * multiplier
         })
         .sum()
@@ -268,6 +289,10 @@ fn get_expected_value() -> f64 {
 /// Delegates to integer function and converts.
 ///
 /// DEPRECATED: Use calculate_multiplier_bp() for financial calculations.
+#[deprecated(
+    since = "0.2.0",
+    note = "Use calculate_multiplier_bp() for financial calculations to avoid floating-point errors"
+)]
 pub fn calculate_multiplier(position: u8) -> Result<f64, String> {
     let bp = calculate_multiplier_bp(position)?;
     Ok(bp as f64 / MULTIPLIER_SCALE as f64)
@@ -283,6 +308,7 @@ fn greet(name: String) -> String {
 // ============================================================================
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
 
@@ -328,6 +354,15 @@ mod tests {
             assert_eq!(NUM_POSITIONS as usize, BINOMIAL_COEFFICIENTS.len());
             assert_eq!(TOTAL_PATHS, BINOMIAL_COEFFICIENTS.iter().sum::<u64>());
             assert_eq!(CENTER_POSITION, ROWS / 2);
+        }
+
+        #[test]
+        fn test_get_multipliers_bp_api() {
+            let multipliers = get_multipliers_bp();
+            assert_eq!(multipliers.len(), 9);
+            assert_eq!(multipliers[0], 65200);
+            assert_eq!(multipliers[4], 2000); // Center position
+            assert_eq!(multipliers[8], 65200);
         }
 
         #[test]
