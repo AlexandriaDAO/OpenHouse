@@ -12,22 +12,146 @@ type MultiBallResult = record {
   average_multiplier: float64;
 };
 
+type PlinkoGameResult = record {
+  path: vec bool;
+  final_position: nat8;
+  multiplier_bp: nat64;
+  multiplier: float64;
+  bet_amount: nat64;
+  payout: nat64;
+  profit: int64;
+  is_win: bool;
+};
+
+type MultiBallGameResult = record {
+  results: vec PlinkoGameResult;
+  total_balls: nat8;
+  total_bet: nat64;
+  total_payout: nat64;
+  net_profit: int64;
+  average_multiplier: float64;
+};
+
+// Accounting types
+type LPPosition = record {
+  shares: nat;
+  pool_ownership_percent: float64;
+  redeemable_icp: nat;
+};
+
+type PoolStats = record {
+  total_shares: nat;
+  pool_reserve: nat;
+  share_price: nat;
+  total_liquidity_providers: nat64;
+  minimum_liquidity_burned: nat;
+  is_initialized: bool;
+};
+
+type WithdrawalType = variant {
+  User: record { amount: nat64 };
+  LP: record { shares: nat; reserve: nat; amount: nat64 };
+};
+
+type PendingWithdrawal = record {
+  withdrawal_type: WithdrawalType;
+  created_at: nat64;
+};
+
+type PendingWithdrawalInfo = record {
+  user: principal;
+  withdrawal_type: text;
+  amount: nat64;
+  created_at: nat64;
+};
+
+type HealthCheck = record {
+  pool_reserve: nat64;
+  total_deposits: nat64;
+  canister_balance: nat64;
+  calculated_total: nat64;
+  excess: int64;
+  excess_usdt: float64;
+  is_healthy: bool;
+  health_status: text;
+  timestamp: nat64;
+  pending_withdrawals_count: nat64;
+  pending_withdrawals_total_amount: nat64;
+  heap_memory_bytes: nat64;
+  stable_memory_pages: nat64;
+  total_abandoned_amount: nat64;
+  unique_users: nat64;
+  unique_lps: nat64;
+  is_solvent: bool;
+};
+
+type DailySnapshot = record {
+  day_timestamp: nat64;
+  pool_reserve_end: nat64;
+  daily_pool_profit: int64;
+  daily_volume: nat64;
+  share_price: nat64;
+};
+
+type ApyInfo = record {
+  actual_apy_percent: float64;
+  expected_apy_percent: float64;
+  days_calculated: nat32;
+  total_volume: nat64;
+  total_profit: int64;
+};
+
+type OrphanedFundsReport = record {
+  total_abandoned_amount: nat64;
+  abandoned_count: nat64;
+  recent_abandonments: vec AbandonedEntry;
+};
+
+type AbandonedEntry = record {
+  user: principal;
+  amount: nat64;
+  timestamp: nat64;
+};
+
 service : {
-  // Drop a ball - no parameters needed (fixed 8 rows)
+  // Existing pure game functions
   drop_ball: () -> (variant { Ok: PlinkoResult; Err: text });
-
-  // Drop multiple balls (1-30)
   drop_multiple_balls: (nat8) -> (variant { Ok: MultiBallResult; Err: text });
-
-  // Get all 9 multipliers in basis points (positions 0-8)
   get_multipliers_bp: () -> (vec nat64) query;
-
-  // Get the mathematical formula
   get_formula: () -> (text) query;
-
-  // Get expected value (should be 0.99)
   get_expected_value: () -> (float64) query;
-
-  // Test function
   greet: (text) -> (text) query;
+
+  // NEW: Betting game functions
+  play_plinko: (nat64) -> (variant { Ok: PlinkoGameResult; Err: text });
+  play_multi_plinko: (nat8, nat64) -> (variant { Ok: MultiBallGameResult; Err: text });
+  get_max_bet: () -> (nat64) query;
+  get_max_bet_per_ball: (nat8) -> (variant { Ok: nat64; Err: text }) query;
+
+  // NEW: User accounting
+  deposit: (nat64) -> (variant { Ok: nat64; Err: text });
+  withdraw_all: () -> (variant { Ok: nat64; Err: text });
+  retry_withdrawal: () -> (variant { Ok: nat64; Err: text });
+  abandon_withdrawal: () -> (variant { Ok: nat64; Err: text });
+  get_balance: (principal) -> (nat64) query;
+  get_my_balance: () -> (nat64) query;
+  get_pending_withdrawal: () -> (opt PendingWithdrawal) query;
+
+  // NEW: LP operations
+  deposit_liquidity: (nat64, opt nat) -> (variant { Ok: nat; Err: text });
+  withdraw_all_liquidity: () -> (variant { Ok: nat64; Err: text });
+  get_pool_stats: () -> (PoolStats) query;
+  get_lp_position: (principal) -> (LPPosition) query;
+  get_my_lp_position: () -> (LPPosition) query;
+  get_house_mode: () -> (text) query;
+
+  // NEW: Admin
+  admin_health_check: () -> (variant { Ok: HealthCheck; Err: text });
+  admin_get_all_pending_withdrawals: () -> (variant { Ok: vec PendingWithdrawalInfo; Err: text }) query;
+  admin_get_orphaned_funds_report: (opt nat64) -> (variant { Ok: OrphanedFundsReport; Err: text }) query;
+  // refresh_canister_balance: () -> (nat64); // Commented out as implementation wasn't clear/standard
+
+  // NEW: Statistics
+  get_daily_stats: (nat32) -> (vec DailySnapshot) query;
+  get_pool_apy: (opt nat32) -> (ApyInfo) query;
 }
