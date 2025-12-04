@@ -52,8 +52,8 @@ export const idlFactory = ({ IDL }) => {
   });
   const LPPosition = IDL.Record({
     'shares' : IDL.Nat,
-    'redeemable_icp' : IDL.Nat,
     'pool_ownership_percent' : IDL.Float64,
+    'redeemable_usdt' : IDL.Nat,
   });
   const WithdrawalType = IDL.Variant({
     'LP' : IDL.Record({

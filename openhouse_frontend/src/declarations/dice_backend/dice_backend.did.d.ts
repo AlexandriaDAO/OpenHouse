@@ -42,8 +42,8 @@ export interface HealthCheck {
 }
 export interface LPPosition {
   'shares' : bigint,
-  'redeemable_icp' : bigint,
   'pool_ownership_percent' : number,
+  'redeemable_usdt' : bigint,
 }
 export interface LPPositionInfo { 'shares' : bigint, 'user' : Principal }
 export interface MinimalGameResult {

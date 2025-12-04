@@ -42,9 +42,10 @@ export interface HealthCheck {
 }
 export interface LPPosition {
   'shares' : bigint,
-  'redeemable_icp' : bigint,
   'pool_ownership_percent' : number,
+  'redeemable_usdt' : bigint,
 }
+export interface LPPositionInfo { 'shares' : bigint, 'user' : Principal }
 export interface MultiBallGameResult {
   'total_balls' : number,
   'total_payout' : bigint,
@@ -98,6 +99,7 @@ export interface PoolStats {
   'is_initialized' : boolean,
   'minimum_liquidity_burned' : bigint,
 }
+export interface UserBalance { 'balance' : bigint, 'user' : Principal }
 export type WithdrawalType = {
     'LP' : { 'shares' : bigint, 'reserve' : bigint, 'amount' : bigint }
   } |
@@ -106,6 +108,26 @@ export interface _SERVICE {
   'abandon_withdrawal' : ActorMethod<
     [],
     { 'Ok' : bigint } |
+      { 'Err' : string }
+  >,
+  'admin_get_all_balances' : ActorMethod<
+    [bigint, bigint],
+    { 'Ok' : Array<UserBalance> } |
+      { 'Err' : string }
+  >,
+  'admin_get_all_balances_complete' : ActorMethod<
+    [],
+    { 'Ok' : Array<UserBalance> } |
+      { 'Err' : string }
+  >,
+  'admin_get_all_lp_positions' : ActorMethod<
+    [bigint, bigint],
+    { 'Ok' : Array<LPPositionInfo> } |
+      { 'Err' : string }
+  >,
+  'admin_get_all_lp_positions_complete' : ActorMethod<
+    [],
+    { 'Ok' : Array<LPPositionInfo> } |
       { 'Err' : string }
   >,
   'admin_get_all_pending_withdrawals' : ActorMethod<
@@ -118,11 +140,22 @@ export interface _SERVICE {
     { 'Ok' : OrphanedFundsReport } |
       { 'Err' : string }
   >,
+  'admin_get_orphaned_funds_report_full' : ActorMethod<
+    [],
+    { 'Ok' : OrphanedFundsReport } |
+      { 'Err' : string }
+  >,
   'admin_health_check' : ActorMethod<
     [],
     { 'Ok' : HealthCheck } |
       { 'Err' : string }
   >,
+  'calculate_shares_preview' : ActorMethod<
+    [bigint],
+    { 'Ok' : bigint } |
+      { 'Err' : string }
+  >,
+  'can_accept_bets' : ActorMethod<[], boolean>,
   'deposit' : ActorMethod<[bigint], { 'Ok' : bigint } | { 'Err' : string }>,
   'deposit_liquidity' : ActorMethod<
     [bigint, [] | [bigint]],
@@ -139,8 +172,10 @@ export interface _SERVICE {
   'get_daily_stats' : ActorMethod<[number], Array<DailySnapshot>>,
   'get_expected_value' : ActorMethod<[], number>,
   'get_formula' : ActorMethod<[], string>,
+  'get_house_balance' : ActorMethod<[], bigint>,
   'get_house_mode' : ActorMethod<[], string>,
   'get_lp_position' : ActorMethod<[Principal], LPPosition>,
+  'get_max_allowed_payout' : ActorMethod<[], bigint>,
   'get_max_bet' : ActorMethod<[], bigint>,
   'get_max_bet_per_ball' : ActorMethod<
     [number],
@@ -150,9 +185,11 @@ export interface _SERVICE {
   'get_multipliers_bp' : ActorMethod<[], BigUint64Array | bigint[]>,
   'get_my_balance' : ActorMethod<[], bigint>,
   'get_my_lp_position' : ActorMethod<[], LPPosition>,
-  'get_pending_withdrawal' : ActorMethod<[], [] | [PendingWithdrawal]>,
+  'get_my_withdrawal_status' : ActorMethod<[], [] | [PendingWithdrawal]>,
   'get_pool_apy' : ActorMethod<[[] | [number]], ApyInfo>,
   'get_pool_stats' : ActorMethod<[], PoolStats>,
+  'get_stats_count' : ActorMethod<[], bigint>,
+  'get_stats_range' : ActorMethod<[bigint, bigint], Array<DailySnapshot>>,
   'greet' : ActorMethod<[string], string>,
   'play_multi_plinko' : ActorMethod<
     [number, bigint],

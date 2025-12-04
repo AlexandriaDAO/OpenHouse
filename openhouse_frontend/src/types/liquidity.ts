@@ -16,7 +16,7 @@ export interface PoolStats {
 export interface LPPosition {
   shares: bigint;
   pool_ownership_percent: number;
-  redeemable_amount: bigint;
+  redeemable_usdt: bigint;
 }
 
 export interface ApyInfo {
@@ -37,7 +37,7 @@ export interface DailySnapshot {
 
 export interface PendingWithdrawal {
   created_at: bigint;
-  withdrawal_type: { User: { amount: bigint } } | { LP: { amount: bigint; shares: bigint } };
+  withdrawal_type: { User: { amount: bigint } } | { LP: { amount: bigint; shares: bigint; reserve: bigint } };
 }
 
 // ========================================
@@ -52,6 +52,12 @@ export interface LiquidityActorInterface {
   get_my_lp_position: () => Promise<LPPosition>;
   get_pool_apy: (days: [number] | []) => Promise<ApyInfo>;
   get_daily_stats: (limit: number) => Promise<DailySnapshot[]>;
+  get_house_balance: () => Promise<bigint>;
+  get_max_allowed_payout: () => Promise<bigint>;
+  can_accept_bets: () => Promise<boolean>;
+  calculate_shares_preview: (amount: bigint) => Promise<{ Ok: bigint } | { Err: string }>;
+  get_stats_range: (start: bigint, end: bigint) => Promise<DailySnapshot[]>;
+  get_stats_count: () => Promise<bigint>;
 
   // Liquidity operations
   deposit_liquidity: (amount: bigint, minShares: [] | [bigint]) => Promise<{ Ok: bigint } | { Err: string }>;
