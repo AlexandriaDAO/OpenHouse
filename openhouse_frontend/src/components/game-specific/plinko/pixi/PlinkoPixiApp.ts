@@ -12,6 +12,7 @@ export interface PlinkoAppConfig {
   multipliers: number[];
   onBallLanded?: (ballId: number, slot: number) => void;
   onAllBallsLanded?: () => void;
+  onDrop?: () => void;
 }
 
 export class PlinkoPixiApp {
@@ -82,6 +83,9 @@ export class PlinkoPixiApp {
     await this.slotRenderer.init(this.mainContainer, this.centerX, this.config.rows);
     await this.ballRenderer.init(this.mainContainer, this.centerX);
     await this.bucketRenderer.init(this.mainContainer, this.centerX);
+    if (this.config.onDrop) {
+      this.bucketRenderer.setOnClick(this.config.onDrop);
+    }
 
     // Apply initial scale
     this.applyScale();

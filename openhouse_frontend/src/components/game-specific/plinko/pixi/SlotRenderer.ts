@@ -39,9 +39,13 @@ export class SlotRenderer {
 
       // Slot background
       const slotGraphic = new Graphics();
+      // Set position first
+      slotGraphic.position.set(x, slotY);
+      
+      // Draw relative to position
       slotGraphic.roundRect(
-        x - LAYOUT.SLOT_WIDTH / 2,
-        slotY,
+        -LAYOUT.SLOT_WIDTH / 2,
+        0,
         LAYOUT.SLOT_WIDTH,
         LAYOUT.SLOT_HEIGHT,
         4

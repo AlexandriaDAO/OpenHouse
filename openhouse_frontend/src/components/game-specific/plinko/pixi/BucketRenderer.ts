@@ -89,6 +89,14 @@ export class BucketRenderer {
     this.container.addChild(this.labelText);
 
     parent.addChild(this.container);
+
+    // Make bucket interactive
+    this.container.eventMode = 'static';
+    this.container.cursor = 'pointer';
+  }
+
+  setOnClick(callback: () => void): void {
+    this.container.on('pointerdown', callback);
   }
 
   fillBucket(count: number): void {
