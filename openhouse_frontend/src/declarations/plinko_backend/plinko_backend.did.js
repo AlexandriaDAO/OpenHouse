@@ -1,4 +1,12 @@
 export const idlFactory = ({ IDL }) => {
+  const UserBalance = IDL.Record({
+    'balance' : IDL.Nat64,
+    'user' : IDL.Principal,
+  });
+  const LPPositionInfo = IDL.Record({
+    'shares' : IDL.Nat,
+    'user' : IDL.Principal,
+  });
   const PendingWithdrawalInfo = IDL.Record({
     'user' : IDL.Principal,
     'created_at' : IDL.Nat64,
@@ -55,8 +63,8 @@ export const idlFactory = ({ IDL }) => {
   });
   const LPPosition = IDL.Record({
     'shares' : IDL.Nat,
-    'redeemable_icp' : IDL.Nat,
     'pool_ownership_percent' : IDL.Float64,
+    'redeemable_usdt' : IDL.Nat,
   });
   const WithdrawalType = IDL.Variant({
     'LP' : IDL.Record({
@@ -109,6 +117,26 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text })],
         [],
       ),
+    'admin_get_all_balances' : IDL.Func(
+        [IDL.Nat64, IDL.Nat64],
+        [IDL.Variant({ 'Ok' : IDL.Vec(UserBalance), 'Err' : IDL.Text })],
+        ['query'],
+      ),
+    'admin_get_all_balances_complete' : IDL.Func(
+        [],
+        [IDL.Variant({ 'Ok' : IDL.Vec(UserBalance), 'Err' : IDL.Text })],
+        ['query'],
+      ),
+    'admin_get_all_lp_positions' : IDL.Func(
+        [IDL.Nat64, IDL.Nat64],
+        [IDL.Variant({ 'Ok' : IDL.Vec(LPPositionInfo), 'Err' : IDL.Text })],
+        ['query'],
+      ),
+    'admin_get_all_lp_positions_complete' : IDL.Func(
+        [],
+        [IDL.Variant({ 'Ok' : IDL.Vec(LPPositionInfo), 'Err' : IDL.Text })],
+        ['query'],
+      ),
     'admin_get_all_pending_withdrawals' : IDL.Func(
         [],
         [
@@ -124,11 +152,22 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Variant({ 'Ok' : OrphanedFundsReport, 'Err' : IDL.Text })],
         ['query'],
       ),
+    'admin_get_orphaned_funds_report_full' : IDL.Func(
+        [],
+        [IDL.Variant({ 'Ok' : OrphanedFundsReport, 'Err' : IDL.Text })],
+        ['query'],
+      ),
     'admin_health_check' : IDL.Func(
         [],
         [IDL.Variant({ 'Ok' : HealthCheck, 'Err' : IDL.Text })],
         [],
       ),
+    'calculate_shares_preview' : IDL.Func(
+        [IDL.Nat64],
+        [IDL.Variant({ 'Ok' : IDL.Nat, 'Err' : IDL.Text })],
+        ['query'],
+      ),
+    'can_accept_bets' : IDL.Func([], [IDL.Bool], ['query']),
     'deposit' : IDL.Func(
         [IDL.Nat64],
         [IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text })],
@@ -157,8 +196,10 @@ export const idlFactory = ({ IDL }) => {
       ),
     'get_expected_value' : IDL.Func([], [IDL.Float64], ['query']),
     'get_formula' : IDL.Func([], [IDL.Text], ['query']),
+    'get_house_balance' : IDL.Func([], [IDL.Nat64], ['query']),
     'get_house_mode' : IDL.Func([], [IDL.Text], ['query']),
     'get_lp_position' : IDL.Func([IDL.Principal], [LPPosition], ['query']),
+    'get_max_allowed_payout' : IDL.Func([], [IDL.Nat64], ['query']),
     'get_max_bet' : IDL.Func([], [IDL.Nat64], ['query']),
     'get_max_bet_per_ball' : IDL.Func(
         [IDL.Nat8],
@@ -168,13 +209,19 @@ export const idlFactory = ({ IDL }) => {
     'get_multipliers_bp' : IDL.Func([], [IDL.Vec(IDL.Nat64)], ['query']),
     'get_my_balance' : IDL.Func([], [IDL.Nat64], ['query']),
     'get_my_lp_position' : IDL.Func([], [LPPosition], ['query']),
-    'get_pending_withdrawal' : IDL.Func(
+    'get_my_withdrawal_status' : IDL.Func(
         [],
         [IDL.Opt(PendingWithdrawal)],
         ['query'],
       ),
     'get_pool_apy' : IDL.Func([IDL.Opt(IDL.Nat32)], [ApyInfo], ['query']),
     'get_pool_stats' : IDL.Func([], [PoolStats], ['query']),
+    'get_stats_count' : IDL.Func([], [IDL.Nat64], ['query']),
+    'get_stats_range' : IDL.Func(
+        [IDL.Nat64, IDL.Nat64],
+        [IDL.Vec(DailySnapshot)],
+        ['query'],
+      ),
     'greet' : IDL.Func([IDL.Text], [IDL.Text], ['query']),
     'play_multi_plinko' : IDL.Func(
         [IDL.Nat8, IDL.Nat64],
