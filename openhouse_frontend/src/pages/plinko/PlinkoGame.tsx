@@ -1,14 +1,14 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import usePlinkoActor from '../hooks/actors/usePlinkoActor';
-import { GameLayout } from '../components/game-ui';
-import { PlinkoBoard } from '../components/game-specific/plinko';
-import useLedgerActor from '../hooks/actors/useLedgerActor';
-import { BettingRail } from '../components/betting';
-import { useGameBalance } from '../providers/GameBalanceProvider';
-import { useBalance } from '../providers/BalanceProvider';
-import { useAuth } from '../providers/AuthProvider';
-import { DECIMALS_PER_CKUSDT, formatUSDT } from '../types/balance';
-import type { PlinkoGameResult as BackendPlinkoResult } from '../declarations/plinko_backend/plinko_backend.did';
+import usePlinkoActor from '../../hooks/actors/usePlinkoActor';
+import { GameLayout } from '../../components/game-ui';
+import { PlinkoBoard } from '../../components/game-specific/plinko';
+import useLedgerActor from '../../hooks/actors/useLedgerActor';
+import { BettingRail } from '../../components/betting';
+import { useGameBalance } from '../../providers/GameBalanceProvider';
+import { useBalance } from '../../providers/BalanceProvider';
+import { useAuth } from '../../providers/AuthProvider';
+import { DECIMALS_PER_CKUSDT, formatUSDT } from '../../types/balance';
+import type { PlinkoGameResult as BackendPlinkoResult } from '../../declarations/plinko_backend/plinko_backend.did';
 
 // Game Constants
 const ROWS = 8;

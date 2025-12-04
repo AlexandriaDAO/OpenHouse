@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { Principal } from '@dfinity/principal';
 import {
   GameType,
@@ -465,21 +465,64 @@ export function useGameBalance(game?: GameType): GameBalanceContextValue | Scope
     throw new Error('useGameBalance must be used within GameBalanceProvider');
   }
 
-  // If a specific game is provided, return scoped functions
-  if (game) {
+  // Memoize scoped callbacks for specific game - prevents infinite render loops
+  const scopedRefresh = useCallback(() => {
+    if (game) return context.refreshBalances(game);
+    return Promise.resolve();
+  }, [context.refreshBalances, game]);
+
+  const scopedOptimisticUpdate = useCallback((update: OptimisticUpdate) => {
+    if (game) context.optimisticUpdate(game, update);
+  }, [context.optimisticUpdate, game]);
+
+  const scopedVerifyAndSync = useCallback(() => {
+    if (game) return context.verifyAndSync(game);
+    return Promise.resolve(false);
+  }, [context.verifyAndSync, game]);
+
+  const scopedRetry = useCallback(() => {
+    if (game) return context.retryLastOperation(game);
+    return Promise.resolve();
+  }, [context.retryLastOperation, game]);
+
+  const scopedClearError = useCallback(() => {
+    if (game) context.clearError(game);
+  }, [context.clearError, game]);
+
+  // Memoize the scoped return object to prevent new object on every render
+  const scopedValue = useMemo((): ScopedGameBalance | null => {
+    if (!game) return null;
     return {
       balance: context.getBalance(game),
       status: context.status[game],
       isLoading: context.isLoading(game),
       hasError: context.hasError(game),
       isSyncing: context.isSyncing(game),
-      refresh: () => context.refreshBalances(game),
-      optimisticUpdate: (update: OptimisticUpdate) => context.optimisticUpdate(game, update),
-      verifyAndSync: () => context.verifyAndSync(game),
-      retry: () => context.retryLastOperation(game),
-      clearError: () => context.clearError(game),
+      refresh: scopedRefresh,
+      optimisticUpdate: scopedOptimisticUpdate,
+      verifyAndSync: scopedVerifyAndSync,
+      retry: scopedRetry,
+      clearError: scopedClearError,
       lastUpdated: context.getLastUpdated(game),
     };
+  }, [
+    game,
+    context.getBalance,
+    context.status,
+    context.isLoading,
+    context.hasError,
+    context.isSyncing,
+    context.getLastUpdated,
+    scopedRefresh,
+    scopedOptimisticUpdate,
+    scopedVerifyAndSync,
+    scopedRetry,
+    scopedClearError,
+  ]);
+
+  // If a specific game is provided, return memoized scoped functions
+  if (game && scopedValue) {
+    return scopedValue;
   }
 
   return context;

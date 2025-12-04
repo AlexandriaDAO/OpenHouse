@@ -1,7 +1,8 @@
-import { useActor } from 'ic-use-actor';
 import { GameType } from '../../types/balance';
-import { LiquidityActorInterface, isLiquidityActor } from '../../types/liquidity';
-import { getGameConfig } from '../../config/gameRegistry';
+import { LiquidityActorInterface } from '../../types/liquidity';
+import useDice from './useDiceActor';
+import usePlinko from './usePlinkoActor';
+import useBlackjack from './useBlackjackActor';
 
 interface UseGameActorResult {
   actor: LiquidityActorInterface | null;
@@ -9,23 +10,27 @@ interface UseGameActorResult {
 }
 
 /**
- * Returns the appropriate actor for a given game type, cast to the common LiquidityActorInterface.
- * This allows shared components to be type-safe without using `any`.
- * 
- * PERFORMANCE: Uses the generic useActor hook with a dynamic canister ID to avoid 
- * instantiating all 3 game hooks (useDiceActor, usePlinkoActor, useBlackjackActor) simultaneously.
+ * Returns the appropriate actor for a given game type.
+ *
+ * ARCHITECTURE: This follows the Alexandria pattern where all actor hooks are called
+ * at once. ic-use-actor actors share global state, so there's no performance penalty
+ * for initializing all hooks - they're singletons managed by the library.
+ *
+ * This pattern matches how ActorProvider works in both OpenHouse and Alexandria.
  */
 export function useGameActor(gameId: GameType): UseGameActorResult {
-  const config = getGameConfig(gameId);
-  
-  // Dynamically fetch the actor by canister ID (or name if registered as such)
-  // ic-use-actor registers actors by the canisterId passed to createActorHook
-  const { actor: rawActor } = useActor(config?.canisterId || '');
+  // Call all game actor hooks (they're singletons, so this is efficient)
+  const dice = useDice();
+  const plinko = usePlinko();
+  const blackjack = useBlackjack();
 
-  // Validate and cast to common interface
-  if (rawActor && isLiquidityActor(rawActor)) {
-    return { actor: rawActor, isReady: true };
-  }
+  // Map game ID to corresponding actor result
+  // ic-use-actor returns { actor, isSuccess, ... } but we normalize to { actor, isReady }
+  const actorMap: Record<GameType, UseGameActorResult> = {
+    dice: { actor: dice.actor as LiquidityActorInterface | null, isReady: dice.isSuccess },
+    plinko: { actor: plinko.actor as LiquidityActorInterface | null, isReady: plinko.isSuccess },
+    blackjack: { actor: blackjack.actor as LiquidityActorInterface | null, isReady: blackjack.isSuccess },
+  };
 
-  return { actor: null, isReady: false };
+  return actorMap[gameId];
 }
