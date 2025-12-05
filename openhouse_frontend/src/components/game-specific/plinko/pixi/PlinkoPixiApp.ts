@@ -53,11 +53,11 @@ export class PlinkoPixiApp {
       await this.app.init({
         width: this.containerWidth,
         height: this.containerHeight,
-        backgroundColor: 0x0a0a14,
-        antialias: true,
-        resolution: Math.min(window.devicePixelRatio || 1, 2),
-        autoDensity: true,
-        preference: 'webgl', // Prefer WebGL over WebGPU for better compatibility
+        backgroundColor: 0x0a0a14, // PIXEL_COLORS.BLACK
+        antialias: false, // Pixel art needs this off
+        resolution: 1, // Fixed resolution for pixel grid
+        autoDensity: true, // Ensure CSS dimensions are set
+        preference: 'webgl',
       });
     } catch (err) {
       console.error('Pixi.js initialization failed:', err);
@@ -71,6 +71,11 @@ export class PlinkoPixiApp {
         preference: 'webgl',
       });
     }
+
+    // Force canvas to fill container to prevent collapse
+    this.app.canvas.style.width = '100%';
+    this.app.canvas.style.height = '100%';
+    this.app.canvas.style.display = 'block';
 
     container.appendChild(this.app.canvas);
     this.app.stage.addChild(this.mainContainer);

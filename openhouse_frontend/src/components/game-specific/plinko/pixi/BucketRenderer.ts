@@ -1,5 +1,5 @@
 import { Container, Graphics, Text, TextStyle } from 'pixi.js';
-import { LAYOUT, easeInOutQuad } from './LayoutConfig';
+import { LAYOUT, easeInOutQuad, PIXEL_SCALE, PIXEL_COLORS } from './LayoutConfig';
 
 interface BucketBall {
   graphics: Graphics;
@@ -24,8 +24,8 @@ export class BucketRenderer {
   private isDoorAnimating = false;
 
   // Bucket interior dimensions
-  private readonly INTERIOR_WIDTH = LAYOUT.BUCKET_WIDTH - 20;
-  private readonly INTERIOR_HEIGHT = LAYOUT.BUCKET_HEIGHT - 20;
+  private readonly INTERIOR_WIDTH = LAYOUT.BUCKET_WIDTH - PIXEL_SCALE * 4; // 2 ps border on each side
+  private readonly INTERIOR_HEIGHT = LAYOUT.BUCKET_HEIGHT - PIXEL_SCALE * 4;
 
   constructor() {
     this.container = new Container();
@@ -36,10 +36,11 @@ export class BucketRenderer {
     this.labelText = new Text({
       text: 'DROP',
       style: new TextStyle({
-        fontFamily: 'JetBrains Mono, monospace',
-        fontSize: 14,
-        fontWeight: 'bold',
-        fill: 0xffffff,
+        fontFamily: '"Press Start 2P", "Courier New", monospace',
+        fontSize: 10,
+        fontWeight: 'normal',
+        fill: PIXEL_COLORS.WHITE,
+        align: 'center',
       }),
     });
   }
@@ -48,40 +49,70 @@ export class BucketRenderer {
     this.container.removeChildren();
     this.container.position.set(centerX, 0);
 
-    // Bucket body (trapezoid shape)
+    const ps = PIXEL_SCALE;
+    const topOffset = ps * 2; // 8px top offset
+
+    // Bucket body - Pixel art style (Rectangle)
     this.bucketBody.clear();
-    this.bucketBody.moveTo(-LAYOUT.BUCKET_WIDTH / 2, 10);
-    this.bucketBody.lineTo(-LAYOUT.BUCKET_WIDTH / 2 + 15, LAYOUT.BUCKET_HEIGHT);
-    this.bucketBody.lineTo(LAYOUT.BUCKET_WIDTH / 2 - 15, LAYOUT.BUCKET_HEIGHT);
-    this.bucketBody.lineTo(LAYOUT.BUCKET_WIDTH / 2, 10);
-    this.bucketBody.closePath();
-    this.bucketBody.fill({ color: LAYOUT.BUCKET_COLOR });
-    this.bucketBody.stroke({ color: LAYOUT.BUCKET_BORDER_COLOR, width: 2 });
+    
+    // Fill
+    this.bucketBody.rect(
+      -LAYOUT.BUCKET_WIDTH / 2,
+      topOffset,
+      LAYOUT.BUCKET_WIDTH,
+      LAYOUT.BUCKET_HEIGHT - topOffset
+    );
+    this.bucketBody.fill({ color: PIXEL_COLORS.DARK_GRAY });
+
+    // Pixel Border (4 sides)
+    const hw = LAYOUT.BUCKET_WIDTH / 2;
+    const h = LAYOUT.BUCKET_HEIGHT;
+    
+    // Top
+    this.bucketBody.rect(-hw, topOffset, LAYOUT.BUCKET_WIDTH, ps);
+    // Bottom
+    this.bucketBody.rect(-hw, h - ps, LAYOUT.BUCKET_WIDTH, ps);
+    // Left
+    this.bucketBody.rect(-hw, topOffset, ps, h - topOffset);
+    // Right
+    this.bucketBody.rect(hw - ps, topOffset, ps, h - topOffset);
+    
+    this.bucketBody.fill({ color: PIXEL_COLORS.MID_GRAY });
 
     this.container.addChild(this.bucketBody);
 
-    // Ball container (masked to bucket interior)
-    this.ballContainer.position.set(0, 15);
+    // Ball container
+    this.ballContainer.position.set(0, topOffset + ps);
     this.container.addChild(this.ballContainer);
+
+    // Doors (Rectangular pixel slabs)
+    const doorWidth = LAYOUT.BUCKET_WIDTH / 2 - ps * 2;
+    const doorHeight = ps * 2; // 8px thick doors
 
     // Left door
     const leftDoorGraphic = new Graphics();
-    leftDoorGraphic.rect(0, 0, LAYOUT.BUCKET_WIDTH / 2 - 10, 8);
+    leftDoorGraphic.rect(0, 0, doorWidth, doorHeight);
     leftDoorGraphic.fill({ color: LAYOUT.TRAPDOOR_COLOR });
-    leftDoorGraphic.stroke({ color: LAYOUT.BUCKET_BORDER_COLOR, width: 1 });
+    // Border
+    leftDoorGraphic.rect(0, 0, doorWidth, ps); // Top border detail
+    leftDoorGraphic.fill({ color: PIXEL_COLORS.MID_GRAY });
+    
     this.leftDoor.addChild(leftDoorGraphic);
-    this.leftDoor.pivot.set(0, 4); // Pivot on left edge
-    this.leftDoor.position.set(-LAYOUT.BUCKET_WIDTH / 2 + 15, LAYOUT.BUCKET_HEIGHT);
+    this.leftDoor.pivot.set(0, doorHeight / 2); // Pivot on left edge center
+    this.leftDoor.position.set(-doorWidth, LAYOUT.BUCKET_HEIGHT - ps * 3); // Positioned near bottom
     this.container.addChild(this.leftDoor);
 
     // Right door
     const rightDoorGraphic = new Graphics();
-    rightDoorGraphic.rect(-(LAYOUT.BUCKET_WIDTH / 2 - 10), 0, LAYOUT.BUCKET_WIDTH / 2 - 10, 8);
+    rightDoorGraphic.rect(-doorWidth, 0, doorWidth, doorHeight);
     rightDoorGraphic.fill({ color: LAYOUT.TRAPDOOR_COLOR });
-    rightDoorGraphic.stroke({ color: LAYOUT.BUCKET_BORDER_COLOR, width: 1 });
+    // Border
+    rightDoorGraphic.rect(-doorWidth, 0, doorWidth, ps);
+    rightDoorGraphic.fill({ color: PIXEL_COLORS.MID_GRAY });
+
     this.rightDoor.addChild(rightDoorGraphic);
-    this.rightDoor.pivot.set(0, 4); // Pivot on right edge
-    this.rightDoor.position.set(LAYOUT.BUCKET_WIDTH / 2 - 15, LAYOUT.BUCKET_HEIGHT);
+    this.rightDoor.pivot.set(0, doorHeight / 2); // Pivot on right edge center
+    this.rightDoor.position.set(doorWidth, LAYOUT.BUCKET_HEIGHT - ps * 3);
     this.container.addChild(this.rightDoor);
 
     // Label
@@ -97,13 +128,11 @@ export class BucketRenderer {
     // Add hover effects
     this.container.on('pointerover', () => {
       if (this.container.eventMode === 'static') {
-        this.container.scale.set(1.05);
         this.bucketBody.tint = 0xddddff;
       }
     });
     
     this.container.on('pointerout', () => {
-      this.container.scale.set(1);
       this.bucketBody.tint = 0xffffff;
     });
   }
@@ -132,17 +161,20 @@ export class BucketRenderer {
     this.clearBalls();
 
     // Add balls with staggered timing
-    const ballRadius = 8;
+    const ballRadius = PIXEL_SCALE; // 4px radius small balls for bucket
 
     for (let i = 0; i < Math.min(count, 30); i++) {
       setTimeout(() => {
         const ball = new Graphics();
-        ball.circle(0, 0, ballRadius);
-        ball.fill({ color: LAYOUT.BALL_COLOR });
+        // Pixel ball (small)
+        //  XX
+        //  XX
+        ball.rect(-ballRadius, -ballRadius, ballRadius * 2, ballRadius * 2);
+        ball.fill({ color: PIXEL_COLORS.GOLD });
 
         // Random starting position at top of bucket
-        const x = (Math.random() - 0.5) * (this.INTERIOR_WIDTH - ballRadius * 2);
-        const y = -ballRadius;
+        const x = (Math.random() - 0.5) * (this.INTERIOR_WIDTH - ballRadius * 4);
+        const y = -ballRadius * 2;
 
         ball.position.set(x, y);
         this.ballContainer.addChild(ball);
@@ -183,16 +215,16 @@ export class BucketRenderer {
         this.isDoorAnimating = false;
       }
 
-      // Apply rotation to doors (swing outward)
+      // Apply rotation to doors (swing down/open)
       const angle = easeInOutQuad(this.doorProgress) * (Math.PI / 2);
-      this.leftDoor.rotation = -angle;
-      this.rightDoor.rotation = angle;
+      this.leftDoor.rotation = angle;
+      this.rightDoor.rotation = -angle;
     }
 
     // Animate bucket balls (simple gravity)
     const gravity = 0.3;
-    const damping = 0.7;
-    const floorY = this.INTERIOR_HEIGHT - 10;
+    const damping = 0.5; // Less bouncy
+    const floorY = this.INTERIOR_HEIGHT - PIXEL_SCALE * 3; // Above doors
 
     this.balls.forEach((ball) => {
       // Apply gravity

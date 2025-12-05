@@ -1,5 +1,5 @@
 import { Container, Graphics, Text, TextStyle } from 'pixi.js';
-import { LAYOUT } from './LayoutConfig';
+import { LAYOUT, PIXEL_SCALE, PIXEL_COLORS, snapToPixelGrid } from './LayoutConfig';
 
 export class SlotRenderer {
   private container: Container;
@@ -21,55 +21,79 @@ export class SlotRenderer {
     this.slotGraphics = [];
     this.multiplierTexts = [];
 
-    const slotY = LAYOUT.DROP_ZONE_HEIGHT + this.rows * LAYOUT.PEG_SPACING_Y + LAYOUT.SLOT_Y_OFFSET;
+    const slotY = snapToPixelGrid(LAYOUT.DROP_ZONE_HEIGHT + this.rows * LAYOUT.PEG_SPACING_Y + LAYOUT.SLOT_Y_OFFSET);
     const numSlots = this.rows + 1;
 
-    // Create text style
+    // Create text style - using pixel font
     const textStyle = new TextStyle({
-      fontFamily: 'JetBrains Mono, monospace',
-      fontSize: 11,
-      fontWeight: 'bold',
-      fill: 0xffffff,
+      fontFamily: '"Press Start 2P", "Courier New", monospace',
+      fontSize: 8, // Small for pixel aesthetic
+      fontWeight: 'normal',
+      fill: PIXEL_COLORS.WHITE,
+      align: 'center',
     });
 
     for (let i = 0; i < numSlots; i++) {
-      const x = centerX + (i - this.rows / 2) * LAYOUT.PEG_SPACING_X;
+      const x = snapToPixelGrid(centerX + (i - this.rows / 2) * LAYOUT.PEG_SPACING_X);
       const multiplier = this.multipliers[i] ?? 0.2;
       const isWin = multiplier >= 1.0;
 
-      // Slot background
       const slotGraphic = new Graphics();
-      // Set position first
       slotGraphic.position.set(x, slotY);
       
-      // Draw relative to position
-      slotGraphic.roundRect(
-        -LAYOUT.SLOT_WIDTH / 2,
-        0,
-        LAYOUT.SLOT_WIDTH,
-        LAYOUT.SLOT_HEIGHT,
-        4
-      );
-      slotGraphic.fill({ color: isWin ? 0x1a3d2e : 0x2a2a3e });
-      slotGraphic.stroke({ color: isWin ? LAYOUT.WIN_COLOR : LAYOUT.LOSE_COLOR, width: 2 });
+      this.drawPixelSlot(slotGraphic, isWin, false);
+      
       this.slotGraphics.push(slotGraphic);
       this.container.addChild(slotGraphic);
 
       // Multiplier text
       const text = new Text({
-        text: `${multiplier.toFixed(2)}x`,
+        text: `${multiplier}x`, // Simplified text
         style: {
           ...textStyle,
-          fill: isWin ? LAYOUT.WIN_COLOR : LAYOUT.LOSE_COLOR,
+          fill: isWin ? PIXEL_COLORS.GREEN : PIXEL_COLORS.LIGHT_GRAY,
         },
       });
       text.anchor.set(0.5);
+      // Center text in slot
       text.position.set(x, slotY + LAYOUT.SLOT_HEIGHT / 2);
       this.multiplierTexts.push(text);
       this.container.addChild(text);
     }
 
     parent.addChild(this.container);
+  }
+
+  private drawPixelSlot(graphics: Graphics, isWin: boolean, isHighlighted: boolean): void {
+    const ps = PIXEL_SCALE;
+    const w = LAYOUT.SLOT_WIDTH;
+    const h = LAYOUT.SLOT_HEIGHT;
+    const halfW = w / 2;
+
+    graphics.clear();
+
+    // Background
+    const bgColor = isHighlighted ? 
+      (isWin ? 0x1a3d2e : 0x4a4a2e) : // Highlighted bg
+      (isWin ? 0x0a2a1a : PIXEL_COLORS.DARK_GRAY); // Normal bg
+    
+    graphics.rect(-halfW, 0, w, h);
+    graphics.fill({ color: bgColor });
+
+    // Border color
+    const borderColor = isHighlighted ? PIXEL_COLORS.GOLD : (isWin ? PIXEL_COLORS.GREEN : PIXEL_COLORS.MID_GRAY);
+
+    // Draw 4 sides separately for crisp edges
+    // Top
+    graphics.rect(-halfW, 0, w, ps);
+    // Bottom
+    graphics.rect(-halfW, h - ps, w, ps);
+    // Left
+    graphics.rect(-halfW, 0, ps, h);
+    // Right
+    graphics.rect(halfW - ps, 0, ps, h);
+
+    graphics.fill({ color: borderColor });
   }
 
   highlightSlots(positions: number[]): void {
@@ -90,16 +114,7 @@ export class SlotRenderer {
         const multiplier = this.multipliers[pos] ?? 0.2;
         const isWin = multiplier >= 1.0;
 
-        slot.clear();
-        slot.roundRect(
-          -LAYOUT.SLOT_WIDTH / 2,
-          0,
-          LAYOUT.SLOT_WIDTH,
-          LAYOUT.SLOT_HEIGHT,
-          4
-        );
-        slot.fill({ color: isWin ? 0x22c55e : LAYOUT.HIGHLIGHT_COLOR, alpha: 0.4 });
-        slot.stroke({ color: LAYOUT.HIGHLIGHT_COLOR, width: 3 });
+        this.drawPixelSlot(slot, isWin, true);
       }
     });
   }
@@ -111,16 +126,7 @@ export class SlotRenderer {
         const multiplier = this.multipliers[pos] ?? 0.2;
         const isWin = multiplier >= 1.0;
 
-        slot.clear();
-        slot.roundRect(
-          -LAYOUT.SLOT_WIDTH / 2,
-          0,
-          LAYOUT.SLOT_WIDTH,
-          LAYOUT.SLOT_HEIGHT,
-          4
-        );
-        slot.fill({ color: isWin ? 0x1a3d2e : 0x2a2a3e });
-        slot.stroke({ color: isWin ? LAYOUT.WIN_COLOR : LAYOUT.LOSE_COLOR, width: 2 });
+        this.drawPixelSlot(slot, isWin, false);
       }
     });
     this.highlightedSlots.clear();
@@ -132,8 +138,8 @@ export class SlotRenderer {
     multipliers.forEach((mult, i) => {
       if (i < this.multiplierTexts.length) {
         const isWin = mult >= 1.0;
-        this.multiplierTexts[i].text = `${mult.toFixed(2)}x`;
-        this.multiplierTexts[i].style.fill = isWin ? LAYOUT.WIN_COLOR : LAYOUT.LOSE_COLOR;
+        this.multiplierTexts[i].text = `${mult}x`;
+        this.multiplierTexts[i].style.fill = isWin ? PIXEL_COLORS.GREEN : PIXEL_COLORS.LIGHT_GRAY;
       }
     });
   }

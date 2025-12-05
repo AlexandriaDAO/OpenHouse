@@ -1,19 +1,38 @@
 // Plinko board layout constants
 // All values are in "design pixels" - scaled uniformly for responsive sizing
 
+export const PIXEL_SCALE = 4;
+
+// Snap to pixel grid
+export function snapToPixelGrid(value: number): number {
+  return Math.round(value / PIXEL_SCALE) * PIXEL_SCALE;
+}
+
+// Pixel art color palette
+export const PIXEL_COLORS = {
+  BLACK: 0x0a0a14,
+  DARK_GRAY: 0x2a2a3e,
+  MID_GRAY: 0x4a4a6e,
+  LIGHT_GRAY: 0x8888aa,
+  WHITE: 0xe8e8e8,
+  GOLD: 0xffd700,
+  GREEN: 0x22c55e,
+  RED: 0xef4444,
+} as const;
+
 export const LAYOUT = {
   // Base design dimensions
   BASE_WIDTH: 800,
   BASE_HEIGHT: 700,
 
-  // Peg grid
-  PEG_SPACING_X: 50,
-  PEG_SPACING_Y: 55,
-  PEG_RADIUS: 6,
+  // Peg grid (multiples of PIXEL_SCALE = 4)
+  PEG_SPACING_X: 52,
+  PEG_SPACING_Y: 56,
+  PEG_RADIUS: 8,
 
   // Ball
   BALL_RADIUS: 12,
-  BALL_COLOR: 0xffd700, // Gold
+  BALL_COLOR: PIXEL_COLORS.GOLD,
 
   // Drop zone (space above first peg row)
   DROP_ZONE_HEIGHT: 80,
@@ -21,14 +40,14 @@ export const LAYOUT = {
   // Bucket
   BUCKET_WIDTH: 160,
   BUCKET_HEIGHT: 80,
-  BUCKET_COLOR: 0x2a2a3e,
-  BUCKET_BORDER_COLOR: 0x4a4a6e,
+  BUCKET_COLOR: PIXEL_COLORS.DARK_GRAY,
+  BUCKET_BORDER_COLOR: PIXEL_COLORS.MID_GRAY,
   TRAPDOOR_COLOR: 0x3a3a5e,
 
   // Slots
-  SLOT_WIDTH: 45,
+  SLOT_WIDTH: 44,
   SLOT_HEIGHT: 40,
-  SLOT_GAP: 5,
+  SLOT_GAP: 4,
   SLOT_Y_OFFSET: 20, // Distance below last peg row
 
   // Animation timing (ms)
@@ -37,10 +56,10 @@ export const LAYOUT = {
   DOOR_OPEN_DURATION_MS: 300,
 
   // Colors
-  PEG_COLOR: 0xe8e8e8,
-  WIN_COLOR: 0x22c55e, // Green
+  PEG_COLOR: PIXEL_COLORS.WHITE,
+  WIN_COLOR: PIXEL_COLORS.GREEN,
   LOSE_COLOR: 0x6b7280, // Gray
-  HIGHLIGHT_COLOR: 0xffd700, // Gold
+  HIGHLIGHT_COLOR: PIXEL_COLORS.GOLD,
 } as const;
 
 // Calculate responsive scale factor

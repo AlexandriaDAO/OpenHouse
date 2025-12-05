@@ -1,5 +1,5 @@
 import { Container, Graphics } from 'pixi.js';
-import { LAYOUT, calculateBallX, calculateBallY } from './LayoutConfig';
+import { LAYOUT, calculateBallX, calculateBallY, PIXEL_SCALE, PIXEL_COLORS, snapToPixelGrid } from './LayoutConfig';
 
 interface AnimatingBall {
   id: number;
@@ -31,26 +31,49 @@ export class BallRenderer {
     parent.addChild(this.container);
   }
 
+  private createPixelBall(): Graphics {
+    const ball = new Graphics();
+    const ps = PIXEL_SCALE;
+
+    // 5x5 "pixel" ball (approx 20x20px)
+    // Pattern:
+    //   XXX
+    //  XXXXX
+    //  XXXXX
+    //  XXXXX
+    //   XXX
+
+    // Top row (3 blocks)
+    ball.rect(-1.5 * ps, -2.5 * ps, 3 * ps, ps);
+    
+    // Middle rows (5 blocks width, 3 blocks height)
+    ball.rect(-2.5 * ps, -1.5 * ps, 5 * ps, 3 * ps);
+    
+    // Bottom row (3 blocks)
+    ball.rect(-1.5 * ps, 1.5 * ps, 3 * ps, ps);
+    
+    ball.fill({ color: PIXEL_COLORS.GOLD });
+
+    // Simple highlight (top-left pixel)
+    ball.rect(-1.5 * ps, -1.5 * ps, ps, ps);
+    ball.fill({ color: 0xffffff, alpha: 0.6 });
+
+    return ball;
+  }
+
   dropBall(id: number, path: boolean[]): void {
     // Calculate final slot position (count of rights in path)
     const finalSlot = path.filter((v) => v).length;
 
-    // Create ball container (Pixi v8 requires Container for hierarchy)
     const ballContainer = new Container();
-
-    // Create ball graphics - draw everything in one Graphics object
-    const ballGraphics = new Graphics();
-    // Main ball
-    ballGraphics.circle(0, 0, LAYOUT.BALL_RADIUS);
-    ballGraphics.fill({ color: LAYOUT.BALL_COLOR });
-    // Highlight for 3D effect
-    ballGraphics.circle(-LAYOUT.BALL_RADIUS * 0.3, -LAYOUT.BALL_RADIUS * 0.3, LAYOUT.BALL_RADIUS * 0.3);
-    ballGraphics.fill({ color: 0xffffff, alpha: 0.4 });
+    const ballGraphics = this.createPixelBall();
 
     ballContainer.addChild(ballGraphics);
 
-    // Initial position (top of board)
-    ballContainer.position.set(this.centerX, LAYOUT.DROP_ZONE_HEIGHT - LAYOUT.BALL_RADIUS * 2);
+    // Initial position (top of board) - Snap to grid
+    const startX = snapToPixelGrid(this.centerX);
+    const startY = snapToPixelGrid(LAYOUT.DROP_ZONE_HEIGHT - LAYOUT.BALL_RADIUS * 2);
+    ballContainer.position.set(startX, startY);
 
     this.container.addChild(ballContainer);
 
@@ -85,9 +108,9 @@ export class BallRenderer {
           this.landedCount++;
 
           // Calculate final position
-          const x = calculateBallX(ball.path, this.rows, 0, this.centerX);
+          const x = snapToPixelGrid(calculateBallX(ball.path, this.rows, 0, this.centerX));
           // Add offset to match SlotRenderer's positioning + half slot height for centering
-          const y = LAYOUT.DROP_ZONE_HEIGHT + this.rows * LAYOUT.PEG_SPACING_Y + LAYOUT.SLOT_Y_OFFSET + LAYOUT.SLOT_HEIGHT / 2;
+          const y = snapToPixelGrid(LAYOUT.DROP_ZONE_HEIGHT + this.rows * LAYOUT.PEG_SPACING_Y + LAYOUT.SLOT_Y_OFFSET + LAYOUT.SLOT_HEIGHT / 2);
           ball.container.position.set(x, y);
 
           // Callback
@@ -97,13 +120,13 @@ export class BallRenderer {
       }
 
       // Calculate current position with easing
-      const x = calculateBallX(ball.path, ball.currentRow, ball.progress, this.centerX);
-      const y = calculateBallY(ball.currentRow, ball.progress);
+      const rawX = calculateBallX(ball.path, ball.currentRow, ball.progress, this.centerX);
+      const rawY = calculateBallY(ball.currentRow, ball.progress);
 
-      ball.container.position.set(x, y);
+      // Snap to pixel grid for retro feel
+      ball.container.position.set(snapToPixelGrid(rawX), snapToPixelGrid(rawY));
 
-      // Add slight rotation for visual interest
-      ball.container.rotation += deltaMS * 0.005;
+      // NO rotation for pixel art
     });
   }
 
