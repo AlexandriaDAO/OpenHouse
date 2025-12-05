@@ -1,6 +1,6 @@
 import { GameType } from '../../types/balance';
 import { useStatsData, Period } from '../../hooks/liquidity/useStatsData';
-import { SharePriceChart, PoolReserveChart, VolumeChart, ProfitLossChart } from './StatsCharts';
+import { SharePriceChart, PoolReserveChart, VolumeChart, NetFlowChart, HouseProfitChart } from './StatsCharts';
 import { ApyCard } from './ApyCard';
 
 interface Props {
@@ -11,7 +11,7 @@ export function GameStatistics({ gameId }: Props) {
   const {
     period, setPeriod,
     isLoading, error,
-    chartData, apy7, apy30,
+    chartData, apy7, apy30, accurateApy,
     hasData
   } = useStatsData(gameId, true);
 
@@ -71,22 +71,40 @@ export function GameStatistics({ gameId }: Props) {
       </div>
 
       {/* APY Cards */}
-      {apy7 && apy30 && (
+      {apy7 && apy30 && accurateApy && (
         <div className="grid grid-cols-2 gap-4">
-          <ApyCard label="7-Day APY" info={apy7} />
-          <ApyCard label="30-Day APY" info={apy30} />
+          <ApyCard 
+            label="7-Day APY" 
+            accurateApy={accurateApy.apy7} 
+            backendApy={apy7} 
+          />
+          <ApyCard 
+            label="30-Day APY" 
+            accurateApy={accurateApy.apy30} 
+            backendApy={apy30} 
+          />
         </div>
       )}
 
       {/* Charts */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Share Price - PRIMARY (shows true performance) */}
         <div className="md:col-span-2">
           <SharePriceChart data={chartData} height={250} />
         </div>
+
+        {/* House Profit - NEW (derived from share price) */}
+        <div className="md:col-span-2">
+          <HouseProfitChart data={chartData} height={180} />
+        </div>
+
+        {/* Supporting metrics */}
         <PoolReserveChart data={chartData} />
         <VolumeChart data={chartData} />
+
+        {/* Net Flow - RENAMED (was "Profit/Loss") */}
         <div className="md:col-span-2">
-          <ProfitLossChart data={chartData} height={180} />
+          <NetFlowChart data={chartData} height={160} />
         </div>
       </div>
     </div>
