@@ -27,13 +27,13 @@ const MAX_RECENT_ABANDONMENTS: usize = 50; // Max entries for orphaned funds rep
 const PARENT_AUTO_WITHDRAW_THRESHOLD: u64 = 10_000_000; // 10 USDT
 
 thread_local! {
-    static USER_BALANCES_STABLE: RefCell<StableBTreeMap<Principal, u64, Memory>> = RefCell::new(
+    pub(crate) static USER_BALANCES_STABLE: RefCell<StableBTreeMap<Principal, u64, Memory>> = RefCell::new(
         StableBTreeMap::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(USER_BALANCES_MEMORY_ID))),
         )
     );
 
-    static PENDING_WITHDRAWALS: RefCell<StableBTreeMap<Principal, PendingWithdrawal, Memory>> = RefCell::new(
+    pub(crate) static PENDING_WITHDRAWALS: RefCell<StableBTreeMap<Principal, PendingWithdrawal, Memory>> = RefCell::new(
         StableBTreeMap::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(PENDING_WITHDRAWALS_MEMORY_ID)))
         )
@@ -549,6 +549,49 @@ pub fn credit_balance(user: Principal, amount: u64) -> Result<(), String> {
         balances.insert(user, new_balance);
 
         log_audit(AuditEvent::BalanceCredited { user, amount, new_balance });
+
+        Ok(())
+    })
+}
+
+/// Force credit balance for internal system refunds.
+///
+/// # Safety
+/// This bypasses the pending withdrawal check. It is safe because:
+/// 1. The pending withdrawal amount is FIXED at creation time
+/// 2. Adding new funds doesn't affect the pending withdrawal amount
+/// 3. This is ONLY called for refunds where tokens are already in canister
+///
+/// # Overflow Safety
+/// This function returns an error on overflow. In the specific case of
+/// `deposit_liquidity` slippage refunds, this would technically result in
+/// orphaned funds (transfer succeeded, credit failed).
+/// 
+/// However, this is theoretically impossible because:
+/// - Token is USDT (6 decimals)
+/// - Max u64 is ~18 quintillion (1.8 * 10^19)
+/// - Total USDT supply is ~100 billion (10^11)
+/// - Therefore, `current_balance + refund` can never overflow u64.
+///
+/// # When to use
+/// ONLY for slippage refunds in `deposit_liquidity` where:
+/// - `transfer_from_user` succeeded (tokens ARE in canister)
+/// - `credit_balance` would fail due to concurrent `PendingWithdrawal`
+///
+/// DO NOT use for general credits or rewards.
+pub(crate) fn force_credit_balance_system(user: Principal, amount: u64) -> Result<(), String> {
+    // NOTE: We intentionally skip the PENDING_WITHDRAWALS check here.
+    // This is safe - see docstring above.
+
+    USER_BALANCES_STABLE.with(|balances| {
+        let mut balances = balances.borrow_mut();
+        let current = balances.get(&user).unwrap_or(0);
+        let new_balance = current.checked_add(amount)
+            .ok_or(format!("Balance overflow: {} + {}", current, amount))?;
+
+        balances.insert(user, new_balance);
+
+        log_audit(AuditEvent::SystemRefundCredited { user, amount, new_balance });
 
         Ok(())
     })

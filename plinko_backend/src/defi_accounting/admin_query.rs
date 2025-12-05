@@ -65,6 +65,7 @@ pub async fn admin_health_check() -> Result<HealthCheck, String> {
         .saturating_mul(WASM_PAGE_SIZE_BYTES);
     #[cfg(not(target_arch = "wasm32"))]
     let heap_memory_bytes: u64 = 0; // Placeholder for non-wasm targets (tests)
+
     let stable_memory_pages = ic_cdk::stable::stable_size();
 
     Ok(HealthCheck {
@@ -133,4 +134,3 @@ pub fn get_orphaned_funds_report_full() -> Result<OrphanedFundsReport, String> {
     require_admin()?;
     Ok(accounting::build_orphaned_funds_report_internal(None))
 }
-

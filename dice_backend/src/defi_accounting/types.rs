@@ -96,6 +96,13 @@ pub enum AuditEvent {
         expected_min_shares: Nat,
         actual_shares: Nat,
     },
+    /// System-initiated refund that bypasses normal credit restrictions.
+    /// Only used for slippage refunds where tokens are already in canister.
+    SystemRefundCredited {
+        user: Principal,
+        amount: u64,
+        new_balance: u64,
+    },
 }
 
 /// Health check result for admin monitoring.
