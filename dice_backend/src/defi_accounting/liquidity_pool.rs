@@ -220,7 +220,7 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
             });
 
             // Refund to user's betting balance (safe - they can withdraw normally)
-            accounting::credit_balance(caller, amount)?;
+            accounting::force_credit_balance_system(caller, amount)?;
 
             // P5 FIX: Actionable error message
             return Err(format!(
