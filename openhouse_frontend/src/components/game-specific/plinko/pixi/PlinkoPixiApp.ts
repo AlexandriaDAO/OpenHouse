@@ -143,18 +143,23 @@ export class PlinkoPixiApp {
         this.ballRenderer.clear();
         this.bucketRenderer.reset();
         this.slotRenderer.clearHighlights();
+        this.bucketRenderer.setInteractive(true);
         break;
       case 'filling':
         // Bucket will handle filling via fillBucket()
+        this.bucketRenderer.setInteractive(false);
         break;
       case 'releasing':
         this.bucketRenderer.openDoor();
+        this.bucketRenderer.setInteractive(false);
         break;
       case 'animating':
         // Balls are dropped via dropBalls()
+        this.bucketRenderer.setInteractive(false);
         break;
       case 'complete':
         this.bucketRenderer.closeDoor();
+        this.bucketRenderer.setInteractive(false);
         break;
     }
   }

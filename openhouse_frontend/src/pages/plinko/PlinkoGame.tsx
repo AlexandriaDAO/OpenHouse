@@ -405,7 +405,7 @@ export const Plinko: React.FC = () => {
         </div>
 
         {/* Result overlay with Framer Motion - Below game board */}
-        <div className="h-16 flex items-center justify-center">
+        <div className="min-h-[4rem] flex items-center justify-center">
           <ResultOverlay
             singleResult={currentResult ? {
               multiplier: currentResult.multiplier,

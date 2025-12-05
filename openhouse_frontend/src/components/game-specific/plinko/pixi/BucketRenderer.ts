@@ -91,8 +91,31 @@ export class BucketRenderer {
     parent.addChild(this.container);
 
     // Make bucket interactive
-    this.container.eventMode = 'static';
-    this.container.cursor = 'pointer';
+    this.setInteractive(false);
+    
+    // Add hover effects
+    this.container.on('pointerover', () => {
+      if (this.container.eventMode === 'static') {
+        this.container.scale.set(1.05);
+        this.bucketBody.tint = 0xddddff;
+      }
+    });
+    
+    this.container.on('pointerout', () => {
+      this.container.scale.set(1);
+      this.bucketBody.tint = 0xffffff;
+    });
+  }
+
+  setInteractive(enabled: boolean): void {
+    this.container.eventMode = enabled ? 'static' : 'none';
+    this.container.cursor = enabled ? 'pointer' : 'default';
+    this.container.alpha = enabled ? 1 : 0.8;
+    
+    if (!enabled) {
+      this.container.scale.set(1);
+      this.bucketBody.tint = 0xffffff;
+    }
   }
 
   setOnClick(callback: () => void): void {
