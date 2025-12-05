@@ -60,8 +60,11 @@ pub async fn admin_health_check() -> Result<HealthCheck, String> {
     let total_abandoned = accounting::sum_abandoned_from_audit_internal();
 
     // Memory metrics (NEW)
+    #[cfg(target_arch = "wasm32")]
     let heap_memory_bytes = (core::arch::wasm32::memory_size(0) as u64)
         .saturating_mul(WASM_PAGE_SIZE_BYTES);
+    #[cfg(not(target_arch = "wasm32"))]
+    let heap_memory_bytes: u64 = 0; // Placeholder for non-wasm targets (tests)
     let stable_memory_pages = ic_cdk::stable::stable_size();
 
     Ok(HealthCheck {
