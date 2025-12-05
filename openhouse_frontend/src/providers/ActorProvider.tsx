@@ -32,7 +32,7 @@ const isAuthenticationError = (error: unknown): boolean => {
 };
 
 // Authentication error modal component
-function AuthErrorModal() {
+function AuthErrorModal({ onDismiss }: { onDismiss: () => void }) {
   const [countdown, setCountdown] = useState(3);
 
   useEffect(() => {
@@ -40,7 +40,7 @@ function AuthErrorModal() {
       setCountdown((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          window.location.reload();
+          onDismiss();
           return 0;
         }
         return prev - 1;
@@ -48,26 +48,26 @@ function AuthErrorModal() {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, []);
+  }, [onDismiss]);
 
   return createPortal(
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[9999]">
       <div className="bg-gray-900 rounded-xl p-6 max-w-md w-full mx-4 border border-red-500/50 shadow-2xl">
         <div className="text-center">
           <div className="text-4xl mb-4">🔐</div>
-          <h3 className="text-xl font-bold text-red-400 mb-2">Authentication Invalid</h3>
+          <h3 className="text-xl font-bold text-red-400 mb-2">Session Expired</h3>
           <p className="text-gray-300 mb-4">
-            Your login session is invalid or has expired.
-            You will be logged out automatically.
+            Your login session has expired.
+            You have been logged out.
           </p>
           <p className="text-yellow-400 font-mono text-lg mb-4">
-            Refreshing in {countdown}...
+            Closing in {countdown}...
           </p>
           <button
-            onClick={() => window.location.reload()}
+            onClick={onDismiss}
             className="w-full px-6 py-3 bg-red-500 text-white font-bold rounded-lg hover:bg-red-400 transition"
           >
-            Refresh Now
+            Continue
           </button>
         </div>
       </div>
@@ -177,10 +177,16 @@ export function ActorProvider() {
     });
   }, [interceptors]);
 
+  // Dismiss the auth error modal and reset state
+  const dismissAuthError = useCallback(() => {
+    setShowAuthError(false);
+    isLoggingOut.current = false;
+  }, []);
+
   // Return null - this is a side-effect component, not a wrapper
   // Use portal for the modal so it renders even though we return null
   if (showAuthError) {
-    return <AuthErrorModal />;
+    return <AuthErrorModal onDismiss={dismissAuthError} />;
   }
 
   return null;
