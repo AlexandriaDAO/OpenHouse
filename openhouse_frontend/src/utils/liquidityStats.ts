@@ -100,50 +100,42 @@ export const processChartData = (snapshots: DailySnapshot[]): ChartDataPoint[] =
 };
 
 /**
- * Calculate APY based on share price returns
- * Uses a fixed period (days) for the denominator to avoid inflation on short data
+ * Calculate APY based on share price returns over actual data period
+ *
+ * @param chartData - Array of chart data points with share prices
+ * @param targetDays - How many days of data to use (7, 30, etc.)
+ * @returns Annualized percentage yield based on share price change
  */
 export const calculateAccurateApy = (
-  chartData: ChartDataPoint[], 
+  chartData: ChartDataPoint[],
   targetDays: number
 ): number => {
   // Need at least 2 points to calculate a return
   if (!chartData || chartData.length < 2) return 0;
 
-  // Get the relevant slice of data
+  // Get the relevant slice of data (last N days)
   const activeData = chartData.slice(-targetDays);
-  
+
   if (activeData.length < 2) return 0;
 
   const startPrice = activeData[0].sharePrice;
   const endPrice = activeData[activeData.length - 1].sharePrice;
 
+  // Can't calculate return if start price is zero or negative
   if (startPrice <= 0) return 0;
 
   const returnRate = (endPrice - startPrice) / startPrice;
-  
-  // FIX: Use targetDays for the time basis if we want a "7 Day APY" estimate
-  // unless we have more data than that (unlikely with slice) or much less.
-  // The request was to avoid "inflated" APY when data is short.
-  // If we have 2 days of data for a 30 day request:
-  // Using 'activeData.length' (2) -> Multiplier 365/2 = 182x. High APY.
-  // Using 'targetDays' (30) -> Multiplier 365/30 = 12x. Conservative APY.
-  // We will use Math.max(activeData.length, targetDays) to be conservative.
-  // Note: activeData.length roughly equals the days of data we have.
-  
-  // Calculate time span in days based on timestamps for better accuracy
+
+  // Calculate actual time span in days based on timestamps
   const startTime = activeData[0].date.getTime();
   const endTime = activeData[activeData.length - 1].date.getTime();
-  const daysDiff = (endTime - startTime) / (1000 * 60 * 60 * 24);
-  
+  const actualDays = (endTime - startTime) / (1000 * 60 * 60 * 24);
+
   // Prevent division by zero or extremely small timeframes
-  if (daysDiff < 0.5) return 0;
+  if (actualDays < 0.5) return 0;
 
-  // Use the larger of actual time passed or the target period.
-  // This ensures that if we only have 1 day of data but want 30-day APY, 
-  // we don't extrapolate that 1 day to the whole year as if it repeats every day.
-  // We treat it as "this is the return we got over this period".
-  const effectiveDays = Math.max(daysDiff, targetDays);
-
-  return returnRate * (DAYS_IN_YEAR / effectiveDays) * 100;
+  // Annualize based on ACTUAL days of data we have
+  // If we have 7 days of data, both 7-day and 30-day APY will show the same
+  // because that's the only data we have. This is accurate and honest.
+  return returnRate * (DAYS_IN_YEAR / actualDays) * 100;
 };
