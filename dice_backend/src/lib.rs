@@ -241,6 +241,16 @@ fn admin_get_all_lp_positions_complete() -> Result<Vec<defi_accounting::types::L
     defi_accounting::admin_query::get_all_lp_positions_complete()
 }
 
+#[query]
+fn admin_get_audit_log(limit: u64, offset: u64) -> Result<Vec<defi_accounting::types::AuditEntry>, String> {
+    defi_accounting::admin_query::get_audit_log(limit, offset)
+}
+
+#[query]
+fn admin_get_audit_log_count() -> Result<u64, String> {
+    defi_accounting::admin_query::get_audit_log_count()
+}
+
 // =============================================================================
 // LIQUIDITY POOL ENDPOINTS
 // =============================================================================

@@ -6,7 +6,9 @@ import {
   PendingWithdrawalInfo,
   OrphanedFundsReport,
   UserBalance,
-  LPPositionInfo
+  LPPositionInfo,
+  AuditEntry,
+  AuditEvent
 } from '../declarations/dice_backend/dice_backend.did';
 import { useAuth } from '../providers/AuthProvider';
 
@@ -52,6 +54,18 @@ interface UnifiedPendingWithdrawal extends PendingWithdrawalInfo {
   game: string;
 }
 
+// Extended audit entry to include game name
+interface UnifiedAuditEntry extends AuditEntry {
+  game: string;
+}
+
+// Audit log state for each game
+interface AuditLogData {
+  entries: AuditEntry[];
+  totalCount: number;
+  error: string | null;
+}
+
 export const Admin: React.FC = () => {
   const { actor: diceActor } = useDiceActor();
   const { actor: plinkoActor } = usePlinkoActor();
@@ -70,6 +84,17 @@ export const Admin: React.FC = () => {
     health: null, pendingWithdrawals: [], orphanedReport: null,
     userBalances: [], lpPositions: [], error: null
   });
+
+  // Audit log state
+  const [diceAuditLog, setDiceAuditLog] = useState<AuditLogData>({
+    entries: [], totalCount: 0, error: null
+  });
+  const [plinkoAuditLog, setPlinkoAuditLog] = useState<AuditLogData>({
+    entries: [], totalCount: 0, error: null
+  });
+  const [auditLogOffset, setAuditLogOffset] = useState(0);
+  const [auditLogFilter, setAuditLogFilter] = useState<string>('all');
+  const AUDIT_LOG_PAGE_SIZE = 50;
 
   const isAdmin = principal === ADMIN_PRINCIPAL;
 
@@ -128,6 +153,49 @@ export const Admin: React.FC = () => {
     }
   };
 
+  // Fetch audit logs from a specific game backend
+  const fetchAuditLog = async (
+    actor: any,
+    setData: React.Dispatch<React.SetStateAction<AuditLogData>>,
+    gameName: string,
+    limit: number,
+    offset: number
+  ) => {
+    if (!actor) return;
+
+    try {
+      const [logRes, countRes] = await Promise.all([
+        actor.admin_get_audit_log?.(BigInt(limit), BigInt(offset)),
+        actor.admin_get_audit_log_count?.()
+      ]);
+
+      let entries: AuditEntry[] = [];
+      let totalCount = 0;
+
+      if (logRes && 'Ok' in logRes) {
+        entries = logRes.Ok;
+      }
+      if (countRes && 'Ok' in countRes) {
+        totalCount = Number(countRes.Ok);
+      }
+
+      setData({ entries, totalCount, error: null });
+    } catch (e) {
+      console.warn(`${gameName} audit log fetch failed:`, e);
+      setData(prev => ({ ...prev, error: String(e) }));
+    }
+  };
+
+  // Fetch audit logs (can be called separately for pagination)
+  const fetchAuditLogs = useCallback(async (offset: number = 0) => {
+    if (!isAdmin || !isAuthenticated) return;
+
+    await Promise.all([
+      fetchAuditLog(diceActor, setDiceAuditLog, 'Dice', AUDIT_LOG_PAGE_SIZE, offset),
+      fetchAuditLog(plinkoActor, setPlinkoAuditLog, 'Plinko', AUDIT_LOG_PAGE_SIZE, offset),
+    ]);
+  }, [diceActor, plinkoActor, isAdmin, isAuthenticated]);
+
   // Fetch all game data in parallel
   const fetchAllData = useCallback(async () => {
     if (!isAdmin || !isAuthenticated) return;
@@ -136,8 +204,11 @@ export const Admin: React.FC = () => {
     await Promise.all([
       fetchGameData(diceActor, setDiceData, 'Dice'),
       fetchGameData(plinkoActor, setPlinkoData, 'Plinko'),
+      fetchAuditLog(diceActor, setDiceAuditLog, 'Dice', AUDIT_LOG_PAGE_SIZE, 0),
+      fetchAuditLog(plinkoActor, setPlinkoAuditLog, 'Plinko', AUDIT_LOG_PAGE_SIZE, 0),
     ]);
 
+    setAuditLogOffset(0); // Reset offset on full refresh
     setLastRefresh(new Date());
     setLoading(false);
   }, [diceActor, plinkoActor, isAdmin, isAuthenticated]);
@@ -360,7 +431,7 @@ export const Admin: React.FC = () => {
       </div>
 
       {/* SECTION 6: Per-Game User Balances & LP Positions */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         {/* Dice - User Balances & LP Positions */}
         <GameBalancesCard
           gameName="Dice"
@@ -377,6 +448,20 @@ export const Admin: React.FC = () => {
           lpPositions={plinkoData.lpPositions}
         />
       </div>
+
+      {/* SECTION 7: Audit Log Viewer */}
+      <AuditLogSection
+        diceAuditLog={diceAuditLog}
+        plinkoAuditLog={plinkoAuditLog}
+        offset={auditLogOffset}
+        filter={auditLogFilter}
+        pageSize={AUDIT_LOG_PAGE_SIZE}
+        onOffsetChange={(newOffset) => {
+          setAuditLogOffset(newOffset);
+          fetchAuditLogs(newOffset);
+        }}
+        onFilterChange={setAuditLogFilter}
+      />
     </div>
   );
 };
@@ -720,6 +805,241 @@ const GameBalancesCard: React.FC<{
           )}
         </div>
       </div>
+    </div>
+  );
+};
+
+// Helper to get event type name from AuditEvent
+const getEventTypeName = (event: AuditEvent): string => {
+  if ('WithdrawalInitiated' in event) return 'WithdrawalInitiated';
+  if ('WithdrawalCompleted' in event) return 'WithdrawalCompleted';
+  if ('WithdrawalFailed' in event) return 'WithdrawalFailed';
+  if ('WithdrawalAbandoned' in event) return 'WithdrawalAbandoned';
+  if ('WithdrawalExpired' in event) return 'WithdrawalExpired';
+  if ('BalanceRestored' in event) return 'BalanceRestored';
+  if ('LPRestored' in event) return 'LPRestored';
+  if ('SystemError' in event) return 'SystemError';
+  if ('ParentFeeCredited' in event) return 'ParentFeeCredited';
+  if ('ParentFeeFallback' in event) return 'ParentFeeFallback';
+  if ('SystemInfo' in event) return 'SystemInfo';
+  if ('BalanceCredited' in event) return 'BalanceCredited';
+  if ('SlippageProtectionTriggered' in event) return 'SlippageProtectionTriggered';
+  if ('SystemRefundCredited' in event) return 'SystemRefundCredited';
+  return 'Unknown';
+};
+
+// Get color class for event type
+const getEventColor = (eventType: string): string => {
+  const greenEvents = ['WithdrawalCompleted', 'BalanceCredited', 'ParentFeeCredited'];
+  const yellowEvents = ['WithdrawalInitiated', 'SystemInfo', 'ParentFeeFallback'];
+  const redEvents = ['WithdrawalFailed', 'WithdrawalAbandoned', 'SystemError', 'SlippageProtectionTriggered'];
+  const blueEvents = ['BalanceRestored', 'LPRestored', 'SystemRefundCredited'];
+
+  if (greenEvents.includes(eventType)) return 'bg-green-900/30 text-green-400';
+  if (yellowEvents.includes(eventType)) return 'bg-yellow-900/30 text-yellow-400';
+  if (redEvents.includes(eventType)) return 'bg-red-900/30 text-red-400';
+  if (blueEvents.includes(eventType)) return 'bg-blue-900/30 text-blue-400';
+  return 'bg-gray-700 text-gray-300';
+};
+
+// Format event details
+const formatEventDetails = (event: AuditEvent): { user?: string; amount?: string; message?: string } => {
+  if ('WithdrawalInitiated' in event) {
+    return { user: event.WithdrawalInitiated.user.toString(), amount: formatUSDT(event.WithdrawalInitiated.amount) };
+  }
+  if ('WithdrawalCompleted' in event) {
+    return { user: event.WithdrawalCompleted.user.toString(), amount: formatUSDT(event.WithdrawalCompleted.amount) };
+  }
+  if ('WithdrawalFailed' in event) {
+    return { user: event.WithdrawalFailed.user.toString(), amount: formatUSDT(event.WithdrawalFailed.amount) };
+  }
+  if ('WithdrawalAbandoned' in event) {
+    return { user: event.WithdrawalAbandoned.user.toString(), amount: formatUSDT(event.WithdrawalAbandoned.amount) };
+  }
+  if ('WithdrawalExpired' in event) {
+    return { user: event.WithdrawalExpired.user.toString(), amount: formatUSDT(event.WithdrawalExpired.amount) };
+  }
+  if ('BalanceRestored' in event) {
+    return { user: event.BalanceRestored.user.toString(), amount: formatUSDT(event.BalanceRestored.amount) };
+  }
+  if ('LPRestored' in event) {
+    return { user: event.LPRestored.user.toString(), amount: formatUSDT(event.LPRestored.amount) };
+  }
+  if ('SystemError' in event) {
+    return { message: event.SystemError.error };
+  }
+  if ('ParentFeeCredited' in event) {
+    return { amount: formatUSDT(event.ParentFeeCredited.amount) };
+  }
+  if ('ParentFeeFallback' in event) {
+    return { amount: formatUSDT(event.ParentFeeFallback.amount), message: event.ParentFeeFallback.reason };
+  }
+  if ('SystemInfo' in event) {
+    return { message: event.SystemInfo.message };
+  }
+  if ('BalanceCredited' in event) {
+    return { user: event.BalanceCredited.user.toString(), amount: formatUSDT(event.BalanceCredited.amount) };
+  }
+  if ('SlippageProtectionTriggered' in event) {
+    return { user: event.SlippageProtectionTriggered.user.toString(), amount: formatUSDT(event.SlippageProtectionTriggered.deposit_amount) };
+  }
+  if ('SystemRefundCredited' in event) {
+    return { user: event.SystemRefundCredited.user.toString(), amount: formatUSDT(event.SystemRefundCredited.amount) };
+  }
+  return {};
+};
+
+// All event types for the filter dropdown
+const ALL_EVENT_TYPES = [
+  'all',
+  'WithdrawalInitiated',
+  'WithdrawalCompleted',
+  'WithdrawalFailed',
+  'WithdrawalAbandoned',
+  'BalanceRestored',
+  'LPRestored',
+  'SystemError',
+  'ParentFeeCredited',
+  'ParentFeeFallback',
+  'SystemInfo',
+  'BalanceCredited',
+  'SlippageProtectionTriggered',
+  'SystemRefundCredited'
+];
+
+// Audit Log Section Component
+const AuditLogSection: React.FC<{
+  diceAuditLog: AuditLogData;
+  plinkoAuditLog: AuditLogData;
+  offset: number;
+  filter: string;
+  pageSize: number;
+  onOffsetChange: (newOffset: number) => void;
+  onFilterChange: (filter: string) => void;
+}> = ({ diceAuditLog, plinkoAuditLog, offset, filter, pageSize, onOffsetChange, onFilterChange }) => {
+  // Combine entries from both games with game tag
+  const allEntries: (AuditEntry & { game: string })[] = [
+    ...diceAuditLog.entries.map(e => ({ ...e, game: 'Dice' })),
+    ...plinkoAuditLog.entries.map(e => ({ ...e, game: 'Plinko' })),
+  ].sort((a, b) => Number(b.timestamp - a.timestamp)); // Sort by timestamp descending
+
+  // Apply filter
+  const filteredEntries = filter === 'all'
+    ? allEntries
+    : allEntries.filter(e => getEventTypeName(e.event) === filter);
+
+  const totalCount = diceAuditLog.totalCount + plinkoAuditLog.totalCount;
+  const hasMore = offset + pageSize < totalCount;
+  const hasPrev = offset > 0;
+
+  return (
+    <div className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
+      {/* Header */}
+      <div className="p-4 border-b border-gray-700 flex justify-between items-center flex-wrap gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-300">Audit Log</h2>
+          <p className="text-xs text-gray-500 mt-1">
+            Dice: {diceAuditLog.totalCount} entries • Plinko: {plinkoAuditLog.totalCount} entries
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {/* Filter dropdown */}
+          <select
+            value={filter}
+            onChange={(e) => onFilterChange(e.target.value)}
+            className="bg-gray-900 border border-gray-600 text-gray-300 text-sm rounded px-3 py-2"
+          >
+            {ALL_EVENT_TYPES.map(type => (
+              <option key={type} value={type}>
+                {type === 'all' ? 'All Events' : type}
+              </option>
+            ))}
+          </select>
+
+          {/* Pagination controls */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onOffsetChange(Math.max(0, offset - pageSize))}
+              disabled={!hasPrev}
+              className={`px-3 py-2 rounded text-sm ${
+                hasPrev
+                  ? 'bg-gray-700 hover:bg-gray-600 text-white'
+                  : 'bg-gray-800 text-gray-500 cursor-not-allowed'
+              }`}
+            >
+              Prev
+            </button>
+            <span className="text-sm text-gray-400">
+              {offset + 1}-{Math.min(offset + pageSize, totalCount)} of {totalCount}
+            </span>
+            <button
+              onClick={() => onOffsetChange(offset + pageSize)}
+              disabled={!hasMore}
+              className={`px-3 py-2 rounded text-sm ${
+                hasMore
+                  ? 'bg-gray-700 hover:bg-gray-600 text-white'
+                  : 'bg-gray-800 text-gray-500 cursor-not-allowed'
+              }`}
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Table */}
+      {filteredEntries.length === 0 ? (
+        <div className="p-8 text-center text-gray-500">No audit log entries</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-xs text-gray-400 uppercase bg-gray-700/50">
+              <tr>
+                <th className="px-4 py-3 text-left">Time</th>
+                <th className="px-4 py-3 text-left">Game</th>
+                <th className="px-4 py-3 text-left">Event</th>
+                <th className="px-4 py-3 text-left">User</th>
+                <th className="px-4 py-3 text-right">Amount</th>
+                <th className="px-4 py-3 text-left">Details</th>
+              </tr>
+            </thead>
+            <tbody className="text-gray-400">
+              {filteredEntries.map((entry, i) => {
+                const eventType = getEventTypeName(entry.event);
+                const details = formatEventDetails(entry.event);
+                return (
+                  <tr key={i} className="border-b border-gray-700 hover:bg-gray-700/30">
+                    <td className="px-4 py-3 text-xs">
+                      {formatTimeAgo(entry.timestamp)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                        entry.game === 'Dice' ? 'bg-blue-900/30 text-blue-400' : 'bg-purple-900/30 text-purple-400'
+                      }`}>
+                        {entry.game}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-1 rounded text-xs font-semibold ${getEventColor(eventType)}`}>
+                        {eventType}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs" title={details.user}>
+                      {details.user ? truncatePrincipal(details.user, 10) : '-'}
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono text-white">
+                      {details.amount ? `${details.amount} USDT` : '-'}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-gray-500 max-w-xs truncate" title={details.message}>
+                      {details.message || '-'}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 };

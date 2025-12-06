@@ -608,18 +608,39 @@ pub fn get_withdrawal_status() -> Option<PendingWithdrawal> {
     PENDING_WITHDRAWALS.with(|p| p.borrow().get(&caller))
 }
 
-// Retained for internal debugging and future admin features.
-#[allow(dead_code)]
-pub fn get_audit_log(offset: usize, limit: usize) -> Vec<AuditEntry> {
+/// Get audit log entries in reverse chronological order (most recent first).
+/// Used by admin_query for the admin dashboard.
+///
+/// # Arguments
+/// - `limit`: Maximum number of entries to return
+/// - `offset`: Number of entries to skip from the most recent
+pub(crate) fn get_audit_entries(limit: u64, offset: u64) -> Vec<AuditEntry> {
     AUDIT_LOG_MAP.with(|log| {
         let log = log.borrow();
-        // BTreeMap iterates in key order (sequential = chronological)
-        log.iter()
-            .skip(offset)
-            .take(limit)
-            .map(|entry| entry.value())
+        let len = log.len();
+        if offset >= len {
+            return vec![];
+        }
+
+        // Collect keys in reverse order (most recent first)
+        // Since keys are sequential, higher keys = newer entries
+        let keys: Vec<u64> = log.iter()
+            .map(|entry| *entry.key())
+            .collect();
+
+        // Reverse iterate, skip offset, take limit
+        keys.into_iter()
+            .rev()
+            .skip(offset as usize)
+            .take(limit as usize)
+            .filter_map(|k| log.get(&k))
             .collect()
     })
+}
+
+/// Get the total number of audit log entries.
+pub(crate) fn get_audit_count() -> u64 {
+    AUDIT_LOG_MAP.with(|log| log.borrow().len())
 }
 
 #[allow(deprecated)]

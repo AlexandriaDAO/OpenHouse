@@ -134,3 +134,21 @@ pub fn get_orphaned_funds_report_full() -> Result<OrphanedFundsReport, String> {
     require_admin()?;
     Ok(accounting::build_orphaned_funds_report_internal(None))
 }
+
+/// Get paginated audit log entries (most recent first).
+///
+/// # Arguments
+/// - `limit`: Maximum number of entries to return (max 100)
+/// - `offset`: Number of entries to skip from the most recent
+pub fn get_audit_log(limit: u64, offset: u64) -> Result<Vec<AuditEntry>, String> {
+    require_admin()?;
+    // Cap limit to prevent abuse
+    let capped_limit = limit.min(100);
+    Ok(accounting::get_audit_entries(capped_limit, offset))
+}
+
+/// Get the total number of audit log entries.
+pub fn get_audit_log_count() -> Result<u64, String> {
+    require_admin()?;
+    Ok(accounting::get_audit_count())
+}
