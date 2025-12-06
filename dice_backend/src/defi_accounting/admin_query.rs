@@ -60,8 +60,12 @@ pub async fn admin_health_check() -> Result<HealthCheck, String> {
     let total_abandoned = accounting::sum_abandoned_from_audit_internal();
 
     // Memory metrics (NEW)
+    #[cfg(target_arch = "wasm32")]
     let heap_memory_bytes = (core::arch::wasm32::memory_size(0) as u64)
         .saturating_mul(WASM_PAGE_SIZE_BYTES);
+    #[cfg(not(target_arch = "wasm32"))]
+    let heap_memory_bytes: u64 = 0; // Placeholder for non-wasm targets (tests)
+
     let stable_memory_pages = ic_cdk::stable::stable_size();
 
     Ok(HealthCheck {
@@ -129,4 +133,22 @@ pub fn get_all_lp_positions_complete() -> Result<Vec<LPPositionInfo>, String> {
 pub fn get_orphaned_funds_report_full() -> Result<OrphanedFundsReport, String> {
     require_admin()?;
     Ok(accounting::build_orphaned_funds_report_internal(None))
+}
+
+/// Get paginated audit log entries (most recent first).
+///
+/// # Arguments
+/// - `limit`: Maximum number of entries to return (max 100)
+/// - `offset`: Number of entries to skip from the most recent
+pub fn get_audit_log(limit: u64, offset: u64) -> Result<Vec<AuditEntry>, String> {
+    require_admin()?;
+    // Cap limit to prevent abuse
+    let capped_limit = limit.min(100);
+    Ok(accounting::get_audit_entries(capped_limit, offset))
+}
+
+/// Get the total number of audit log entries.
+pub fn get_audit_log_count() -> Result<u64, String> {
+    require_admin()?;
+    Ok(accounting::get_audit_count())
 }

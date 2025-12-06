@@ -607,18 +607,44 @@ pub fn get_withdrawal_status() -> Option<PendingWithdrawal> {
     PENDING_WITHDRAWALS.with(|p| p.borrow().get(&caller))
 }
 
-// Retained for internal debugging and future admin features.
-#[allow(dead_code)]
-pub fn get_audit_log(offset: usize, limit: usize) -> Vec<AuditEntry> {
+/// Get audit log entries in reverse chronological order (most recent first).
+/// Used by admin_query for the admin dashboard.
+///
+/// # Arguments
+/// - `limit`: Maximum number of entries to return
+/// - `offset`: Number of entries to skip from the most recent
+///
+/// # Implementation Note
+/// StableBTreeMap doesn't implement DoubleEndedIterator, so we can't use `.rev()`.
+/// Instead, we calculate the exact window of entries needed, iterate forward through
+/// that window, and reverse the result. This avoids collecting all keys into memory.
+pub(crate) fn get_audit_entries(limit: u64, offset: u64) -> Vec<AuditEntry> {
     AUDIT_LOG_MAP.with(|log| {
         let log = log.borrow();
-        // BTreeMap iterates in key order (sequential = chronological)
+        let len = log.len();
+        if offset >= len {
+            return vec![];
+        }
+
+        // Calculate the window of entries we need
+        let entries_to_fetch = limit.min(len - offset) as usize;
+        let skip_from_start = (len as usize).saturating_sub(offset as usize + entries_to_fetch);
+
+        // Iterate forward through the window, then reverse for most-recent-first order
         log.iter()
-            .skip(offset)
-            .take(limit)
+            .skip(skip_from_start)
+            .take(entries_to_fetch)
             .map(|entry| entry.value())
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
             .collect()
     })
+}
+
+/// Get the total number of audit log entries.
+pub(crate) fn get_audit_count() -> u64 {
+    AUDIT_LOG_MAP.with(|log| log.borrow().len())
 }
 
 #[allow(deprecated)]
