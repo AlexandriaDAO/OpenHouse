@@ -207,8 +207,11 @@ export const Plinko: React.FC = () => {
       setAnimatingBalls(prev => [...prev, ...newBalls]);
       setNextBallId(prev => prev + ballCount);
       
-      // Refresh balance after expected duration
-      const durationMs = (results[0].path.length * PLINKO_LAYOUT.MS_PER_ROW) + (results.length * PLINKO_LAYOUT.BALL_STAGGER_MS);
+      // Calculate more precise duration for balance refresh
+      // Find the longest path length to be safe (though usually constant)
+      const maxPathLength = Math.max(...results.map(r => r.path.length));
+      const durationMs = (maxPathLength * PLINKO_LAYOUT.MS_PER_ROW) + (results.length * PLINKO_LAYOUT.BALL_STAGGER_MS);
+      
       setTimeout(() => {
         gameBalanceContext.refresh();
       }, durationMs + 500);
@@ -220,15 +223,17 @@ export const Plinko: React.FC = () => {
   };
 
   // Handle ball animation complete
-  const handleBallComplete = useCallback((ballId: number, finalSlot: number) => {
-    setAnimatingBalls(prev => {
-      const remaining = prev.filter(b => b.id !== ballId);
-      if (remaining.length === 0) {
-        setIsPlaying(false);
-      }
-      return remaining;
-    });
+  const handleBallComplete = useCallback((ballId: number) => {
+    setAnimatingBalls(prev => prev.filter(b => b.id !== ballId));
   }, []);
+
+  // Monitor playing state based on animating balls
+  useEffect(() => {
+    // If we were playing, but now no balls are animating, stop playing
+    if (isPlaying && animatingBalls.length === 0) {
+      setIsPlaying(false);
+    }
+  }, [animatingBalls.length, isPlaying]);
 
   const houseEdge = ((1 - expectedValue) * 100).toFixed(2);
 

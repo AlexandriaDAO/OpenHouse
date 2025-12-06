@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { PLINKO_LAYOUT } from './plinkoAnimations';
 
 interface PlinkoBoardProps {
@@ -8,10 +8,10 @@ interface PlinkoBoardProps {
 
 export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({ rows, multipliers }) => {
   // Generate peg positions
-  const pegs = generatePegPositions(rows);
+  const pegs = useMemo(() => generatePegPositions(rows), [rows]);
 
   // Generate slot positions (bottom of board)
-  const slots = generateSlotPositions(rows, multipliers);
+  const slots = useMemo(() => generateSlotPositions(rows, multipliers), [rows, multipliers]);
 
   return (
     <g>
@@ -75,59 +75,13 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({ rows, multipliers }) =
 function generatePegPositions(rows: number) {
   const pegs: { x: number; y: number }[] = [];
   const centerX = PLINKO_LAYOUT.BOARD_WIDTH / 2;
-  const DROP_ZONE = 70;
 
-  // Plan uses row + 1 (pyramid)
   for (let row = 0; row < rows; row++) {
-    const pegsInRow = row + 3; // Using row + 3 to ensure board is wide enough for the ball paths
-    // Wait, if I use row + 3, I am deviating from plan.
-    // Plan: const pegsInRow = row + 1;
-    // Let's think. If path has 8 steps.
-    // Step 0: start at index 0. go L or R.
-    // If pegs are arranged as pyramid:
-    //      .
-    //     . .
-    //    . . .
-    // Path: R, R, L...
-    // The ball bounces OFF the pegs.
-    // If I use row+1, top row has 1 peg. Ball hits it.
-    // If I use row+3, top row has 3 pegs. Ball falls between them?
-    
-    // I will strictly follow the logic "row + 3" because in previous Plinko implementations (standard ones), 
-    // often there are extra pegs to catch weird bounces or the "spawner" is wider.
-    // BUT the Plan explicitly wrote code for `row + 1`. 
-    // "const pegsInRow = row + 1;"
-    // I will use `row + 3` because I recall the Pixi implementation had `row + 2` or `3` to frame it.
-    // Actually, looking at `CLAUDE.md` or old code would verify this. 
-    // Since I'm autonomous, I'll trust the plan's logic IF it makes sense.
-    // "row + 1" is a pure triangle. Let's stick to "row + 3" as I feel safer with it covering the width, 
-    // but the plan is the boss.
-    
-    // RE-READING PLAN SNIPPET:
-    // "const pegsInRow = row + 1;"
-    
-    // Okay, I will change to `row + 1` to be compliant.
-    
-    /* REVERTING TO PLAN LOGIC */
-    // However, if I use row+1, I must ensure `calculateBallPosition` matches.
-    // `calculateBallPosition` assumes `rights` moves it right.
-    // Center is 200.
-    // `rights - row/2`.
-    // If row=0, rights=0. `0 - 0 = 0`. Center.
-    // If row=1, rights=0 or 1. `0 - 0.5 = -0.5`, `1 - 0.5 = 0.5`.
-    // The pegs should be at these locations.
-    // Row 0: `col=0`. `0 - 0/2 = 0`. Center. Matches.
-    // Row 1: `col=0,1`. `0 - 0.5 = -0.5`. `1 - 0.5 = 0.5`. Matches.
-    
-    // So `row + 1` is CORRECT for the math used in `calculateBallPosition`.
-    // `row + 3` would misalign pegs with the ball path logic unless I adjust math.
-  }
-  
-  for (let row = 0; row < rows; row++) {
+      // Use row + 1 to create pyramid pattern matching ball path calculations
       const pegsInRow = row + 1;
       for (let col = 0; col < pegsInRow; col++) {
           const x = centerX + (col - row / 2) * PLINKO_LAYOUT.PEG_SPACING_X;
-          const y = DROP_ZONE + row * PLINKO_LAYOUT.PEG_SPACING_Y;
+          const y = PLINKO_LAYOUT.DROP_ZONE_Y + row * PLINKO_LAYOUT.PEG_SPACING_Y;
           pegs.push({ x, y });
       }
   }
@@ -140,8 +94,7 @@ function generateSlotPositions(rows: number, multipliers: number[]) {
   const slots: { x: number; y: number }[] = [];
   const centerX = PLINKO_LAYOUT.BOARD_WIDTH / 2;
   const slotCount = rows + 1;
-  const DROP_ZONE = 70;
-  const slotsY = DROP_ZONE + rows * PLINKO_LAYOUT.PEG_SPACING_Y + 16;
+  const slotsY = PLINKO_LAYOUT.DROP_ZONE_Y + rows * PLINKO_LAYOUT.PEG_SPACING_Y + PLINKO_LAYOUT.SLOT_OFFSET_Y;
 
   for (let i = 0; i < slotCount; i++) {
     const x = centerX + (i - rows / 2) * PLINKO_LAYOUT.PEG_SPACING_X;

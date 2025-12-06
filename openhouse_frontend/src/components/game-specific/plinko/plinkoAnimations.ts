@@ -6,13 +6,18 @@ export const PLINKO_LAYOUT = {
   // Spacing (same as old LayoutConfig for consistency)
   PEG_SPACING_X: 38,
   PEG_SPACING_Y: 36,
-  PEG_RADIUS: 5, // Slightly smaller than plan for aesthetic
+  PEG_RADIUS: 5, 
   BALL_RADIUS: 8,
 
   // Slot configuration
   SLOT_WIDTH: 34,
   SLOT_HEIGHT: 32,
   SLOT_GAP: 2,
+  SLOT_OFFSET_Y: 16,
+
+  // Vertical layout constants
+  DROP_ZONE_Y: 70,    // Where the first peg row starts
+  BALL_START_Y: 50,   // Where balls spawn
 
   // Animation timing
   MS_PER_ROW: 150,        
@@ -50,8 +55,7 @@ export function calculateBallPosition(
   const x = currentX + (nextX - currentX) * easeInOutQuad(progress);
 
   // Calculate Y position
-  const DROP_ZONE = 70;
-  const baseY = DROP_ZONE + currentRow * PLINKO_LAYOUT.PEG_SPACING_Y;
+  const baseY = PLINKO_LAYOUT.DROP_ZONE_Y + currentRow * PLINKO_LAYOUT.PEG_SPACING_Y;
   const y = baseY + PLINKO_LAYOUT.PEG_SPACING_Y * easeInOutQuad(progress);
 
   return { x, y };
@@ -67,13 +71,13 @@ export function generateBallKeyframes(path: boolean[]) {
   const keyframes: { x: number; y: number }[] = [];
 
   // Start at top
-  keyframes.push({ x: PLINKO_LAYOUT.BOARD_WIDTH / 2, y: 50 });
+  keyframes.push({ x: PLINKO_LAYOUT.BOARD_WIDTH / 2, y: PLINKO_LAYOUT.BALL_START_Y });
 
   // Add keyframe for each row
   for (let row = 0; row < path.length; row++) {
     const rightsSoFar = path.slice(0, row + 1).filter(v => v).length;
     const x = PLINKO_LAYOUT.BOARD_WIDTH / 2 + (rightsSoFar - (row + 1) / 2) * PLINKO_LAYOUT.PEG_SPACING_X;
-    const y = 70 + (row + 1) * PLINKO_LAYOUT.PEG_SPACING_Y;
+    const y = PLINKO_LAYOUT.DROP_ZONE_Y + (row + 1) * PLINKO_LAYOUT.PEG_SPACING_Y;
     
     keyframes.push({ x, y });
   }
