@@ -34,15 +34,28 @@ const isAuthenticationError = (error: unknown): boolean => {
 };
 
 // Authentication error modal component
-function AuthErrorModal() {
+function AuthErrorModal({ onLogout }: { onLogout: () => Promise<void> }) {
   const [countdown, setCountdown] = useState(3);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  const performLogout = useCallback(async () => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    try {
+      await onLogout();
+    } catch (e) {
+      console.error('Error during logout:', e);
+    }
+    // Reload after credentials are cleared
+    window.location.reload();
+  }, [onLogout, isLoggingOut]);
 
   useEffect(() => {
     const timer = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          window.location.reload();
+          performLogout();
           return 0;
         }
         return prev - 1;
@@ -50,7 +63,7 @@ function AuthErrorModal() {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, []);
+  }, [performLogout]);
 
   return createPortal(
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[9999]">
@@ -63,13 +76,14 @@ function AuthErrorModal() {
             You will be logged out automatically.
           </p>
           <p className="text-yellow-400 font-mono text-lg mb-4">
-            Refreshing in {countdown}...
+            {isLoggingOut ? 'Logging out...' : `Logging out in ${countdown}...`}
           </p>
           <button
-            onClick={() => window.location.reload()}
-            className="w-full px-6 py-3 bg-red-500 text-white font-bold rounded-lg hover:bg-red-400 transition"
+            onClick={performLogout}
+            disabled={isLoggingOut}
+            className="w-full px-6 py-3 bg-red-500 text-white font-bold rounded-lg hover:bg-red-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Refresh Now
+            {isLoggingOut ? 'Logging out...' : 'Log Out Now'}
           </button>
         </div>
       </div>
@@ -106,16 +120,16 @@ export function ActorProvider() {
     if (isLoggingOut.current) return;
     isLoggingOut.current = true;
 
-    console.error('Authentication error detected - clearing session');
+    console.error('Authentication error detected - will clear session');
 
     // Only show the error modal if we had a valid session before
     // This prevents infinite reload loop for already-expired sessions on page load
     if (hadValidSession.current) {
       setShowAuthError(true);
+    } else {
+      // No valid session existed, just clear credentials silently
+      clear().catch(console.error);
     }
-
-    // Clear the stored credentials immediately
-    clear().catch(console.error);
   }, [clear]);
 
   // Interceptor to check delegation validity before each request
@@ -197,7 +211,7 @@ export function ActorProvider() {
   // Return null - this is a side-effect component, not a wrapper
   // Use portal for the modal so it renders even though we return null
   if (showAuthError) {
-    return <AuthErrorModal />;
+    return <AuthErrorModal onLogout={clear} />;
   }
 
   return null;

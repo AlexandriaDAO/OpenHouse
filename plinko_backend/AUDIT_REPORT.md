@@ -1,118 +1,95 @@
-# Audit Report: Plinko Backend DeFi Accounting
+# DeFi Accounting Module Security Audit
 
-**Date:** December 4, 2025
-**Module:** `@plinko_backend/src/defi_accounting/`
-
-## 1. Race Condition in Liquidity Deposit Refund causing Orphaned Funds
-
-**Severity:** High
-
-**Consequence in theory:**
-A user attempting to deposit liquidity (`deposit_liquidity`) while simultaneously withdrawing their betting balance (`withdraw_all`) can end up in a state where the liquidity deposit fails (e.g., due to slippage) but the refund mechanism fails to credit the funds back to the user. This results in the user's tokens being transferred to the canister but not recorded in any balance, effectively causing a permanent loss of funds (orphaned funds) for the user.
-
-**Consequence in practice:**
-This fails because the slippage refund logic in `deposit_liquidity` relies on `accounting::credit_balance`, which strictly enforces that no pending withdrawals exist for the user. However, `deposit_liquidity` does not lock the user's account during the asynchronous transfer phase.
-
-**How it fails (Step-by-Step Exploit):**
-1.  **Initial State:** A user has a betting balance of 10 USDT and 100 ckUSDT in their wallet.
-2.  **Action 1:** User calls `deposit_liquidity(100_000_000)` (100 USDT) with a strict `min_shares_expected` (or a value calculated based on current state).
-3.  **Check:** `deposit_liquidity` checks `accounting::get_withdrawal_status()`. It is `None`. The call proceeds.
-4.  **Async Transfer:** `deposit_liquidity` calls `icrc2_transfer_from`. This is an `await` point. The execution yields.
-5.  **Action 2 (Race):** While the transfer is pending, the user (or a script/bot) calls `withdraw_all()` to withdraw their 10 USDT betting balance.
-6.  **Locking:** `withdraw_internal` runs. It sees no pending withdrawal (yet). It creates a `PendingWithdrawal` for the 10 USDT and sets the user's betting balance to 0.
-7.  **Resume:** The `icrc2_transfer_from` in `deposit_liquidity` completes successfully. The canister has received the 100 USDT.
-8.  **Slippage Trigger:** `deposit_liquidity` recalculates shares. Suppose the share price changed slightly during the await (or the user set tight bounds), causing `shares_to_mint < min_shares_expected`.
-9.  **Refund Attempt:** The code enters the refund block:
-    ```rust
-    // @plinko_backend/src/defi_accounting/liquidity_pool.rs
-
-    if shares_to_mint < min_shares {
-        // ...
-        // Refund to user's betting balance
-        accounting::credit_balance(caller, amount)?; // <--- THIS FAILS
-        // ...
-    }
-    ```
-10. **The Failure:** `accounting::credit_balance` executes:
-    ```rust
-    // @plinko_backend/src/defi_accounting/accounting.rs
-
-    pub fn credit_balance(user: Principal, amount: u64) -> Result<(), String> {
-        if PENDING_WITHDRAWALS.with(|p| p.borrow().contains_key(&user)) {
-            return Err("Cannot credit: withdrawal pending".to_string());
-        }
-        // ...
-    }
-    ```
-    It sees the `PendingWithdrawal` created in Step 6. It returns an `Err`.
-11. **Result:** `deposit_liquidity` receives the `Err` from `credit_balance` and bubbles it up to the user (via the `?` operator or implicit return).
-    - The 100 USDT transfer **happened**.
-    - The `LP_SHARES` were **not minted**.
-    - The `credit_balance` refund **failed**.
-    - **Outcome:** The 100 USDT sits in the canister's generic balance, unallocated to anyone. The user has lost 100 USDT.
-
-**How to prove it fails:**
-Write a test case in `test_slippage_audit.rs` (or similar) that:
-1.  Mock the state.
-2.  Simulate `deposit_liquidity` pausing after transfer.
-3.  Inject a `PendingWithdrawal` for that user into the state.
-4.  Resume `deposit_liquidity` and force the slippage condition.
-5.  Assert that the function returns an Error and that `USER_BALANCES` was *not* incremented, despite `canister_balance` increasing.
-
-**Conditions for exploitation:**
-- User must have a non-zero betting balance (to initiate a withdrawal) OR the ability to initiate a withdrawal that creates a pending state.
-- User must perform a liquidity deposit that triggers slippage (can be self-induced by setting `min_shares_expected` unreasonably high).
-- User must time the `withdraw_all` call to occur during the `await` of the deposit transfer (standard race condition).
+**Scope:** `dice_backend/src/defi_accounting/`
+**Date:** 2025-12-06
+**Auditor:** Claude Opus 4.5
 
 ---
 
-## 2. Potential DoS via Audit Log Pruning (Minor)
+## Executive Summary
 
-**Severity:** Low / Gas Optimization
+After reviewing all source files in the defi_accounting module, I found **no Critical or High severity vulnerabilities**. The codebase demonstrates solid security practices: atomic operations within IC's execution model, proper double-spend prevention via pending withdrawal tracking, and comprehensive handling of uncertain transaction outcomes.
 
-**Consequence in theory:**
-The `prune_oldest_audit_entries` function in `accounting.rs` iterates through keys to remove them. While `MAX_AUDIT_ENTRIES` is currently small (1000), if this limit were raised significantly, the linear iteration and removal from `StableBTreeMap` could consume excessive cycles, potentially making the `log_audit` function (and thus all financial operations) expensive or hitting instruction limits.
-
-**Consequence in practice:**
-Currently bounded at 1000 entries. 1000 iterations is negligible for canister operations. This is a "future-proof" warning rather than an immediate exploit.
-- **Fails if:** The constant `MAX_AUDIT_ENTRIES` is increased to a large number (e.g., 50,000) without changing the pruning logic.
+The issues identified below are Medium severity with limited real-world impact.
 
 ---
 
-## 3. Integer Overflow in `calculate_shares_for_deposit` (Theoretical)
+## Vulnerabilities
 
-**Severity:** Low (Safety checks present)
+### 1. Orphaned Funds Tracking Becomes Inaccurate After Audit Log Pruning
 
-**Consequence in theory:**
-In `liquidity_pool.rs`, the share calculation uses:
-`let numerator = amount_nat.clone() * total_shares;`
-If `amount_nat` and `total_shares` are both extremely large, this multiplication could overflow memory or cycle limits if `Nat` grows too large (it is arbitrary precision, so it won't "overflow" like u64, but it consumes resources).
+**Severity:** Medium
 
-**Consequence in practice:**
-`Nat` handles arbitrarily large numbers. The constraint is cycle consumption. Given the `u64` input limits on amounts, realistic values will never cause resource exhaustion here. The logic handles division by zero (checks `current_reserve == 0`).
+**Description:** The audit log prunes entries beyond 1000 records (`MAX_AUDIT_ENTRIES`). The function `sum_abandoned_from_audit_internal()` sums `WithdrawalAbandoned` events from this log to calculate total orphaned funds. After pruning, this sum becomes permanently understated.
+
+**Failure Scenario:**
+1. Over time, 50 users experience uncertain withdrawal outcomes and call `abandon_withdrawal()`, totaling 500 USDT in orphaned funds
+2. Each abandonment creates an audit entry
+3. After 1000+ total audit events, the oldest abandonment entries are pruned
+4. Admin calls `admin_health_check()` which reports `total_abandoned_amount: 200 USDT` (only recent abandonments visible)
+5. Admin believes system has 300 USDT fewer orphaned funds than reality
+6. Solvency calculations in monitoring dashboards are incorrect by this margin
+
+**Location:** `accounting.rs:713-725`, `accounting.rs:93-95`
 
 ---
 
-## Recommendation for Critical Fix (Vulnerability #1)
+### 2. Sub-Minimum User Balances Are Permanently Trapped Without Recovery Mechanism
 
-Modify `liquidity_pool.rs` to handle the refund explicitly, bypassing the `credit_balance` check if necessary, OR strictly lock the user account at the start of `deposit_liquidity` in a way that prevents `withdraw_all` from running concurrently.
+**Severity:** Medium
 
-**Preferred Fix:**
-In `accounting.rs`, add a specific `force_credit_balance` function strictly for internal system refunds that is allowed to execute even if a withdrawal is pending (since adding funds does not interfere with the logic of withdrawing *existing* funds, as long as the pending withdrawal amount is fixed).
+**Description:** Users with balance between 0 and `MIN_WITHDRAW` (1 USDT) cannot withdraw. Unlike pending withdrawals which have `abandon_withdrawal()`, there is no mechanism to forfeit or recover sub-minimum user balances. The only exit is depositing more funds to exceed the threshold.
 
-```rust
-// Suggestion for accounting.rs
-pub(crate) fn force_credit_balance_system(user: Principal, amount: u64) -> Result<(), String> {
-    // Does NOT check PENDING_WITHDRAWALS
-    // Safe because this is a NEW deposit refund, not a modification of the withdrawing amount
-    USER_BALANCES_STABLE.with(|balances| {
-        let mut balances = balances.borrow_mut();
-        let current = balances.get(&user).unwrap_or(0);
-        // ... overflow checks ...
-        let new_balance = current + amount;
-        balances.insert(user, new_balance);
-        // ... log audit ...
-        Ok(())
-    })
-}
-```
+**Failure Scenario:**
+1. User deposits 10 USDT, plays games, loses 9.5 USDT
+2. User balance is now 0.5 USDT (500,000 e8s)
+3. User calls `withdraw_all()` - fails with "Balance below minimum withdrawal of 1 USDT"
+4. User must either: (a) deposit 1+ USDT more, or (b) gamble remaining balance to zero
+5. If user abandons the platform, 0.5 USDT remains locked in their internal balance indefinitely
+6. These micro-balances accumulate across users with no sweep mechanism
+
+**Location:** `accounting.rs:199-201`
+
+---
+
+### 3. Parent Fee Credit Failure Silently Returns Fee to Pool Reserve
+
+**Severity:** Medium
+
+**Description:** When an LP withdrawal completes successfully, the 1% fee should be credited to the parent canister. If `credit_parent_fee()` fails (e.g., parent has a pending withdrawal), the fee is added back to the pool reserve. This means existing LPs receive a windfall rather than the protocol collecting its fee.
+
+**Failure Scenario:**
+1. LP withdraws 1000 USDT worth of shares
+2. Fee = 10 USDT, LP receives 990 USDT
+3. Parent canister happens to have a pending withdrawal at this moment
+4. `credit_parent_fee()` returns false
+5. 10 USDT fee is added to pool reserve via `add_to_reserve()`
+6. This dilutes the fee across all remaining LPs instead of going to protocol
+7. If this occurs frequently, protocol loses significant revenue
+
+**Location:** `liquidity_pool.rs:386-394`, `accounting.rs:433-441`
+
+---
+
+## Items Reviewed (No Issues Found)
+
+The following areas were thoroughly reviewed and found to be correctly implemented:
+
+- **Double-spend prevention**: Pending withdrawal pattern correctly prevents re-spending during uncertain outcomes
+- **LP share calculations**: Proper handling of division by zero, first-deposit burn, and share/reserve proportionality
+- **Atomic state updates**: All state changes occur before async boundaries
+- **Rollback logic**: Initial DefiniteError correctly triggers rollback; retry DefiniteError correctly stays pending
+- **LP position restoration**: Correctly restores exact shares and reserve on rollback
+- **Slippage protection**: Pre-flight and post-transfer checks with proper refund to betting balance
+- **Overflow protection**: Consistent use of `checked_add`/`saturating_add` throughout
+- **Memory ID uniqueness**: Test ensures no collisions across stable storage regions
+
+---
+
+## Recommendations
+
+1. **For Issue #1:** Implement a separate counter for abandoned amounts that is NOT subject to pruning, or increase MAX_AUDIT_ENTRIES significantly for financial events.
+
+2. **For Issue #2:** Add an admin function to sweep sub-minimum balances to the pool reserve after extended inactivity (e.g., 1 year), or reduce MIN_WITHDRAW to match MIN_BET (0.01 USDT).
+
+3. **For Issue #3:** If parent fee credit fails, store the fee in a dedicated accumulator that retries on next opportunity rather than returning to pool. Alternatively, ensure parent canister never has pending withdrawals during business operations.
