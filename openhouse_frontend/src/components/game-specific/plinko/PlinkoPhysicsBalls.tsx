@@ -116,10 +116,8 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
   );
 };
 
-// Individual ball renderer
-// Ball radius = pinRadius * 2, scaled for our 400px canvas (vs 760px original)
-// For 8 rows: (24-8)/2 * 2 * 0.53 ≈ 8.5
-const BALL_RADIUS = 8.5;
+// Individual ball renderer - unified with tunnel balls
+const BALL_RADIUS = 8;  // Matches tunnel balls for seamless transition
 
 const PhysicsBall: React.FC<{ state: BallState }> = ({ state }) => {
   const { x, y, rotation } = state;
