@@ -102,15 +102,18 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
 
       // Calculate angle from the last segment of the trajectory
       // atan2 gives angle in radians, convert to degrees
-      // Negative because canvas Y increases downward
       const dx = lastX - prevX;
       const dy = lastY - prevY;
-      const angleRad = Math.atan2(-dy, dx); // negative dy because Y is inverted
-      const angleDeg = (angleRad * 180) / Math.PI;
+      // Canvas Y is inverted (increases downward), so negate dy
+      const angleRad = Math.atan2(-dy, dx);
+      const trajectoryAngle = (angleRad * 180) / Math.PI;
 
-      // Rocket emoji points right by default, so we rotate relative to that
-      // When going up-right at 45°, angleDeg will be ~45°
-      const rocketAngle = angleDeg - 90; // Adjust so rocket points along trajectory
+      // Rocket emoji 🚀 naturally points at ~45° (1-2 o'clock)
+      // We want it to follow the trajectory:
+      // - Flat trajectory (0°) → rocket at ~2-3 o'clock (rotate clockwise)
+      // - Steep trajectory (90°) → rocket at ~12 o'clock (rotate counter-clockwise)
+      // Formula: offset from emoji's natural 45° angle
+      const rocketAngle = trajectoryAngle - 45;
 
       // Store rocket position as percentages so it scales with container
       newPositions.set(rocket.index, {
