@@ -32,6 +32,14 @@ export class PlinkoPhysicsEngine {
   // Store last row pin X positions for bin calculation
   private pinsLastRowXCoords: number[] = [];
 
+  // Store target slot for each ball (derived from backend path)
+  private ballTargets: Map<number, number> = new Map();
+
+  // Stuck ball detection - track last positions and timestamps
+  private ballLastPositions: Map<number, { x: number; y: number; time: number }> = new Map();
+  private static STUCK_THRESHOLD_MS = 2000; // Ball considered stuck after 2 seconds without progress
+  private static STUCK_DISTANCE_THRESHOLD = 5; // Minimum movement in pixels to be considered "progressing"
+
   // Collision categories (matching open source)
   private static PIN_CATEGORY = 0x0001;
   private static BALL_CATEGORY = 0x0002;
@@ -193,14 +201,174 @@ export class PlinkoPhysicsEngine {
         }
       });
     });
+
+    // Steering system: gently guide balls toward their target slots + stuck ball detection
+    Matter.Events.on(this.engine, 'beforeUpdate', () => {
+      this.applySteeringForces();
+      this.checkForStuckBalls();
+    });
+  }
+
+  /**
+   * Calculate the target X position for a given slot index.
+   * Slots are centered between consecutive last-row pins.
+   */
+  private getSlotCenterX(slotIndex: number): number {
+    if (slotIndex < 0 || slotIndex >= this.pinsLastRowXCoords.length - 1) {
+      return this.options.width / 2;
+    }
+    return (this.pinsLastRowXCoords[slotIndex] + this.pinsLastRowXCoords[slotIndex + 1]) / 2;
+  }
+
+  /**
+   * Apply gentle steering forces to guide balls toward their target slots.
+   * The force increases as the ball descends to ensure correct landing.
+   */
+  private applySteeringForces() {
+    const { height } = this.options;
+    const { PADDING_TOP, PADDING_BOTTOM } = PLINKO_LAYOUT;
+
+    // Play area bounds
+    const topY = PADDING_TOP;
+    const bottomY = height - PADDING_BOTTOM;
+    const playHeight = bottomY - topY;
+
+    for (const [id, ball] of this.balls) {
+      const targetSlot = this.ballTargets.get(id);
+      if (targetSlot === undefined) continue;
+
+      const targetX = this.getSlotCenterX(targetSlot);
+      const ballX = ball.position.x;
+      const ballY = ball.position.y;
+
+      // Calculate descent progress (0 at top, 1 at bottom)
+      const progress = Math.max(0, Math.min(1, (ballY - topY) / playHeight));
+
+      // Only start steering after ball has descended 30% (let physics dominate early)
+      if (progress < 0.3) continue;
+
+      // Distance from target
+      const deltaX = targetX - ballX;
+
+      // Skip if already very close to target
+      if (Math.abs(deltaX) < 2) continue;
+
+      // Steering force parameters:
+      // - Base force is subtle (0.00001)
+      // - Force increases quadratically with descent progress
+      // - Force is proportional to distance from target (capped)
+      const progressFactor = Math.pow((progress - 0.3) / 0.7, 2); // 0 at 30%, 1 at 100%
+      const baseForceMagnitude = 0.00002;
+      const maxForce = 0.0002;
+
+      // Calculate force magnitude (stronger when further from target, stronger near bottom)
+      let forceMagnitude = baseForceMagnitude * progressFactor * Math.min(Math.abs(deltaX), 50);
+      forceMagnitude = Math.min(forceMagnitude, maxForce);
+
+      // Apply horizontal force in direction of target
+      const forceX = Math.sign(deltaX) * forceMagnitude;
+
+      Matter.Body.applyForce(ball, ball.position, { x: forceX, y: 0 });
+
+      // Bounds checking: prevent ball from going outside the pin grid
+      // Get the bounds from the last row pins (widest point)
+      const minX = this.pinsLastRowXCoords[0] - this.pinDistanceX * 0.3;
+      const maxX = this.pinsLastRowXCoords[this.pinsLastRowXCoords.length - 1] + this.pinDistanceX * 0.3;
+
+      // If ball is outside bounds, apply corrective force
+      if (ballX < minX) {
+        Matter.Body.applyForce(ball, ball.position, { x: 0.0005, y: 0 });
+      } else if (ballX > maxX) {
+        Matter.Body.applyForce(ball, ball.position, { x: -0.0005, y: 0 });
+      }
+    }
+  }
+
+  /**
+   * Check for stuck balls and force them to land if they haven't moved.
+   * A ball is considered stuck if it hasn't moved significantly for STUCK_THRESHOLD_MS.
+   */
+  private checkForStuckBalls() {
+    const now = Date.now();
+    const { height } = this.options;
+    const { PADDING_BOTTOM } = PLINKO_LAYOUT;
+    const bottomY = height - PADDING_BOTTOM;
+
+    for (const [id, ball] of this.balls) {
+      const ballX = ball.position.x;
+      const ballY = ball.position.y;
+
+      const lastPos = this.ballLastPositions.get(id);
+
+      if (lastPos) {
+        const dx = Math.abs(ballX - lastPos.x);
+        const dy = Math.abs(ballY - lastPos.y);
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        // Check if ball is stuck (hasn't moved enough) OR is out of bounds
+        const isStuck = distance < PlinkoPhysicsEngine.STUCK_DISTANCE_THRESHOLD &&
+                        (now - lastPos.time) > PlinkoPhysicsEngine.STUCK_THRESHOLD_MS;
+
+        const isOutOfBounds = ballX < 0 || ballX > this.options.width ||
+                              ballY > height + 50; // Allow some overshoot
+
+        // Also check if ball is near the bottom but trapped (common stuck scenario)
+        const isNearBottom = ballY > bottomY - 20;
+        const isNearBottomAndSlow = isNearBottom &&
+                                    Math.abs(ball.velocity.y) < 0.5 &&
+                                    (now - lastPos.time) > 1500;
+
+        if (isStuck || isOutOfBounds || isNearBottomAndSlow) {
+          console.log(`[Plinko] Ball ${id} detected as stuck. Forcing landing. Reason: ${isStuck ? 'no movement' : isOutOfBounds ? 'out of bounds' : 'near bottom and slow'}`);
+          this.forceLandBall(id, ball);
+          continue;
+        }
+
+        // Ball is still moving, update position if it moved significantly
+        if (distance >= PlinkoPhysicsEngine.STUCK_DISTANCE_THRESHOLD) {
+          this.ballLastPositions.set(id, { x: ballX, y: ballY, time: now });
+        }
+      } else {
+        // First time tracking this ball
+        this.ballLastPositions.set(id, { x: ballX, y: ballY, time: now });
+      }
+    }
+  }
+
+  /**
+   * Force a stuck ball to land in its target slot.
+   */
+  private forceLandBall(id: number, ball: Matter.Body) {
+    const targetSlot = this.ballTargets.get(id);
+    const binIndex = targetSlot !== undefined ? targetSlot :
+                     this.pinsLastRowXCoords.findLastIndex((pinX) => pinX < ball.position.x);
+
+    const validBinIndex = binIndex !== -1 && binIndex < this.pinsLastRowXCoords.length - 1
+                          ? binIndex : Math.floor(this.pinsLastRowXCoords.length / 2);
+
+    // Notify landing
+    this.options.onBallLanded?.(id, validBinIndex);
+
+    // Clean up ball
+    Matter.Composite.remove(this.engine.world, ball);
+    this.balls.delete(id);
+    this.ballTargets.delete(id);
+    this.ballLastPositions.delete(id);
   }
 
   private handleBallEnterBin(ball: Matter.Body) {
-    // Find bin index (matching open source logic)
-    const binIndex = this.pinsLastRowXCoords.findLastIndex((pinX) => pinX < ball.position.x);
+    const ballId = this.getBallIdFromBody(ball);
+
+    // Use the backend-determined target slot instead of physics-detected bin
+    // This ensures the visual landing matches the actual payout
+    const targetSlot = ballId !== null ? this.ballTargets.get(ballId) : undefined;
+
+    // Fall back to physics detection only if no target was set
+    const binIndex = targetSlot !== undefined
+      ? targetSlot
+      : this.pinsLastRowXCoords.findLastIndex((pinX) => pinX < ball.position.x);
 
     if (binIndex !== -1 && binIndex < this.pinsLastRowXCoords.length - 1) {
-      const ballId = this.getBallIdFromBody(ball);
       if (ballId !== null) {
         this.options.onBallLanded?.(ballId, binIndex);
       }
@@ -209,9 +377,11 @@ export class PlinkoPhysicsEngine {
     // Remove ball from world
     Matter.Composite.remove(this.engine.world, ball);
 
-    const ballId = this.getBallIdFromBody(ball);
+    // Clean up tracking
     if (ballId !== null) {
       this.balls.delete(ballId);
+      this.ballTargets.delete(ballId);
+      this.ballLastPositions.delete(ballId);
     }
   }
 
@@ -222,9 +392,13 @@ export class PlinkoPhysicsEngine {
     return null;
   }
 
-  public dropBall(id: number, _path: boolean[]): void {
+  public dropBall(id: number, path: boolean[]): void {
     const { rows, width } = this.options;
     const { BALL_START_Y } = PLINKO_LAYOUT;
+
+    // Calculate target slot from backend path (count of "right" moves = final position)
+    const targetSlot = path.filter(v => v).length;
+    this.ballTargets.set(id, targetSlot);
 
     // Ball offset range (matching open source: pinDistanceX * 0.8)
     const ballOffsetRangeX = this.pinDistanceX * 0.8;
@@ -258,6 +432,8 @@ export class PlinkoPhysicsEngine {
     if (ball) {
       Matter.Composite.remove(this.engine.world, ball);
       this.balls.delete(id);
+      this.ballTargets.delete(id);
+      this.ballLastPositions.delete(id);
     }
   }
 
@@ -304,6 +480,8 @@ export class PlinkoPhysicsEngine {
     this.stop();
     Matter.Engine.clear(this.engine);
     this.balls.clear();
+    this.ballTargets.clear();
+    this.ballLastPositions.clear();
     this.pins = [];
     this.walls = [];
     this.pinsLastRowXCoords = [];

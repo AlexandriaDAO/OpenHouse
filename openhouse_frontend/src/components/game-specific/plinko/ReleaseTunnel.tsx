@@ -6,92 +6,102 @@ interface ReleaseTunnelProps {
   ballCount: number;
   isOpen: boolean;
   isVisible: boolean;
+  showBalls?: boolean; // If false, only show tunnel structure (balls rendered by physics)
 }
 
 /**
- * Release tunnel that displays queued balls at the top of the Plinko board.
- * Uses the same gold ball styling as the physics engine for consistency.
+ * Release tunnel - pyramid shape (wide at bottom like the pins below).
+ * Narrow tube extends up off-screen to hold overflow balls.
  */
 export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
   ballCount,
   isOpen,
   isVisible,
+  showBalls = true,
 }) => {
-  const { TUNNEL, BOARD_WIDTH } = PLINKO_LAYOUT;
+  const { BOARD_WIDTH } = PLINKO_LAYOUT;
   const centerX = BOARD_WIDTH / 2;
-  const ballRadius = TUNNEL.BALL_RADIUS;
 
-  // Calculate ball positions - inside funnel and overflowing above
-  const { insideBalls, overflowBalls } = useMemo(() => {
-    const inside: { x: number; y: number; delay: number }[] = [];
-    const overflow: { x: number; y: number; delay: number }[] = [];
+  // Pyramid bucket dimensions
+  const BUCKET = {
+    TOP_Y: 15,           // Where pyramid starts (narrow)
+    BOTTOM_Y: 70,        // Where pyramid ends (wide) - gate location
+    TOP_WIDTH: 24,       // Narrow opening at top
+    BOTTOM_WIDTH: 80,    // Wide opening at bottom (matches first row spread)
+    GATE_HEIGHT: 4,
+    TUBE_TOP: -100,      // Tube extends off-screen
+  };
+
+  const ballRadius = 5;
+  const bucketHeight = BUCKET.BOTTOM_Y - BUCKET.TOP_Y;
+
+  // Calculate ball positions - pyramid is wide at bottom, narrow at top
+  // Overflow goes up the narrow tube off-screen
+  const { pyramidBalls, tubeBalls } = useMemo(() => {
+    const pyramid: { x: number; y: number; delay: number }[] = [];
+    const tube: { x: number; y: number; delay: number }[] = [];
     const ballDiameter = ballRadius * 2;
-    const spacing = ballDiameter + 1;
+    const spacing = ballDiameter + 1.5;
 
-    // Available width inside funnel (narrows toward bottom)
-    const topWidth = TUNNEL.WIDTH - 8;
-    const bottomWidth = ballDiameter + 4;
-
-    // Stack balls from bottom to top INSIDE the funnel
-    let currentY = TUNNEL.Y + TUNNEL.HEIGHT - TUNNEL.GATE_HEIGHT - ballRadius - 2;
+    // Stack balls from bottom (wide) to top (narrow) inside pyramid
+    let currentY = BUCKET.BOTTOM_Y - BUCKET.GATE_HEIGHT - ballRadius - 2;
     let ballIndex = 0;
 
-    while (ballIndex < ballCount && currentY > TUNNEL.Y + ballRadius) {
-      // Calculate width at this Y position (linear interpolation)
-      const progress = (currentY - TUNNEL.Y) / (TUNNEL.HEIGHT - TUNNEL.GATE_HEIGHT);
-      const widthAtY = bottomWidth + (topWidth - bottomWidth) * (1 - progress);
-      const ballsInRow = Math.max(1, Math.floor(widthAtY / spacing));
+    while (ballIndex < ballCount && currentY > BUCKET.TOP_Y + ballRadius) {
+      // Calculate width at this Y position (linear: wide at bottom, narrow at top)
+      const progress = (currentY - BUCKET.TOP_Y) / bucketHeight;
+      const widthAtY = BUCKET.TOP_WIDTH + (BUCKET.BOTTOM_WIDTH - BUCKET.TOP_WIDTH) * progress;
+      const ballsInRow = Math.max(1, Math.floor((widthAtY - 8) / spacing));
 
-      // Center the row
       const actualBallsInRow = Math.min(ballsInRow, ballCount - ballIndex);
-      const rowWidth = actualBallsInRow * spacing - 1;
+      const rowWidth = actualBallsInRow * spacing - 1.5;
       const startX = -rowWidth / 2 + ballRadius;
 
       for (let col = 0; col < actualBallsInRow && ballIndex < ballCount; col++) {
-        inside.push({
+        pyramid.push({
           x: startX + col * spacing,
           y: currentY,
-          delay: ballIndex * 0.02,
+          delay: ballIndex * 0.015,
         });
         ballIndex++;
       }
 
-      currentY -= spacing * 0.85;
+      currentY -= spacing * 0.9;
     }
 
-    // Remaining balls overflow ABOVE the funnel
-    // Stack them in rows above the funnel opening
-    const overflowStartY = TUNNEL.Y - ballRadius - 2;
-    const overflowWidth = TUNNEL.WIDTH + 20; // Slightly wider than funnel top
-    const ballsPerOverflowRow = Math.floor(overflowWidth / spacing);
+    // Overflow balls go up the narrow tube (off-screen)
+    const tubeWidth = BUCKET.TOP_WIDTH - 4;
+    const ballsPerTubeRow = Math.max(1, Math.floor(tubeWidth / spacing));
+    let tubeY = BUCKET.TOP_Y - ballRadius - 2;
 
     while (ballIndex < ballCount) {
-      const overflowIndex = ballIndex - inside.length;
-      const row = Math.floor(overflowIndex / ballsPerOverflowRow);
-      const col = overflowIndex % ballsPerOverflowRow;
+      const tubeIndex = ballIndex - pyramid.length;
+      const col = tubeIndex % ballsPerTubeRow;
 
-      // Calculate how many balls in this row
-      const remainingBalls = ballCount - inside.length - row * ballsPerOverflowRow;
-      const ballsInThisRow = Math.min(ballsPerOverflowRow, remainingBalls);
-      const rowWidth = ballsInThisRow * spacing - 1;
+      if (col === 0 && tubeIndex > 0) {
+        tubeY -= spacing * 0.9;
+      }
+
+      const rowBalls = Math.min(ballsPerTubeRow, ballCount - pyramid.length - Math.floor(tubeIndex / ballsPerTubeRow) * ballsPerTubeRow);
+      const rowWidth = rowBalls * spacing - 1.5;
       const startX = -rowWidth / 2 + ballRadius;
 
-      overflow.push({
+      tube.push({
         x: startX + col * spacing,
-        y: overflowStartY - row * spacing * 0.9,
-        delay: ballIndex * 0.02,
+        y: tubeY,
+        delay: ballIndex * 0.015,
       });
       ballIndex++;
     }
 
-    return { insideBalls: inside, overflowBalls: overflow };
-  }, [ballCount, TUNNEL, ballRadius]);
+    return { pyramidBalls: pyramid, tubeBalls: tube };
+  }, [ballCount, BUCKET, bucketHeight, ballRadius]);
 
   if (!isVisible) return null;
 
   return (
     <g transform={`translate(${centerX}, 0)`}>
-      {/* SVG definitions for ball gradient (matching physics balls) */}
+      {/* SVG definitions */}
       <defs>
         <radialGradient id="tunnelBallGradient" cx="35%" cy="35%" r="60%">
           <stop offset="0%" stopColor="#fff7cc" />
@@ -100,128 +110,130 @@ export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
           <stop offset="100%" stopColor="#b8860b" />
         </radialGradient>
 
-        <linearGradient id="tunnelGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor="#2d3748" />
-          <stop offset="100%" stopColor="#1a202c" />
+        <linearGradient id="pyramidGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stopColor="#1a202c" />
+          <stop offset="100%" stopColor="#2d3748" />
         </linearGradient>
 
-        {/* Clip path for funnel shape */}
-        <clipPath id="tunnelClip">
+        {/* Clip path for pyramid + tube shape */}
+        <clipPath id="bucketClip">
           <path d={`
-            M ${-TUNNEL.WIDTH/2} ${TUNNEL.Y}
-            L ${TUNNEL.WIDTH/2} ${TUNNEL.Y}
-            L ${ballRadius + 4} ${TUNNEL.Y + TUNNEL.HEIGHT - TUNNEL.GATE_HEIGHT}
-            L ${ballRadius + 4} ${TUNNEL.Y + TUNNEL.HEIGHT}
-            L ${-ballRadius - 4} ${TUNNEL.Y + TUNNEL.HEIGHT}
-            L ${-ballRadius - 4} ${TUNNEL.Y + TUNNEL.HEIGHT - TUNNEL.GATE_HEIGHT}
+            M ${-BUCKET.TOP_WIDTH/2} ${BUCKET.TUBE_TOP}
+            L ${BUCKET.TOP_WIDTH/2} ${BUCKET.TUBE_TOP}
+            L ${BUCKET.TOP_WIDTH/2} ${BUCKET.TOP_Y}
+            L ${BUCKET.BOTTOM_WIDTH/2} ${BUCKET.BOTTOM_Y}
+            L ${-BUCKET.BOTTOM_WIDTH/2} ${BUCKET.BOTTOM_Y}
+            L ${-BUCKET.TOP_WIDTH/2} ${BUCKET.TOP_Y}
             Z
           `} />
         </clipPath>
       </defs>
 
-      {/* Tunnel background */}
+      {/* Narrow tube extending up (only visible part) */}
+      <rect
+        x={-BUCKET.TOP_WIDTH/2}
+        y={0}
+        width={BUCKET.TOP_WIDTH}
+        height={BUCKET.TOP_Y}
+        fill="url(#pyramidGradient)"
+        opacity={0.7}
+      />
+
+      {/* Pyramid bucket body */}
       <path
         d={`
-          M ${-TUNNEL.WIDTH/2} ${TUNNEL.Y}
-          L ${TUNNEL.WIDTH/2} ${TUNNEL.Y}
-          L ${ballRadius + 6} ${TUNNEL.Y + TUNNEL.HEIGHT - TUNNEL.GATE_HEIGHT}
-          L ${ballRadius + 6} ${TUNNEL.Y + TUNNEL.HEIGHT}
-          L ${-ballRadius - 6} ${TUNNEL.Y + TUNNEL.HEIGHT}
-          L ${-ballRadius - 6} ${TUNNEL.Y + TUNNEL.HEIGHT - TUNNEL.GATE_HEIGHT}
+          M ${-BUCKET.TOP_WIDTH/2} ${BUCKET.TOP_Y}
+          L ${BUCKET.TOP_WIDTH/2} ${BUCKET.TOP_Y}
+          L ${BUCKET.BOTTOM_WIDTH/2} ${BUCKET.BOTTOM_Y}
+          L ${-BUCKET.BOTTOM_WIDTH/2} ${BUCKET.BOTTOM_Y}
           Z
         `}
-        fill="url(#tunnelGradient)"
+        fill="url(#pyramidGradient)"
         stroke="#4a5568"
-        strokeWidth={1.5}
-        opacity={0.9}
+        strokeWidth={1}
+        opacity={0.85}
       />
 
       {/* Inner shadow for depth */}
       <path
         d={`
-          M ${-TUNNEL.WIDTH/2 + 3} ${TUNNEL.Y + 3}
-          L ${TUNNEL.WIDTH/2 - 3} ${TUNNEL.Y + 3}
-          L ${ballRadius + 3} ${TUNNEL.Y + TUNNEL.HEIGHT - TUNNEL.GATE_HEIGHT - 2}
-          L ${-ballRadius - 3} ${TUNNEL.Y + TUNNEL.HEIGHT - TUNNEL.GATE_HEIGHT - 2}
+          M ${-BUCKET.TOP_WIDTH/2 + 3} ${BUCKET.TOP_Y + 2}
+          L ${BUCKET.TOP_WIDTH/2 - 3} ${BUCKET.TOP_Y + 2}
+          L ${BUCKET.BOTTOM_WIDTH/2 - 4} ${BUCKET.BOTTOM_Y - BUCKET.GATE_HEIGHT - 1}
+          L ${-BUCKET.BOTTOM_WIDTH/2 + 4} ${BUCKET.BOTTOM_Y - BUCKET.GATE_HEIGHT - 1}
           Z
         `}
         fill="#0a0a14"
-        opacity={0.5}
+        opacity={0.4}
       />
 
-      {/* Overflow balls ABOVE the funnel (not clipped, rendered first/behind) */}
-      <g>
-        <AnimatePresence>
-          {overflowBalls.map((pos, i) => (
-            <TunnelBall
-              key={`overflow-${i}`}
-              x={pos.x}
-              y={pos.y}
-              radius={ballRadius}
-              delay={pos.delay}
-              isReleasing={isOpen}
-              releaseDelay={(insideBalls.length + i) * 0.03}
-            />
-          ))}
-        </AnimatePresence>
-      </g>
+      {/* Tube balls (overflow, clipped) - only shown when showBalls is true */}
+      {showBalls && (
+        <g clipPath="url(#bucketClip)">
+          <AnimatePresence>
+            {tubeBalls.map((pos, i) => (
+              <TunnelBall
+                key={`tube-${i}`}
+                x={pos.x}
+                y={pos.y}
+                radius={ballRadius}
+                delay={pos.delay}
+                isReleasing={isOpen}
+                releaseDelay={(pyramidBalls.length + i) * 0.025}
+              />
+            ))}
+          </AnimatePresence>
+        </g>
+      )}
 
-      {/* Balls inside tunnel (clipped to funnel shape) */}
-      <g clipPath="url(#tunnelClip)">
-        <AnimatePresence>
-          {insideBalls.map((pos, i) => (
-            <TunnelBall
-              key={`inside-${i}`}
-              x={pos.x}
-              y={pos.y}
-              radius={ballRadius}
-              delay={pos.delay}
-              isReleasing={isOpen}
-              releaseDelay={i * 0.03}
-            />
-          ))}
-        </AnimatePresence>
-      </g>
+      {/* Pyramid balls (clipped) - only shown when showBalls is true */}
+      {showBalls && (
+        <g clipPath="url(#bucketClip)">
+          <AnimatePresence>
+            {pyramidBalls.map((pos, i) => (
+              <TunnelBall
+                key={`pyramid-${i}`}
+                x={pos.x}
+                y={pos.y}
+                radius={ballRadius}
+                delay={pos.delay}
+                isReleasing={isOpen}
+                releaseDelay={i * 0.025}
+              />
+            ))}
+          </AnimatePresence>
+        </g>
+      )}
 
-      {/* Release gate (slides open) */}
+      {/* Release gate at bottom (splits open) */}
       <motion.g
-        animate={{ y: isOpen ? 15 : 0, opacity: isOpen ? 0 : 1 }}
-        transition={{ duration: 0.2, ease: 'easeOut' }}
+        animate={{ y: isOpen ? 12 : 0, opacity: isOpen ? 0 : 1 }}
+        transition={{ duration: 0.15, ease: 'easeOut' }}
       >
-        {/* Left gate */}
         <rect
-          x={-ballRadius - 5}
-          y={TUNNEL.Y + TUNNEL.HEIGHT - TUNNEL.GATE_HEIGHT}
-          width={ballRadius + 5 - 1}
-          height={TUNNEL.GATE_HEIGHT}
-          fill="#4a5568"
-          rx={1}
-        />
-        {/* Right gate */}
-        <rect
-          x={1}
-          y={TUNNEL.Y + TUNNEL.HEIGHT - TUNNEL.GATE_HEIGHT}
-          width={ballRadius + 5 - 1}
-          height={TUNNEL.GATE_HEIGHT}
+          x={-BUCKET.BOTTOM_WIDTH/2}
+          y={BUCKET.BOTTOM_Y - BUCKET.GATE_HEIGHT}
+          width={BUCKET.BOTTOM_WIDTH}
+          height={BUCKET.GATE_HEIGHT}
           fill="#4a5568"
           rx={1}
         />
       </motion.g>
 
-      {/* Top rim decoration */}
+      {/* Bottom edge decoration */}
       <rect
-        x={-TUNNEL.WIDTH/2 - 2}
-        y={TUNNEL.Y - 2}
-        width={TUNNEL.WIDTH + 4}
-        height={4}
+        x={-BUCKET.BOTTOM_WIDTH/2 - 2}
+        y={BUCKET.BOTTOM_Y - 1}
+        width={BUCKET.BOTTOM_WIDTH + 4}
+        height={2}
         fill="#4a5568"
-        rx={2}
+        rx={1}
       />
     </g>
   );
 };
 
-// Individual ball with physics-matching style
+// Individual ball component
 interface TunnelBallProps {
   x: number;
   y: number;
@@ -245,75 +257,50 @@ const TunnelBall: React.FC<TunnelBallProps> = ({
       animate={
         isReleasing
           ? {
-              y: y + 80,
+              y: y + 60,
               opacity: 0,
               scale: 1,
-              x: x + (Math.random() - 0.5) * 10,
+              x: x + (Math.random() - 0.5) * 8,
             }
           : {
-              // Subtle jiggle animation while waiting
-              x: [x - 0.5, x + 0.5, x - 0.3, x + 0.3, x],
-              y: [y, y - 1, y + 0.5, y - 0.5, y],
+              x: [x - 0.3, x + 0.3, x - 0.2, x + 0.2, x],
+              y: [y, y - 0.5, y + 0.3, y - 0.3, y],
               opacity: 1,
               scale: 1,
             }
       }
       transition={
         isReleasing
-          ? { duration: 0.25, ease: 'easeIn', delay: releaseDelay }
+          ? { duration: 0.2, ease: 'easeIn', delay: releaseDelay }
           : {
               x: {
-                duration: 0.4,
+                duration: 0.5,
                 repeat: Infinity,
                 repeatType: 'mirror',
                 ease: 'easeInOut',
                 delay: delay,
               },
               y: {
-                duration: 0.35,
+                duration: 0.4,
                 repeat: Infinity,
                 repeatType: 'mirror',
                 ease: 'easeInOut',
-                delay: delay + 0.15,
+                delay: delay + 0.1,
               },
-              opacity: { duration: 0.15, delay },
-              scale: { duration: 0.15, delay, type: 'spring', stiffness: 400 },
+              opacity: { duration: 0.1, delay },
+              scale: { duration: 0.1, delay, type: 'spring', stiffness: 400 },
             }
       }
     >
-      {/* Drop shadow */}
-      <ellipse
-        cx={1}
-        cy={radius + 1}
-        rx={radius * 0.6}
-        ry={radius * 0.2}
-        fill="black"
-        opacity={0.2}
-      />
-
-      {/* Main ball with gold gradient */}
+      {/* Main ball */}
+      <circle r={radius} fill="url(#tunnelBallGradient)" />
+      {/* Highlight */}
       <circle
-        r={radius}
-        fill="url(#tunnelBallGradient)"
-      />
-
-      {/* Specular highlight */}
-      <ellipse
-        cx={-radius * 0.3}
-        cy={-radius * 0.3}
-        rx={radius * 0.35}
-        ry={radius * 0.25}
+        cx={-radius * 0.25}
+        cy={-radius * 0.25}
+        r={radius * 0.3}
         fill="white"
-        opacity={0.6}
-      />
-
-      {/* Secondary highlight */}
-      <circle
-        cx={-radius * 0.15}
-        cy={-radius * 0.45}
-        r={radius * 0.1}
-        fill="white"
-        opacity={0.8}
+        opacity={0.5}
       />
     </motion.g>
   );

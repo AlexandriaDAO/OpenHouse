@@ -1,12 +1,12 @@
 export const PLINKO_LAYOUT = {
   // SVG viewBox dimensions (scales naturally)
   BOARD_WIDTH: 400,
-  BOARD_HEIGHT: 520,  // Extra height for release tunnel at top + multiplier slots
+  BOARD_HEIGHT: 550,  // Extra height for release tunnel at top + multiplier slots
 
   // Padding - increased top padding for release tunnel
   PADDING_X: 27,
-  PADDING_TOP: 75,    // Room for release tunnel above first row
-  PADDING_BOTTOM: 60,  // Bottom padding for slots
+  PADDING_TOP: 80,    // Room for release tunnel above first row
+  PADDING_BOTTOM: 80,  // Bottom padding for slots (increased for visibility)
 
   // Pin radius scales with row count: (24 - rows) / 2, scaled for 400px canvas
   // For 8 rows: (24-8)/2 * 0.53 ≈ 4.2
@@ -24,16 +24,16 @@ export const PLINKO_LAYOUT = {
   // Legacy constants (kept for compatibility)
   PEG_SPACING_X: 38,
   PEG_SPACING_Y: 36,
-  DROP_ZONE_Y: 75,      // Same as PADDING_TOP - where balls enter pin grid
-  BALL_START_Y: 55,     // Balls start just above first row (below tunnel)
+  DROP_ZONE_Y: 80,      // Same as PADDING_TOP - where balls enter pin grid
+  BALL_START_Y: 60,     // Balls start just above first row (below tunnel)
 
   // Release tunnel configuration (above first row of pins)
   TUNNEL: {
-    WIDTH: 60,          // Narrow funnel
-    HEIGHT: 45,         // Height of tunnel
-    Y: 5,               // Top of tunnel
+    WIDTH: 100,         // Wider funnel to hold more balls
+    HEIGHT: 55,         // Taller to accommodate more balls
+    Y: 0,               // Top of tunnel
     GATE_HEIGHT: 4,     // Height of release gate
-    BALL_RADIUS: 7,     // Slightly smaller balls in tunnel
+    BALL_RADIUS: 6,     // Smaller balls to fit more
   },
 
   // Legacy bucket config (deprecated, use TUNNEL)

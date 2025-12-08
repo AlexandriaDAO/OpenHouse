@@ -1,9 +1,9 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import usePlinkoActor from '../../hooks/actors/usePlinkoActor';
 import useLedgerActor from '../../hooks/actors/useLedgerActor';
 import { GameLayout } from '../../components/game-ui';
 import { BettingRail } from '../../components/betting';
-import { PlinkoBoard, ReleaseTunnel, PlinkoPhysicsBalls, PLINKO_LAYOUT } from '../../components/game-specific/plinko';
+import { PlinkoBoard, ReleaseTunnel, PlinkoPhysicsBalls, TunnelFillingBalls, PLINKO_LAYOUT } from '../../components/game-specific/plinko';
 import { useGameBalance } from '../../providers/GameBalanceProvider';
 import { useBalance } from '../../providers/BalanceProvider';
 import { useAuth } from '../../providers/AuthProvider';
@@ -66,7 +66,7 @@ export const Plinko: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isWaiting, setIsWaiting] = useState(false);  // Waiting for IC response
   const [bucketOpen, setBucketOpen] = useState(false); // Bucket door state
-  const [ballCount, setBallCount] = useState(1);
+  const [ballCount, setBallCount] = useState(10);
   const [betAmount, setBetAmount] = useState(0.01);
   const [maxBet, setMaxBet] = useState(100);
   const [multipliers, setMultipliers] = useState<number[]>([]);
@@ -82,6 +82,11 @@ export const Plinko: React.FC = () => {
   // Animation state - balls waiting to be dropped by physics engine
   const [pendingBalls, setPendingBalls] = useState<PendingBall[]>([]);
   const [nextBallId, setNextBallId] = useState(0);
+
+  // Tunnel filling animation state
+  const [isFilling, setIsFilling] = useState(false);
+  const fillingCompleteRef = useRef(false);
+  const backendResultsRef = useRef<{ path: boolean[] }[] | null>(null);
 
   // Track recently landed slots for highlighting
   const [activeSlots, setActiveSlots] = useState<Set<number>>(new Set());
@@ -131,9 +136,43 @@ export const Plinko: React.FC = () => {
     updateMaxBet();
   }, [actor, ballCount, betAmount]);
 
+  // Helper: Try to release balls when both backend and filling are ready
+  const tryReleaseBalls = useCallback(() => {
+    if (fillingCompleteRef.current && backendResultsRef.current) {
+      const results = backendResultsRef.current;
+
+      // Open the bucket door
+      setBucketOpen(true);
+
+      // Wait for door animation, then start physics ball drops
+      setTimeout(() => {
+        const newBalls: PendingBall[] = results.map((r, i) => ({
+          id: nextBallId + i,
+          path: r.path,
+        }));
+
+        setPendingBalls(newBalls);
+        setNextBallId(prev => prev + results.length);
+        setIsWaiting(false);
+        setIsFilling(false);
+        setIsPlaying(true);
+
+        // Clean up refs for next round
+        fillingCompleteRef.current = false;
+        backendResultsRef.current = null;
+      }, PLINKO_LAYOUT.BUCKET_OPEN_MS);
+    }
+  }, [nextBallId]);
+
+  // Callback when tunnel filling animation settles
+  const handleFillingComplete = useCallback(() => {
+    fillingCompleteRef.current = true;
+    tryReleaseBalls();
+  }, [tryReleaseBalls]);
+
   // Drop balls handler
   const dropBalls = async () => {
-    if (!actor || isPlaying || isWaiting) return;
+    if (!actor || isPlaying || isWaiting || isFilling) return;
 
     if (!isAuthenticated) {
       setGameError('Please log in to play.');
@@ -145,12 +184,17 @@ export const Plinko: React.FC = () => {
       return;
     }
 
-    // Start waiting state - show bucket filling with balls
-    setIsWaiting(true);
-    setBucketOpen(false);
+    // Reset state for new game
     setGameError('');
     setCurrentResult(null);
     setMultiBallResult(null);
+    setBucketOpen(false);
+    fillingCompleteRef.current = false;
+    backendResultsRef.current = null;
+
+    // Start filling animation immediately (gives user something to watch)
+    setIsFilling(true);
+    setIsWaiting(true);
 
     // DEBUG: Log pre-play state
     const prePlayTimestamp = Date.now();
@@ -167,6 +211,7 @@ export const Plinko: React.FC = () => {
         console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] FAILED: Insufficient balance (frontend check)`);
         setGameError(`Insufficient balance. Total bet: $${(betAmount * ballCount).toFixed(2)}`);
         setIsWaiting(false);
+        setIsFilling(false);
         return;
       }
 
@@ -228,22 +273,9 @@ export const Plinko: React.FC = () => {
         }
       }
 
-      // IC responded - open the bucket door
-      setBucketOpen(true);
-
-      // Wait for bucket door animation, then start physics ball drops
-      setTimeout(() => {
-        // Create pending balls for physics engine
-        const newBalls: PendingBall[] = results.map((r, i) => ({
-          id: nextBallId + i,
-          path: r.path,
-        }));
-
-        setPendingBalls(newBalls);
-        setNextBallId(prev => prev + ballCount);
-        setIsWaiting(false);
-        setIsPlaying(true);
-      }, PLINKO_LAYOUT.BUCKET_OPEN_MS);
+      // Backend responded - store results and try to release
+      backendResultsRef.current = results;
+      tryReleaseBalls();
 
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to play';
@@ -258,6 +290,7 @@ export const Plinko: React.FC = () => {
 
       setGameError(errorMsg);
       setIsWaiting(false);
+      setIsFilling(false);
       setBucketOpen(false);
     }
   };
@@ -292,141 +325,165 @@ export const Plinko: React.FC = () => {
 
   return (
     <GameLayout hideFooter noScroll>
-      <div className="flex-1 flex flex-col items-center justify-center px-2 pb-40 overflow-hidden w-full">
-        
-        {/* Game Stats Bar - New compact design */}
-        <div className="w-full max-w-lg mx-auto mb-2 px-4 min-h-[40px] flex items-center justify-center">
-          {isWaiting ? (
-            <div className="text-yellow-400 text-xs font-mono tracking-widest uppercase animate-pulse">
-              Loading balls...
-            </div>
-          ) : !isPlaying && currentResult ? (
-            <div className={`flex items-center gap-4 animate-in fade-in slide-in-from-bottom-2 ${currentResult.win ? 'text-green-400' : 'text-red-400'}`}>
-              <div className="flex flex-col items-center">
-                <span className="text-[10px] uppercase text-gray-500 font-bold">Multiplier</span>
-                <span className="font-bold text-xl">{currentResult.multiplier.toFixed(2)}x</span>
-              </div>
-              <div className="h-8 w-px bg-gray-800"></div>
-              <div className="flex flex-col items-center">
-                <span className="text-[10px] uppercase text-gray-500 font-bold">Profit</span>
-                <span className="font-bold text-xl">
-                  {currentResult.profit && currentResult.profit >= 0 ? '+' : ''}{currentResult.profit?.toFixed(2)}
-                </span>
-              </div>
-            </div>
-          ) : !isPlaying && multiBallResult ? (
-            <div className={`flex items-center gap-4 animate-in fade-in slide-in-from-bottom-2 ${(multiBallResult.net_profit ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              <div className="flex flex-col items-center">
-                <span className="text-[10px] uppercase text-gray-500 font-bold">Avg Mult</span>
-                <span className="font-bold text-xl">{multiBallResult.average_multiplier.toFixed(2)}x</span>
-              </div>
-              <div className="h-8 w-px bg-gray-800"></div>
-              <div className="flex flex-col items-center">
-                <span className="text-[10px] uppercase text-gray-500 font-bold">Net Profit</span>
-                <span className="font-bold text-xl">
-                  {(multiBallResult.net_profit ?? 0) >= 0 ? '+' : ''}{multiBallResult.net_profit?.toFixed(2)}
-                </span>
-              </div>
-              <div className="h-8 w-px bg-gray-800"></div>
-              <div className="flex flex-col items-center">
-                <span className="text-[10px] uppercase text-gray-500 font-bold">Wins</span>
-                <span className="font-bold text-xl">{multiBallResult.total_wins}/{multiBallResult.total_balls}</span>
-              </div>
-            </div>
-          ) : (
-            <div className="text-gray-600 text-xs font-mono tracking-widest opacity-50 uppercase">
-              {isPlaying ? 'Dropping Balls...' : 'Place your bet'}
-            </div>
-          )}
-        </div>
+      {/* Full-screen game */}
+      <div className="flex-1 flex items-center justify-center overflow-hidden w-full pb-32">
 
-        {/* Game Board Area */}
-        <div className="card max-w-4xl mx-auto relative p-0 overflow-hidden bg-transparent border-none shadow-none">
-          <div
-            className={`cursor-pointer transition-transform duration-100 ${(isPlaying || isWaiting) ? 'cursor-default' : 'active:scale-95'}`}
-            onClick={dropBalls}
-            style={{ width: '400px', maxWidth: '100%' }}
+        {/* Game Board - SVG with embedded controls */}
+        <div
+          className={`cursor-pointer transition-transform duration-100 h-full ${(isPlaying || isWaiting || isFilling) ? 'cursor-default' : 'active:scale-[0.99]'}`}
+          onClick={dropBalls}
+          style={{ maxHeight: 'calc(100vh - 200px)' }}
+        >
+          <svg
+            viewBox={`0 0 ${PLINKO_LAYOUT.BOARD_WIDTH} ${PLINKO_LAYOUT.BOARD_HEIGHT}`}
+            className="h-full w-auto"
           >
-            <div style={{ aspectRatio: `${PLINKO_LAYOUT.BOARD_WIDTH}/${PLINKO_LAYOUT.BOARD_HEIGHT}` }}>
-              <svg viewBox={`0 0 ${PLINKO_LAYOUT.BOARD_WIDTH} ${PLINKO_LAYOUT.BOARD_HEIGHT}`} className="w-full h-full overflow-visible">
-                {/* Static board */}
-                <PlinkoBoard rows={ROWS} multipliers={multipliers} activeSlots={activeSlots} />
+            {/* Static board */}
+            <PlinkoBoard rows={ROWS} multipliers={multipliers} activeSlots={activeSlots} />
 
-                {/* Release tunnel - shows balls loading while waiting for IC response */}
-                <ReleaseTunnel
-                  ballCount={ballCount}
-                  isOpen={bucketOpen}
-                  isVisible={isWaiting}
-                />
+            {/* Release tunnel - structure always visible, static balls hidden when filling with physics */}
+            <ReleaseTunnel
+              ballCount={ballCount}
+              isOpen={bucketOpen}
+              isVisible={true}
+              showBalls={false}
+            />
 
-                {/* Physics-based animated balls */}
-                {pendingBalls.length > 0 && (
-                  <PlinkoPhysicsBalls
-                    rows={ROWS}
-                    pendingBalls={pendingBalls}
-                    onAllBallsLanded={handleAllBallsLanded}
-                    onBallLanded={handleBallLanded}
-                    staggerMs={PLINKO_LAYOUT.BALL_STAGGER_MS}
-                  />
-                )}
-              </svg>
-            </div>
+            {/* Physics-based tunnel filling animation */}
+            <TunnelFillingBalls
+              ballCount={ballCount}
+              isFilling={isFilling}
+              onFillingComplete={handleFillingComplete}
+              staggerMs={60}
+            />
 
-            {/* Tap to Play Hint */}
-            {!isPlaying && !isWaiting && isAuthenticated && balance.game > 0n && (
-              <div className="absolute top-1/4 left-1/2 transform -translate-x-1/2 text-[10px] text-gray-500 font-mono tracking-widest opacity-60 pointer-events-none">
-                TAP TO DROP
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Controls - Ball Count & Info */}
-        <div className="w-full max-w-md mx-auto mt-2 px-4 flex flex-col gap-2">
-          {/* Slider Row */}
-          <div className="flex items-center justify-between bg-[#0a0a14] p-3 rounded-lg border border-gray-800/50">
-            <span className="text-xs text-gray-500 uppercase font-bold w-10">Balls</span>
-            <div className="flex items-center flex-1 mx-4">
-              <input
-                type="range"
-                min={1}
-                max={30}
-                value={ballCount}
-                onChange={(e) => setBallCount(Math.min(30, Math.max(1, Number(e.target.value))))}
-                disabled={isPlaying || isWaiting}
-                className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-dfinity-turquoise"
+            {/* Physics-based animated balls on the board */}
+            {pendingBalls.length > 0 && (
+              <PlinkoPhysicsBalls
+                rows={ROWS}
+                pendingBalls={pendingBalls}
+                onAllBallsLanded={handleAllBallsLanded}
+                onBallLanded={handleBallLanded}
+                staggerMs={PLINKO_LAYOUT.BALL_STAGGER_MS}
               />
-            </div>
-            <span className="text-lg text-white font-mono font-bold w-8 text-center">{ballCount}</span>
-          </div>
+            )}
 
-          {/* Info/Stats Row */}
-          <div className="flex items-center justify-between gap-2">
-             <div className="flex-1 bg-[#0a0a14] p-2 rounded-lg border border-gray-800/50 flex justify-between items-center px-3">
-               <span className="text-[10px] text-gray-500 uppercase">Total Bet</span>
-               <span className="text-sm font-mono text-yellow-400 font-bold">${(betAmount * ballCount).toFixed(2)}</span>
-             </div>
-             
-             <button 
-               onClick={() => setShowInfoModal(true)}
-               className="bg-[#0a0a14] hover:bg-gray-800 border border-gray-800/50 text-gray-400 hover:text-white p-2 rounded-lg transition-colors"
-               title="Game Info"
-             >
-               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                 <circle cx="12" cy="12" r="10"></circle>
-                 <line x1="12" y1="16" x2="12" y2="12"></line>
-                 <line x1="12" y1="8" x2="12.01" y2="8"></line>
-               </svg>
-             </button>
-          </div>
+            {/* LEFT SIDE - Tall ball count slider */}
+            <foreignObject x="5" y="20" width="40" height="380">
+              <div
+                className="flex flex-col items-center h-full"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Ball count display */}
+                <div className="text-xl font-bold text-yellow-500 font-mono tabular-nums">
+                  {ballCount}
+                </div>
+                <span className="text-[8px] text-gray-400 uppercase tracking-wider font-semibold mb-2">Balls</span>
+
+                {/* Tall vertical slider */}
+                <input
+                  type="range"
+                  min={1}
+                  max={30}
+                  value={ballCount}
+                  onChange={(e) => { e.stopPropagation(); setBallCount(Math.min(30, Math.max(1, Number(e.target.value)))); }}
+                  onClick={(e) => e.stopPropagation()}
+                  disabled={isPlaying || isWaiting || isFilling}
+                  className="w-3 flex-1 bg-gray-700/60 rounded-full appearance-none cursor-pointer
+                    [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:h-6
+                    [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-yellow-500
+                    [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-yellow-600
+                    [&::-webkit-slider-thumb]:shadow-lg
+                    [&::-moz-range-thumb]:w-6 [&::-moz-range-thumb]:h-6 [&::-moz-range-thumb]:rounded-full
+                    [&::-moz-range-thumb]:bg-yellow-500 [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-yellow-600"
+                  style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
+                />
+              </div>
+            </foreignObject>
+
+            {/* RIGHT SIDE - Total bet & info */}
+            <foreignObject x="340" y="40" width="60" height="130">
+              <div
+                className="flex flex-col items-center h-full"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Total Bet Section */}
+                <span className="text-[8px] text-gray-400 uppercase tracking-wider font-semibold mb-1">Total</span>
+                <div className="text-lg font-bold text-yellow-500 font-mono tabular-nums leading-tight">
+                  ${(betAmount * ballCount).toFixed(2)}
+                </div>
+
+                {/* Per ball info */}
+                <div className="text-[8px] text-gray-500 font-mono mt-1">
+                  ${betAmount.toFixed(2)}×{ballCount}
+                </div>
+
+                {/* Info button */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowInfoModal(true); }}
+                  className="mt-3 w-8 h-8 rounded-full bg-gray-700/80 hover:bg-gray-600 text-gray-400 hover:text-white transition-colors flex items-center justify-center"
+                  title="Game Info"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="16" x2="12" y2="12"></line>
+                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                  </svg>
+                </button>
+              </div>
+            </foreignObject>
+
+            {/* Result display (inside SVG) */}
+            {!isPlaying && !isWaiting && !isFilling && (currentResult || multiBallResult) && (
+              <foreignObject x="140" y="100" width="120" height="60">
+                <div className="text-center pointer-events-none">
+                  {currentResult ? (
+                    <div className={currentResult.win ? 'text-green-400' : 'text-red-400'}>
+                      <div className="text-xl font-bold drop-shadow-lg">{currentResult.multiplier.toFixed(2)}x</div>
+                      <div className="text-[10px] font-mono opacity-80">
+                        {currentResult.profit && currentResult.profit >= 0 ? '+' : ''}${currentResult.profit?.toFixed(2)}
+                      </div>
+                    </div>
+                  ) : multiBallResult ? (
+                    <div className={(multiBallResult.net_profit ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}>
+                      <div className="text-lg font-bold drop-shadow-lg">{multiBallResult.average_multiplier.toFixed(2)}x</div>
+                      <div className="text-[10px] font-mono opacity-80">
+                        {(multiBallResult.net_profit ?? 0) >= 0 ? '+' : ''}${multiBallResult.net_profit?.toFixed(2)}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </foreignObject>
+            )}
+
+            {/* Tap hint */}
+            {!isPlaying && !isWaiting && !isFilling && isAuthenticated && balance.game > 0n && !currentResult && !multiBallResult && (
+              <text
+                x={PLINKO_LAYOUT.BOARD_WIDTH / 2}
+                y="180"
+                textAnchor="middle"
+                fill="#4a4a4a"
+                fontSize="8"
+                fontFamily="monospace"
+                style={{ letterSpacing: '0.15em' }}
+              >
+                TAP TO DROP
+              </text>
+            )}
+
+            {/* Error display */}
+            {gameError && (
+              <foreignObject x="50" y={PLINKO_LAYOUT.BOARD_HEIGHT - 60} width="300" height="30">
+                <div className="text-red-400 text-[9px] text-center bg-red-900/30 px-2 py-1 rounded mx-auto w-fit">
+                  {gameError}
+                </div>
+              </foreignObject>
+            )}
+          </svg>
         </div>
-
-        {gameError && (
-          <div className="text-red-400 text-center mt-2 bg-red-900/10 p-2 rounded border border-red-900/20 text-xs">{gameError}</div>
-        )}
       </div>
 
-      {/* Betting Controls */}
+      {/* Betting Controls - Bottom */}
       <div className="flex-shrink-0">
         <BettingRail
           betAmount={betAmount}
@@ -438,7 +495,7 @@ export const Plinko: React.FC = () => {
           ledgerActor={ledgerActor}
           gameActor={actor}
           onBalanceRefresh={handleBalanceRefresh}
-          disabled={isPlaying || isWaiting}
+          disabled={isPlaying || isWaiting || isFilling}
           multiplier={multipliers[Math.floor(multipliers.length / 2)] || DEFAULT_MULTIPLIER}
           canisterId={PLINKO_BACKEND_CANISTER_ID}
           isBalanceLoading={gameBalanceContext.isLoading}
