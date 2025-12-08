@@ -167,7 +167,7 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
             {rocket.isCrashed ? (
               <div className="text-3xl" style={{ filter: 'drop-shadow(0 0 6px orange)' }}>💥</div>
             ) : (
-              <RocketSVG color={color} size={30} />
+              <div className="text-2xl" style={{ filter: `drop-shadow(0 0 4px ${color})` }}>🚀</div>
             )}
           </div>
         );
