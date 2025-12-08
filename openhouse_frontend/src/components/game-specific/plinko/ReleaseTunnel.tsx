@@ -32,7 +32,7 @@ export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
     TUBE_TOP: -100,      // Tube extends off-screen
   };
 
-  const ballRadius = 5;
+  const ballRadius = 8;  // Matches board balls for unified appearance
   const bucketHeight = BUCKET.BOTTOM_Y - BUCKET.TOP_Y;
 
   // Calculate ball positions - pyramid is wide at bottom, narrow at top
@@ -111,9 +111,14 @@ export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
         </radialGradient>
 
         <linearGradient id="pyramidGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor="#1a202c" />
-          <stop offset="100%" stopColor="#2d3748" />
+          <stop offset="0%" stopColor="#1a202c" stopOpacity="0.3" />
+          <stop offset="100%" stopColor="#2d3748" stopOpacity="0.3" />
         </linearGradient>
+
+        {/* Drop shadow filter to match board balls */}
+        <filter id="tunnelBallShadow" x="-50%" y="-50%" width="200%" height="200%">
+          <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="#000" floodOpacity="0.3" />
+        </filter>
 
         {/* Clip path for pyramid + tube shape */}
         <clipPath id="bucketClip">
@@ -129,17 +134,17 @@ export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
         </clipPath>
       </defs>
 
-      {/* Narrow tube extending up (only visible part) */}
+      {/* Narrow tube extending up (only visible part) - subtle */}
       <rect
         x={-BUCKET.TOP_WIDTH/2}
         y={0}
         width={BUCKET.TOP_WIDTH}
         height={BUCKET.TOP_Y}
         fill="url(#pyramidGradient)"
-        opacity={0.7}
+        opacity={0.3}
       />
 
-      {/* Pyramid bucket body */}
+      {/* Pyramid bucket body - subtle/transparent */}
       <path
         d={`
           M ${-BUCKET.TOP_WIDTH/2} ${BUCKET.TOP_Y}
@@ -149,12 +154,12 @@ export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
           Z
         `}
         fill="url(#pyramidGradient)"
-        stroke="#4a5568"
+        stroke="rgba(74, 85, 104, 0.2)"
         strokeWidth={1}
-        opacity={0.85}
+        opacity={0.3}
       />
 
-      {/* Inner shadow for depth */}
+      {/* Inner shadow for depth - more subtle */}
       <path
         d={`
           M ${-BUCKET.TOP_WIDTH/2 + 3} ${BUCKET.TOP_Y + 2}
@@ -164,7 +169,7 @@ export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
           Z
         `}
         fill="#0a0a14"
-        opacity={0.4}
+        opacity={0.15}
       />
 
       {/* Tube balls (overflow, clipped) - only shown when showBalls is true */}
@@ -292,16 +297,39 @@ const TunnelBall: React.FC<TunnelBallProps> = ({
             }
       }
     >
-      {/* Main ball */}
-      <circle r={radius} fill="url(#tunnelBallGradient)" />
-      {/* Highlight */}
-      <circle
-        cx={-radius * 0.25}
-        cy={-radius * 0.25}
-        r={radius * 0.3}
-        fill="white"
-        opacity={0.5}
-      />
+      <g filter="url(#tunnelBallShadow)">
+        {/* Drop shadow - matches board balls */}
+        <ellipse
+          cx={2}
+          cy={radius + 2}
+          rx={radius * 0.7}
+          ry={radius * 0.25}
+          fill="black"
+          opacity={0.15}
+        />
+
+        {/* Main ball */}
+        <circle r={radius} fill="url(#tunnelBallGradient)" />
+
+        {/* Specular highlight - enhanced to match board balls */}
+        <ellipse
+          cx={-radius * 0.3}
+          cy={-radius * 0.3}
+          rx={radius * 0.35}
+          ry={radius * 0.25}
+          fill="white"
+          opacity={0.6}
+        />
+
+        {/* Secondary highlight - matches board balls */}
+        <circle
+          cx={-radius * 0.15}
+          cy={-radius * 0.45}
+          r={radius * 0.1}
+          fill="white"
+          opacity={0.8}
+        />
+      </g>
     </motion.g>
   );
 };

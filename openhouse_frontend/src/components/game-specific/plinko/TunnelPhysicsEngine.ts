@@ -35,7 +35,7 @@ export class TunnelPhysicsEngine {
     GATE_HEIGHT: 4,
   };
 
-  private static BALL_RADIUS = 5;
+  private static BALL_RADIUS = 8;  // Matches board balls for unified appearance
 
   constructor(options: TunnelPhysicsOptions) {
     this.options = options;
