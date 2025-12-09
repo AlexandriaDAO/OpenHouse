@@ -33,7 +33,7 @@ export const PLINKO_LAYOUT = {
     HEIGHT: 55,         // Taller to accommodate more balls
     Y: 0,               // Top of tunnel
     GATE_HEIGHT: 4,     // Height of release gate
-    BALL_RADIUS: 6,     // Smaller balls to fit more
+    BALL_RADIUS: 8,     // Matches board balls for unified appearance
   },
 
   // Legacy bucket config (deprecated, use TUNNEL)

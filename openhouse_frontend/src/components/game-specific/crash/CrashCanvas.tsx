@@ -23,6 +23,14 @@ interface CrashCanvasProps {
   height?: number;
 }
 
+// Padding to keep rockets visible within canvas bounds
+const CANVAS_PADDING = {
+    left: 30,   // Space for rocket at start
+    right: 30,  // Space for rocket at end
+    top: 25,    // Space for rocket at high multipliers
+    bottom: 25, // Space for rocket at bottom
+};
+
 export const CrashCanvas: React.FC<CrashCanvasProps> = ({
   rocketStates,
   targetMultiplier,
@@ -267,7 +275,7 @@ function drawGrid(ctx: CanvasRenderingContext2D, width: number, height: number) 
     const y = height - (i * height / 4);
     ctx.beginPath();
     ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
+    ctx.lineTo(drawArea.right + CANVAS_PADDING.right, y);
     ctx.stroke();
   }
 }
