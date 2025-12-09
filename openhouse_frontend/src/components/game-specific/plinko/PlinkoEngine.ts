@@ -257,55 +257,10 @@ export class PlinkoPhysicsEngine {
       }
     );
 
-    // Add funnel walls to guide balls from bucket to first row of pins
-    // These angled walls connect bucket bottom to peg board walls
-    const funnelTopY = BUCKET.BOTTOM_Y;
-    const funnelBottomY = PADDING_TOP;
-    const funnelHeight = funnelBottomY - funnelTopY;
+    // Note: Funnel walls removed - they were causing balls to get stuck
+    // The angled board walls already guide balls toward the peg area
 
-    // Left funnel - from bucket left edge to first row left pin
-    const leftFunnelAngle = Math.atan2(firstRowFirstPinX - (centerX - halfWidth), funnelHeight);
-    const leftFunnelX = (centerX - halfWidth + firstRowFirstPinX) / 2;
-    const leftFunnelY = (funnelTopY + funnelBottomY) / 2;
-    const leftFunnelLength = Math.sqrt(
-      Math.pow(firstRowFirstPinX - (centerX - halfWidth), 2) + Math.pow(funnelHeight, 2)
-    );
-
-    const leftFunnel = Matter.Bodies.rectangle(
-      leftFunnelX,
-      leftFunnelY,
-      8,
-      leftFunnelLength + 10,
-      {
-        isStatic: true,
-        angle: -leftFunnelAngle,
-        collisionFilter: {
-          category: PIN_CATEGORY,
-          mask: PlinkoPhysicsEngine.BALL_CATEGORY,
-        },
-        label: 'bucket_left_funnel',
-      }
-    );
-
-    // Right funnel - from bucket right edge to first row right pin
-    const rightFunnelX = (centerX + halfWidth + firstRowLastPinX) / 2;
-    const rightFunnel = Matter.Bodies.rectangle(
-      rightFunnelX,
-      leftFunnelY,
-      8,
-      leftFunnelLength + 10,
-      {
-        isStatic: true,
-        angle: leftFunnelAngle,
-        collisionFilter: {
-          category: PIN_CATEGORY,
-          mask: PlinkoPhysicsEngine.BALL_CATEGORY,
-        },
-        label: 'bucket_right_funnel',
-      }
-    );
-
-    this.bucketWalls = [leftWall, rightWall, leftFunnel, rightFunnel];
+    this.bucketWalls = [leftWall, rightWall];
     this.bucketGate = gate;
     Matter.Composite.add(this.engine.world, [...this.bucketWalls, gate]);
   }
@@ -333,10 +288,14 @@ export class PlinkoPhysicsEngine {
     const centerX = this.options.width / 2;
     const bucketWidth = this.getBucketWidth();
 
+    console.log(`[PlinkoEngine] Scheduling ball ${id} to drop in ${delay}ms (bucket width: ${bucketWidth})`);
+
     setTimeout(() => {
       const boxHalfWidth = bucketWidth / 2 - this.pinRadius * 2 - 4;
       const startX = centerX + (Math.random() * 2 - 1) * boxHalfWidth;
       const startY = -20 - Math.random() * 30; // Start above visible area
+
+      console.log(`[PlinkoEngine] Creating ball ${id} at (${startX.toFixed(1)}, ${startY.toFixed(1)})`);
 
       const ball = Matter.Bodies.circle(startX, startY, this.pinRadius * 2, {
         restitution: 0.4, // Less bouncy in bucket
@@ -358,6 +317,7 @@ export class PlinkoPhysicsEngine {
 
       Matter.Composite.add(this.engine.world, ball);
       this.balls.set(id, ball);
+      console.log(`[PlinkoEngine] Ball ${id} added. Total balls in world: ${this.balls.size}`);
     }, delay);
   }
 
@@ -365,10 +325,12 @@ export class PlinkoPhysicsEngine {
    * Open the bucket gate to release all balls onto the peg board.
    */
   public openBucket(): void {
+    console.log(`[PlinkoEngine] openBucket called. Gate exists: ${!!this.bucketGate}, already open: ${this.isBucketOpen}, balls in world: ${this.balls.size}`);
     if (this.bucketGate && !this.isBucketOpen) {
       Matter.Composite.remove(this.engine.world, this.bucketGate);
       this.bucketGate = null;
       this.isBucketOpen = true;
+      console.log('[PlinkoEngine] Bucket gate opened');
     }
   }
 

@@ -104,13 +104,28 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
     };
   }, [rows]); // ONLY rows - callbacks via refs
 
+  // Track previous filling state to detect when filling starts fresh
+  const prevFillingRef = useRef(false);
+
   // Handle filling phase - drop balls into bucket
   useEffect(() => {
+    // Detect when isFilling transitions from false to true (new game starting)
+    const justStartedFilling = isFilling && !prevFillingRef.current;
+    prevFillingRef.current = isFilling;
+
+    // If just started filling, reset the flag to allow ball creation
+    if (justStartedFilling) {
+      hasStartedFillingRef.current = false;
+      console.log('[PlinkoPhysicsBalls] Filling started fresh, resetting hasStartedFillingRef');
+    }
+
     if (isFilling && fillBallCount > 0 && engineRef.current && !hasStartedFillingRef.current) {
       hasStartedFillingRef.current = true;
       hasNotifiedSettledRef.current = false;
       totalBallsRef.current = fillBallCount;
       landedBallsRef.current = new Set();
+
+      console.log(`[PlinkoPhysicsBalls] Creating ${fillBallCount} balls with stagger ${staggerMs}ms`);
 
       // Drop balls into bucket with stagger - IDs 0 to fillBallCount-1
       for (let i = 0; i < fillBallCount; i++) {
@@ -122,6 +137,7 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
         if (engineRef.current && !hasNotifiedSettledRef.current) {
           if (engineRef.current.areBallsSettled()) {
             hasNotifiedSettledRef.current = true;
+            console.log('[PlinkoPhysicsBalls] Balls settled, calling onFillingComplete');
             onFillingCompleteRef.current?.();
           }
         }
