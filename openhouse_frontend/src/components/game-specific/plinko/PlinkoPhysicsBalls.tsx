@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { PLINKO_LAYOUT } from './plinkoAnimations';
 import { PlinkoPhysicsEngine, BallState } from './PlinkoEngine';
 
@@ -40,7 +40,25 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
   const settleCheckIntervalRef = useRef<number | null>(null);
   const hasNotifiedSettledRef = useRef(false);
 
-  // Initialize physics engine
+  // Use refs for callbacks to avoid engine recreation
+  const onBallLandedRef = useRef(onBallLanded);
+  const onAllBallsLandedRef = useRef(onAllBallsLanded);
+  const onFillingCompleteRef = useRef(onFillingComplete);
+
+  // Keep refs in sync with props
+  useEffect(() => {
+    onBallLandedRef.current = onBallLanded;
+  }, [onBallLanded]);
+
+  useEffect(() => {
+    onAllBallsLandedRef.current = onAllBallsLanded;
+  }, [onAllBallsLanded]);
+
+  useEffect(() => {
+    onFillingCompleteRef.current = onFillingComplete;
+  }, [onFillingComplete]);
+
+  // Initialize physics engine - ONLY depends on rows
   useEffect(() => {
     const engine = new PlinkoPhysicsEngine({
       rows,
@@ -61,13 +79,13 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
           return next;
         });
 
-        // Notify parent of the slot where ball landed
-        onBallLanded?.(slotIndex);
+        // Notify parent of the slot where ball landed (use ref)
+        onBallLandedRef.current?.(slotIndex);
 
         // Check if all balls have landed
         if (landedBallsRef.current.size === totalBallsRef.current && totalBallsRef.current > 0) {
           setTimeout(() => {
-            onAllBallsLanded();
+            onAllBallsLandedRef.current();
           }, 100);
         }
       },
@@ -84,7 +102,7 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
         settleCheckIntervalRef.current = null;
       }
     };
-  }, [rows, onAllBallsLanded, onBallLanded]);
+  }, [rows]); // ONLY rows - callbacks via refs
 
   // Handle filling phase - drop balls into bucket
   useEffect(() => {
@@ -94,7 +112,7 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
       totalBallsRef.current = fillBallCount;
       landedBallsRef.current = new Set();
 
-      // Drop balls into bucket with stagger
+      // Drop balls into bucket with stagger - IDs 0 to fillBallCount-1
       for (let i = 0; i < fillBallCount; i++) {
         engineRef.current.dropBallIntoBucket(i, i * staggerMs);
       }
@@ -104,12 +122,12 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
         if (engineRef.current && !hasNotifiedSettledRef.current) {
           if (engineRef.current.areBallsSettled()) {
             hasNotifiedSettledRef.current = true;
-            onFillingComplete?.();
+            onFillingCompleteRef.current?.();
           }
         }
       }, 100);
     }
-  }, [isFilling, fillBallCount, staggerMs, onFillingComplete]);
+  }, [isFilling, fillBallCount, staggerMs]);
 
   // Handle release phase - open bucket and assign paths
   useEffect(() => {
@@ -120,9 +138,10 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
         settleCheckIntervalRef.current = null;
       }
 
-      // Assign paths to balls before opening bucket
-      pendingBalls.forEach((ball) => {
-        engineRef.current?.assignPathToBall(ball.id, ball.path);
+      // Assign paths to balls - use INDEX as the ID (0, 1, 2...)
+      // because that's how we created them in dropBallIntoBucket
+      pendingBalls.forEach((ball, index) => {
+        engineRef.current?.assignPathToBall(index, ball.path);
       });
 
       // Open bucket gate - balls fall naturally through pegs
