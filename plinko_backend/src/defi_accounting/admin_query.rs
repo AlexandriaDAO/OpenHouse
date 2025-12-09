@@ -5,8 +5,7 @@ use super::types::*;
 
 const ADMIN_PRINCIPAL: &str = "p7336-jmpo5-pkjsf-7dqkd-ea3zu-g2ror-ctcn2-sxtuo-tjve3-ulrx7-wae";
 const WASM_PAGE_SIZE_BYTES: u64 = 65536;
-// const MAX_PAGINATION_LIMIT: u64 = 100; // Historical limit - removed to allow unlimited admin queries
-const REASONABLE_MAX_LIMIT: usize = 10_000; // Safety net
+const REASONABLE_MAX_LIMIT: usize = 10_000; // Safety net for unbounded queries
 
 fn require_admin() -> Result<(), String> {
     let caller = ic_cdk::api::msg_caller();
@@ -106,14 +105,12 @@ pub fn get_orphaned_funds_report(recent_limit: Option<u64>) -> Result<OrphanedFu
 /// Paginated list of all user balances
 pub fn get_all_balances(offset: u64, limit: u64) -> Result<Vec<UserBalance>, String> {
     require_admin()?;
-    // Removed: let limit = limit.min(MAX_PAGINATION_LIMIT);
     Ok(accounting::iter_user_balances_internal(offset as usize, limit as usize))
 }
 
 /// Paginated list of all LP positions
 pub fn get_all_lp_positions(offset: u64, limit: u64) -> Result<Vec<LPPositionInfo>, String> {
     require_admin()?;
-    // Removed: let limit = limit.min(MAX_PAGINATION_LIMIT);
     Ok(liquidity_pool::iter_lp_positions_internal(offset as usize, limit as usize))
 }
 

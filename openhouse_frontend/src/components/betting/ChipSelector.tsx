@@ -6,6 +6,7 @@ interface ChipSelectorProps {
   disabled: boolean;
   size?: 'xs' | 'mobile' | 'sm' | 'md';
   variant?: 'full' | 'compact';  // 'compact' = 3 chips for mobile (red, green, blue)
+  layout?: 'horizontal' | 'vertical';
 }
 
 export function ChipSelector({
@@ -14,6 +15,7 @@ export function ChipSelector({
   disabled,
   size = 'md',
   variant = 'full',
+  layout = 'horizontal',
 }: ChipSelectorProps) {
   // Filter chips based on variant - compact shows only $0.10, $1, $5 for mobile
   const chips = variant === 'compact'
@@ -29,8 +31,10 @@ export function ChipSelector({
   };
   const { img: imgClass, gap: gapClass } = sizeClasses[size];
 
+  const flexDirection = layout === 'vertical' ? 'flex-col' : '';
+
   return (
-    <div className={`flex items-center ${gapClass}`}>
+    <div className={`flex items-center ${flexDirection} ${gapClass}`}>
       {chips.map(chip => (
         <button
           key={chip.color}

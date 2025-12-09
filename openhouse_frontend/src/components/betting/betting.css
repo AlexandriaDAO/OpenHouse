@@ -124,11 +124,13 @@
 .bet-display-pill {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
   padding: 6px 12px;
   background: rgba(0, 0, 0, 0.6);
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.15);
+  min-width: 160px;
 }
 
 .bet-amount-text {
@@ -170,6 +172,68 @@
 .clear-text-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
+}
+
+/* ==========================================================================
+   ACTION PILL (Desktop - matches bet-display-pill)
+   ========================================================================== */
+
+.action-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 12px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  min-width: 160px;
+}
+
+.action-pill-btn {
+  background: none;
+  border: none;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 2px 8px;
+  transition: all 0.15s;
+  border-radius: 4px;
+}
+
+.action-pill-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.action-pill-btn--deposit {
+  color: var(--rail-accent);
+}
+
+.action-pill-btn--deposit:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.2);
+}
+
+.action-pill-btn--deposit.deposit-pulse {
+  animation: depositPulse 2s infinite;
+}
+
+.action-pill-btn--withdraw {
+  color: #ef4444;
+}
+
+.action-pill-btn--withdraw:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.action-pill-btn--house {
+  color: #9ca3af;
+  font-size: 16px;
+}
+
+.action-pill-btn--house:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
 }
 
 /* ==========================================================================
@@ -411,13 +475,13 @@
 
 .betting-rail-mobile {
   background: linear-gradient(180deg, #1a1d21 0%, #0a0b0c 100%);
-  padding: 12px 12px;
-  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  padding: 6px 12px;
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
   position: relative;
   overflow: visible;
-  /* Curved top like desktop */
-  border-top-left-radius: 50% 25px;
-  border-top-right-radius: 50% 25px;
+  /* Curved top like desktop - reduced height for mobile */
+  border-top-left-radius: 50% 12px;
+  border-top-right-radius: 50% 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.15);
 }
 
@@ -450,11 +514,12 @@
   box-shadow: 0 0 12px rgba(255, 255, 255, 0.5);
 }
 
-/* Mobile rail grid */
+/* Mobile rail grid - allows chip pile to overflow upward */
 .mobile-rail-grid {
   display: flex;
   flex-direction: column;
   overflow: visible;
+  position: relative;
 }
 
 /* Three column layout for mobile */
@@ -497,11 +562,12 @@
   margin-right: 4px;
 }
 
-/* Circular/arc chip pile layout */
+/* Circular/arc chip pile layout - overflows upward */
 .chip-pile-circular {
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: visible;
 }
 
 .chip-pile-circular .chip-pile {
@@ -694,6 +760,311 @@
 }
 
 /* ==========================================================================
+   MOBILE COMPACT LAYOUT (V3)
+   ========================================================================== */
+
+/* Main row: balances+bet left, chips right */
+.mobile-main-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+/* Left stack: sync/bet, chips balance, house balance */
+.mobile-left-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.mobile-sync-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  color: #6b7280;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: 'Roboto Mono', monospace;
+}
+
+.mobile-sync-btn:hover {
+  color: var(--rail-accent);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.mobile-bet-inline {
+  color: #fff;
+  font-weight: 700;
+  font-size: 11px;
+  margin-left: 4px;
+}
+
+/* 3-column layout: balances | pot | chips */
+.mobile-three-col {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  overflow: visible;
+}
+
+/* Left column: balances */
+.mobile-col-balances {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex-shrink: 0;
+}
+
+/* Bet row: sync icon, CLR, amount, MAX */
+.mobile-bet-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+}
+
+.mobile-sync-icon {
+  background: transparent;
+  border: none;
+  color: #6b7280;
+  padding: 2px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.mobile-sync-icon:hover {
+  color: var(--rail-accent);
+}
+
+.mobile-bet-value {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.mobile-bet-ctrl {
+  background: transparent;
+  border: none;
+  font-size: 8px;
+  font-weight: 700;
+  padding: 1px 2px;
+  cursor: pointer;
+  transition: all 0.15s;
+  opacity: 0.6;
+}
+
+.mobile-bet-ctrl:hover:not(:disabled) {
+  opacity: 1;
+}
+
+.mobile-bet-ctrl:disabled {
+  opacity: 0.2;
+  cursor: not-allowed;
+}
+
+.mobile-bet-ctrl--clr {
+  color: #ef4444;
+}
+
+.mobile-bet-ctrl--max {
+  color: var(--rail-accent);
+}
+
+/* Center column: pot only */
+.mobile-col-pot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  flex: 1;
+  overflow: visible;
+}
+
+/* Right column: chip selector */
+.mobile-col-chips {
+  display: flex;
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+
+/* Balance row button - shared styles */
+.balance-row-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: 'Roboto Mono', monospace;
+}
+
+.balance-row-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Balance icon styles */
+.balance-icon {
+  font-size: 12px;
+  font-weight: 700;
+  width: 20px;
+  text-align: center;
+}
+
+.balance-icon--plusminus {
+  color: var(--rail-accent);
+}
+
+.balance-icon--house {
+  color: #9ca3af;
+  font-size: 14px;
+}
+
+.balance-row-btn--house:hover .balance-icon--house {
+  color: #fff;
+}
+
+/* Refresh button row */
+.balance-icon--refresh {
+  color: #6b7280;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.balance-row-btn--refresh:hover .balance-icon--refresh {
+  color: var(--rail-accent);
+}
+
+/* ==========================================================================
+   CHIP PILE WITH CONTROLS (CLR left, MAX right, amount bottom)
+   ========================================================================== */
+
+.chip-pile-with-controls {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-rows: 1fr auto;
+  align-items: center;
+  justify-items: center;
+  position: relative;
+  overflow: visible;
+}
+
+.chip-pile-with-controls .chip-pile-circular,
+.chip-pile-with-controls .bet-placeholder-mini {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.chip-control {
+  background: none;
+  border: none;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+  opacity: 0.6;
+}
+
+.chip-control:hover:not(:disabled) {
+  opacity: 1;
+}
+
+.chip-control:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
+.chip-control--clr {
+  grid-column: 1;
+  grid-row: 1;
+  color: #ef4444;
+  align-self: center;
+}
+
+.chip-control--max {
+  grid-column: 3;
+  grid-row: 1;
+  color: var(--rail-accent);
+  align-self: center;
+}
+
+.chip-control--amount {
+  grid-column: 2;
+  grid-row: 2;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  text-align: center;
+  padding: 0;
+  margin-top: -2px;
+  cursor: default;
+  opacity: 0.9;
+}
+
+/* Mini bet placeholder for empty state with controls */
+.bet-placeholder-mini {
+  width: 40px;
+  height: 40px;
+  border: 2px dashed rgba(255, 255, 255, 0.15);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.25);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+/* Labels and values in balance rows */
+.balance-row-btn .balance-label {
+  font-size: 10px;
+  color: var(--rail-text-muted);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  width: 42px;
+  text-align: left;
+}
+
+.balance-row-btn .balance-value {
+  font-size: 12px;
+  color: #d1d5db;
+}
+
+.balance-row-btn .text-highlight {
+  color: var(--rail-text-highlight);
+  font-weight: 600;
+}
+
+/* Pulse animation on CHIPS row when user needs to deposit */
+.balance-row-btn--chips.deposit-pulse {
+  animation: depositPulse 2s infinite;
+}
+
+.balance-row-btn--chips.deposit-pulse .balance-icon--plusminus {
+  animation: iconGlow 2s infinite;
+}
+
+@keyframes iconGlow {
+  0%, 100% { text-shadow: 0 0 4px rgba(34, 197, 94, 0.5); }
+  50% { text-shadow: 0 0 12px rgba(34, 197, 94, 0.9); }
+}
+
+/* ==========================================================================
    THEME VARIANTS
    ========================================================================== */
 
@@ -792,4 +1163,21 @@
 .chip-button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* ==========================================================================
+   SMALL MOBILE BREAKPOINT (≤420px)
+   ========================================================================== */
+
+@media (max-width: 420px) {
+  /* Reduce two-column gap from 8px to 4px */
+  .mobile-two-columns {
+    gap: 4px;
+  }
+
+  /* Further reduce padding on very small screens */
+  .betting-rail-mobile {
+    padding: 4px 8px;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
 }

@@ -401,17 +401,70 @@ export const Plinko: React.FC = () => {
               />
             )}
 
-            {/* LEFT SIDE - Tall ball count slider */}
-            <foreignObject x="5" y="20" width="40" height="380">
+            {/* LEFT SIDE - Total bet, info & result */}
+            <foreignObject x="40" y="20" width="50" height="200">
+              <div
+                className="flex flex-col items-center"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Total Bet Section */}
+                <span className="text-[7px] text-gray-400 uppercase tracking-wider font-semibold mb-1">Total</span>
+                <div className="text-sm font-bold text-yellow-500 font-mono tabular-nums leading-tight">
+                  ${(betAmount * ballCount).toFixed(2)}
+                </div>
+
+                {/* Per ball info */}
+                <div className="text-[7px] text-gray-500 font-mono mt-1">
+                  ${betAmount.toFixed(2)}×{ballCount}
+                </div>
+
+                {/* Info button */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowInfoModal(true); }}
+                  className="mt-2 w-6 h-6 rounded-full bg-gray-700/80 hover:bg-gray-600 text-gray-400 hover:text-white transition-colors flex items-center justify-center"
+                  title="Game Info"
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="16" x2="12" y2="12"></line>
+                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                  </svg>
+                </button>
+
+                {/* Result display - below bet info */}
+                {!isPlaying && !isWaiting && !isFilling && (currentResult || multiBallResult) && (
+                  <div className="mt-2 text-center pointer-events-none">
+                    {currentResult ? (
+                      <div className={currentResult.win ? 'text-green-400' : 'text-red-400'}>
+                        <div className="text-sm font-bold drop-shadow-lg">{currentResult.multiplier.toFixed(2)}x</div>
+                        <div className="text-[8px] font-mono opacity-80">
+                          {currentResult.profit && currentResult.profit >= 0 ? '+' : ''}${currentResult.profit?.toFixed(2)}
+                        </div>
+                      </div>
+                    ) : multiBallResult ? (
+                      <div className={(multiBallResult.net_profit ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}>
+                        <div className="text-sm font-bold drop-shadow-lg">{multiBallResult.average_multiplier.toFixed(2)}x</div>
+                        <div className="text-[8px] font-mono opacity-80">
+                          {(multiBallResult.net_profit ?? 0) >= 0 ? '+' : ''}${multiBallResult.net_profit?.toFixed(2)}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            </foreignObject>
+
+            {/* RIGHT SIDE - Ball count with vertical slider */}
+            <foreignObject x="310" y="20" width="50" height="280">
               <div
                 className="flex flex-col items-center h-full"
                 onClick={(e) => e.stopPropagation()}
               >
                 {/* Ball count display */}
-                <div className="text-xl font-bold text-yellow-500 font-mono tabular-nums">
+                <div className="text-lg font-bold text-yellow-500 font-mono tabular-nums">
                   {ballCount}
                 </div>
-                <span className="text-[8px] text-gray-400 uppercase tracking-wider font-semibold mb-2">Balls</span>
+                <span className="text-[7px] text-gray-400 uppercase tracking-wider font-semibold mb-2">Balls</span>
 
                 {/* Tall vertical slider */}
                 <input
@@ -433,61 +486,6 @@ export const Plinko: React.FC = () => {
                 />
               </div>
             </foreignObject>
-
-            {/* RIGHT SIDE - Total bet & info */}
-            <foreignObject x="340" y="40" width="60" height="130">
-              <div
-                className="flex flex-col items-center h-full"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {/* Total Bet Section */}
-                <span className="text-[8px] text-gray-400 uppercase tracking-wider font-semibold mb-1">Total</span>
-                <div className="text-lg font-bold text-yellow-500 font-mono tabular-nums leading-tight">
-                  ${(betAmount * ballCount).toFixed(2)}
-                </div>
-
-                {/* Per ball info */}
-                <div className="text-[8px] text-gray-500 font-mono mt-1">
-                  ${betAmount.toFixed(2)}×{ballCount}
-                </div>
-
-                {/* Info button */}
-                <button
-                  onClick={(e) => { e.stopPropagation(); setShowInfoModal(true); }}
-                  className="mt-3 w-8 h-8 rounded-full bg-gray-700/80 hover:bg-gray-600 text-gray-400 hover:text-white transition-colors flex items-center justify-center"
-                  title="Game Info"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <line x1="12" y1="16" x2="12" y2="12"></line>
-                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
-                  </svg>
-                </button>
-              </div>
-            </foreignObject>
-
-            {/* Result display (inside SVG) */}
-            {!isPlaying && !isWaiting && !isFilling && (currentResult || multiBallResult) && (
-              <foreignObject x="140" y="100" width="120" height="60">
-                <div className="text-center pointer-events-none">
-                  {currentResult ? (
-                    <div className={currentResult.win ? 'text-green-400' : 'text-red-400'}>
-                      <div className="text-xl font-bold drop-shadow-lg">{currentResult.multiplier.toFixed(2)}x</div>
-                      <div className="text-[10px] font-mono opacity-80">
-                        {currentResult.profit && currentResult.profit >= 0 ? '+' : ''}${currentResult.profit?.toFixed(2)}
-                      </div>
-                    </div>
-                  ) : multiBallResult ? (
-                    <div className={(multiBallResult.net_profit ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}>
-                      <div className="text-lg font-bold drop-shadow-lg">{multiBallResult.average_multiplier.toFixed(2)}x</div>
-                      <div className="text-[10px] font-mono opacity-80">
-                        {(multiBallResult.net_profit ?? 0) >= 0 ? '+' : ''}${multiBallResult.net_profit?.toFixed(2)}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              </foreignObject>
-            )}
 
             {/* Tap hint */}
             {!isPlaying && !isWaiting && !isFilling && isAuthenticated && balance.game > 0n && !currentResult && !multiBallResult && (

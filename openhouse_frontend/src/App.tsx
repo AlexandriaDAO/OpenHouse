@@ -7,12 +7,13 @@ import { GameBalanceProvider } from './providers/GameBalanceProvider';
 import { Layout } from './components/Layout';
 import { AdminRoute } from './components/AdminRoute';
 import { Home } from './pages/Home';
-import { DiceLayout, DiceGame, DiceLiquidity } from './pages/dice';
-import { PlinkoLayout, PlinkoGame, PlinkoLiquidity } from './pages/plinko';
+import { DiceGame } from './pages/dice';
+import { PlinkoGame } from './pages/plinko';
 import { Crash } from './pages/Crash';
-import { BlackjackLayout, BlackjackGame, BlackjackLiquidity } from './pages/blackjack';
+import { BlackjackGame } from './pages/blackjack';
 import { Admin } from './pages/Admin';
 import { Wallet } from './pages/Wallet';
+import { Liquidity } from './pages/Liquidity';
 
 function App() {
   return (
@@ -25,25 +26,12 @@ function App() {
               <Layout>
                 <Routes>
                   <Route path="/" element={<Home />} />
-                  
-                  <Route path="/dice" element={<DiceLayout />}>
-                    <Route index element={<DiceGame />} />
-                    <Route path="liquidity" element={<DiceLiquidity />} />
-                  </Route>
-                  
-                  <Route path="/plinko" element={<AdminRoute><PlinkoLayout /></AdminRoute>}>
-                    <Route index element={<PlinkoGame />} />
-                    <Route path="liquidity" element={<PlinkoLiquidity />} />
-                  </Route>
-
+                  <Route path="/dice" element={<DiceGame />} />
+                  <Route path="/plinko" element={<AdminRoute><PlinkoGame /></AdminRoute>} />
                   <Route path="/crash" element={<AdminRoute><Crash /></AdminRoute>} />
-
-                  <Route path="/blackjack" element={<AdminRoute><BlackjackLayout /></AdminRoute>}>
-                    <Route index element={<BlackjackGame />} />
-                    <Route path="liquidity" element={<BlackjackLiquidity />} />
-                  </Route>
-                  
+                  <Route path="/blackjack" element={<AdminRoute><BlackjackGame /></AdminRoute>} />
                   <Route path="/wallet" element={<Wallet />} />
+                  <Route path="/liquidity" element={<Liquidity />} />
                   <Route path="/admin" element={<Admin />} />
                 </Routes>
               </Layout>

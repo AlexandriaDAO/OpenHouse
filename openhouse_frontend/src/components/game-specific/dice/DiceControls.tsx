@@ -19,7 +19,7 @@ export const DiceControls: React.FC<DiceControlsProps> = ({
   disabled = false,
 }) => {
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-2 sm:gap-3">
       {/* Dice count stepper - inline left */}
       <DiceCountSelector
         diceCount={diceCount}
@@ -28,20 +28,20 @@ export const DiceControls: React.FC<DiceControlsProps> = ({
       />
 
       {/* Separator */}
-      <div className="w-px h-4 bg-gray-700" />
+      <div className="w-px h-4 bg-gray-700 hidden sm:block" />
 
       {/* Target slider */}
-      <span className="text-gray-500 text-xs">Target:</span>
+      <span className="text-gray-500 text-[10px] sm:text-xs hidden sm:inline">Target:</span>
       <input
         type="range"
         min="2"
         max="98"
         value={targetNumber}
         onChange={(e) => onTargetChange(parseInt(e.target.value))}
-        className="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-white"
+        className="flex-1 min-w-0 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-white"
         disabled={disabled}
       />
-      <span className="text-white font-bold font-mono w-8 text-center">{targetNumber}</span>
+      <span className="text-white font-bold font-mono w-6 sm:w-8 text-center text-sm sm:text-base">{targetNumber}</span>
     </div>
   );
 };

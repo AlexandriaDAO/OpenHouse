@@ -630,8 +630,6 @@ pub fn restore_lp_position(user: Principal, shares: Nat, reserve_amount: Nat) {
         pool_state.reserve += reserve_amount;
         state.borrow_mut().set(pool_state);
     });
-
-    ic_cdk::println!("LP position restored for user: {}", user);
 }
 
 // Transfer helpers (using existing accounting module)

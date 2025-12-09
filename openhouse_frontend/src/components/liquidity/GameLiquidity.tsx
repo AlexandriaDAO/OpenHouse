@@ -1,5 +1,4 @@
 import { useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { GameType } from '../../types/balance';
 import { getGameConfig } from '../../config/gameRegistry';
 import { useAuth } from '../../providers/AuthProvider';
@@ -24,7 +23,6 @@ interface Props {
 }
 
 export function GameLiquidity({ gameId }: Props) {
-  const navigate = useNavigate();
   const config = getGameConfig(gameId);
   const { isAuthenticated } = useAuth();
   const { balance: walletBalance } = useBalance();
@@ -53,28 +51,7 @@ export function GameLiquidity({ gameId }: Props) {
   const [showWithdrawConfirm, setShowWithdrawConfirm] = useState(false);
 
   return (
-    <div className="max-w-2xl mx-auto px-4 pb-12">
-      {/* Back to Game Button - uses theme color */}
-      <div className="pt-4 pb-2">
-        <button
-          onClick={() => navigate(config.routes.base)}
-          className={`text-${theme.primary} hover:text-${theme.primary}/80 text-sm font-medium flex items-center gap-2 transition`}
-        >
-          <span>&larr;</span>
-          <span>{config.icon} Back to Game</span>
-        </button>
-      </div>
-
-      {/* Hero Section */}
-      <div className="text-center py-8">
-        <h1 className="text-3xl font-black text-white mb-2 tracking-tight">
-          BE THE <span className={`text-${theme.primary}`}>HOUSE</span>
-        </h1>
-        <p className="text-gray-400 text-sm max-w-md mx-auto">
-          Provide liquidity to the {config.name} bankroll. You take the House's risk and earn the House's 1% statistical edge.
-        </p>
-      </div>
-
+    <div className="pb-6">
       {/* Pending Withdrawal Recovery */}
       {isAuthenticated && (
         <PendingWithdrawalRecovery gameId={gameId} onResolved={handleRefresh} />

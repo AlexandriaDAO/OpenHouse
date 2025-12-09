@@ -12,6 +12,12 @@ interface ExtendedChipStackProps extends ChipStackProps {
   scale?: number;
   layout?: 'horizontal' | 'circular'; // horizontal = desktop, circular = mobile pile
   circleSize?: number; // Size of the circular container
+  // Mobile bet controls (only for circular layout)
+  showBetControls?: boolean;
+  onClear?: () => void;
+  onMax?: () => void;
+  canClear?: boolean;
+  canMax?: boolean;
 }
 
 export function ChipStack({
@@ -22,6 +28,11 @@ export function ChipStack({
   scale = 1,
   layout = 'horizontal',
   circleSize = 70,
+  showBetControls = false,
+  onClear,
+  onMax,
+  canClear = true,
+  canMax = true,
 }: ExtendedChipStackProps) {
   // Decompose amount into chip counts
   const chipData = useMemo(() => decomposeIntoChips(amount), [amount]);
@@ -34,8 +45,33 @@ export function ChipStack({
 
   // Empty state
   if (amount <= 0 || chipData.length === 0) {
+    if (showBetControls && layout === 'circular') {
+      // Compact empty state with controls around it
+      return (
+        <div className="chip-pile-with-controls" style={{ width: circleSize, height: circleSize }}>
+          <button
+            onClick={onClear}
+            disabled={disabled || !canClear}
+            className="chip-control chip-control--clr"
+          >
+            CLR
+          </button>
+          <div className="bet-placeholder-mini">
+            <span>BET</span>
+          </div>
+          <button
+            onClick={onMax}
+            disabled={disabled || !canMax}
+            className="chip-control chip-control--max"
+          >
+            MAX
+          </button>
+          <span className="chip-control chip-control--amount">$0.00</span>
+        </div>
+      );
+    }
     return (
-      <div className="bet-placeholder" style={layout === 'circular' ? { width: circleSize, height: circleSize } : undefined}>
+      <div className="bet-placeholder" style={layout === 'circular' ? { width: circleSize * 0.6, height: circleSize * 0.6 } : undefined}>
         <span>BET</span>
       </div>
     );
@@ -55,69 +91,101 @@ export function ChipStack({
 
     return (
       <div
-        className="chip-pile-circular"
+        className="chip-pile-with-controls"
         style={{
           width: circleSize,
           height: circleSize,
-          position: 'relative',
-          overflow: 'visible', // Ensure chips aren't clipped
         }}
       >
-        {chipData.map(({ chip, count }, pileIndex) => {
-          const visibleCount = Math.min(count, maxChips);
-          const hasOverflow = count > maxChips;
+        {/* CLR on left */}
+        {showBetControls && (
+          <button
+            onClick={onClear}
+            disabled={disabled || !canClear}
+            className="chip-control chip-control--clr"
+          >
+            CLR
+          </button>
+        )}
 
-          // Position around the circle - start from BOTTOM and go clockwise
-          // This puts white chips (index 0) at the front/bottom where they're visible
-          const angle = (pileIndex / totalPiles) * Math.PI * 2 + Math.PI / 2;
-          const x = Math.cos(angle) * radius;
-          const y = Math.sin(angle) * radius * 0.45; // Squash for perspective
+        {/* Chip pile in center */}
+        <div
+          className="chip-pile-circular"
+          style={{
+            width: circleSize * 0.7,
+            height: circleSize * 0.7,
+            position: 'relative',
+            overflow: 'visible',
+          }}
+        >
+          {chipData.map(({ chip, count }, pileIndex) => {
+            const visibleCount = Math.min(count, maxChips);
+            const hasOverflow = count > maxChips;
 
-          return (
-            <div
-              key={chip.color}
-              className="chip-pile"
-              style={{
-                position: 'absolute',
-                left: '50%',
-                top: '65%', // Lower in the container
-                width: chipWidth,
-                transform: `translate(-50%, -50%) translate(${x}px, ${y}px)`,
-                zIndex: Math.round(10 + y), // Further back = lower z-index (top chips behind)
-              }}
-            >
-              {/* Render stacked chips */}
-              {Array(visibleCount).fill(null).map((_, chipIndex) => (
-                <img
-                  key={chipIndex}
-                  src={chip.sideImg}
-                  alt={`${chip.label} chip`}
-                  className={`chip-in-pile ${disabled ? '' : 'cursor-pointer'}`}
-                  onClick={() => handleChipClick(chip)}
-                  style={{
-                    position: 'absolute',
-                    width: chipWidth,
-                    height: 'auto',
-                    bottom: chipIndex * stackOffset,
-                    left: 0,
-                    zIndex: chipIndex,
-                  }}
-                  title={disabled ? '' : `Click to remove $${chip.value.toFixed(2)}`}
-                />
-              ))}
+            const angle = (pileIndex / totalPiles) * Math.PI * 2 + Math.PI / 2;
+            const x = Math.cos(angle) * radius;
+            const y = Math.sin(angle) * radius * 0.45;
 
-              {/* Overflow indicator */}
-              {hasOverflow && (
-                <div
-                  className="absolute -top-1 -right-1 bg-white text-gray-900 text-[7px] font-bold rounded-full w-3.5 h-3.5 flex items-center justify-center shadow-md border border-gray-300"
-                  style={{ zIndex: 100 }}
-                >
-                  +{count - maxChips}
-                </div>
-              )}
-            </div>
-          );
-        })}
+            return (
+              <div
+                key={chip.color}
+                className="chip-pile"
+                style={{
+                  position: 'absolute',
+                  left: '50%',
+                  top: '65%',
+                  width: chipWidth,
+                  transform: `translate(-50%, -50%) translate(${x}px, ${y}px)`,
+                  zIndex: Math.round(10 + y),
+                }}
+              >
+                {Array(visibleCount).fill(null).map((_, chipIndex) => (
+                  <img
+                    key={chipIndex}
+                    src={chip.sideImg}
+                    alt={`${chip.label} chip`}
+                    className={`chip-in-pile ${disabled ? '' : 'cursor-pointer'}`}
+                    onClick={() => handleChipClick(chip)}
+                    style={{
+                      position: 'absolute',
+                      width: chipWidth,
+                      height: 'auto',
+                      bottom: chipIndex * stackOffset,
+                      left: 0,
+                      zIndex: chipIndex,
+                    }}
+                    title={disabled ? '' : `Click to remove $${chip.value.toFixed(2)}`}
+                  />
+                ))}
+
+                {hasOverflow && (
+                  <div
+                    className="absolute -top-1 -right-1 bg-white text-gray-900 text-[7px] font-bold rounded-full w-3.5 h-3.5 flex items-center justify-center shadow-md border border-gray-300"
+                    style={{ zIndex: 100 }}
+                  >
+                    +{count - maxChips}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* MAX on right */}
+        {showBetControls && (
+          <button
+            onClick={onMax}
+            disabled={disabled || !canMax}
+            className="chip-control chip-control--max"
+          >
+            MAX
+          </button>
+        )}
+
+        {/* Amount at bottom */}
+        {showBetControls && (
+          <span className="chip-control chip-control--amount">${amount.toFixed(2)}</span>
+        )}
       </div>
     );
   }

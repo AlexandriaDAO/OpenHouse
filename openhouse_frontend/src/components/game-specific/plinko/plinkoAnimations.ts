@@ -3,8 +3,8 @@ export const PLINKO_LAYOUT = {
   BOARD_WIDTH: 400,
   BOARD_HEIGHT: 550,  // Extra height for release tunnel at top + multiplier slots
 
-  // Padding - increased top padding for release tunnel
-  PADDING_X: 27,
+  // Padding - increased for mobile compatibility (370px screens)
+  PADDING_X: 35,      // Increased from 27 to ensure slots don't clip on edges
   PADDING_TOP: 80,    // Room for release tunnel above first row
   PADDING_BOTTOM: 80,  // Bottom padding for slots (increased for visibility)
 

@@ -220,7 +220,7 @@ export function DiceGame() {
   return (
     <GameLayout hideFooter noScroll>
       {/* Main container - grows to fill space, pushes BettingRail to bottom */}
-      <div className="flex-1 flex flex-col max-w-xl mx-auto px-4 overflow-hidden min-h-0">
+      <div className="flex-1 flex flex-col max-w-xl mx-auto px-2 sm:px-4 overflow-hidden min-h-0">
 
         {/* Auth check - compact */}
         {!isAuthenticated && (
@@ -284,10 +284,10 @@ export function DiceGame() {
         </div>
 
         {/* Direction buttons row - Underneath Dice */}
-        <div className="flex gap-4 justify-center mb-2 flex-shrink-0">
+        <div className="flex gap-2 sm:gap-4 justify-center mb-2 flex-shrink-0">
           <button
             onClick={() => setDirection('Under')}
-            className={`flex-1 md:flex-none md:w-32 px-4 py-3 text-sm font-bold rounded-xl transition ${
+            className={`flex-1 md:flex-none md:w-32 px-3 sm:px-4 py-2.5 sm:py-3 text-xs sm:text-sm font-bold rounded-xl transition ${
               direction === 'Under'
                 ? 'border-2 border-white text-white bg-white/5'
                 : 'border border-gray-700 text-gray-500 hover:text-gray-300 bg-black/20'
@@ -299,7 +299,7 @@ export function DiceGame() {
 
           <button
             onClick={() => setDirection('Over')}
-            className={`flex-1 md:flex-none md:w-32 px-4 py-3 text-sm font-bold rounded-xl transition ${
+            className={`flex-1 md:flex-none md:w-32 px-3 sm:px-4 py-2.5 sm:py-3 text-xs sm:text-sm font-bold rounded-xl transition ${
               direction === 'Over'
                 ? 'border-2 border-white text-white bg-white/5'
                 : 'border border-gray-700 text-gray-500 hover:text-gray-300 bg-black/20'
@@ -311,7 +311,7 @@ export function DiceGame() {
         </div>
 
         {/* Controls Section */}
-        <div className="flex-1 flex flex-col justify-start space-y-4 pt-2">
+        <div className="flex-1 flex flex-col justify-start space-y-2 sm:space-y-4 pt-2">
 
           {/* Target slider with inline dice count stepper */}
           <DiceControls
@@ -322,34 +322,35 @@ export function DiceGame() {
             disabled={isPlaying}
           />
 
-          {/* Stats row - includes Total Bet */}
-          <div className="flex justify-between items-center bg-black/20 rounded-lg p-3 border border-gray-800/50">
-            <div className="flex flex-col">
-              <span className="text-[10px] text-gray-500 uppercase tracking-wider">Win Chance</span>
-              <span className="text-yellow-400 font-mono font-bold">{winChance.toFixed(0)}%</span>
+          {/* Stats row - responsive 2x2 grid on mobile */}
+          <div className="bg-black/20 rounded-lg p-2 sm:p-3 border border-gray-800/50">
+            <div className="grid grid-cols-4 gap-1 sm:gap-2">
+              <div className="flex flex-col items-center sm:items-start">
+                <span className="text-[8px] sm:text-[10px] text-gray-500 uppercase tracking-wider">Win</span>
+                <span className="text-yellow-400 font-mono font-bold text-xs sm:text-sm">{winChance.toFixed(0)}%</span>
+              </div>
+              <div className="flex flex-col items-center sm:items-start">
+                <span className="text-[8px] sm:text-[10px] text-gray-500 uppercase tracking-wider">Multi</span>
+                <span className="text-green-400 font-mono font-bold text-xs sm:text-sm">{multiplier.toFixed(2)}x</span>
+              </div>
+              <div className="flex flex-col items-center sm:items-start">
+                <span className="text-[8px] sm:text-[10px] text-gray-500 uppercase tracking-wider">Bet</span>
+                <span className="text-white font-mono font-bold text-xs sm:text-sm">${totalBet.toFixed(2)}</span>
+              </div>
+              <div className="flex flex-col items-center sm:items-end">
+                <span className="text-[8px] sm:text-[10px] text-gray-500 uppercase tracking-wider flex items-center gap-1">
+                  Payout
+                  <button
+                    onClick={() => setShowOddsExplainer(true)}
+                    className="text-gray-600 hover:text-gray-400 text-[10px]"
+                    title="How odds work"
+                  >
+                    ?
+                  </button>
+                </span>
+                <span className="text-dfinity-turquoise font-mono font-bold text-xs sm:text-sm">${maxPayout.toFixed(2)}</span>
+              </div>
             </div>
-            <div className="h-6 w-px bg-gray-800 mx-2"></div>
-            <div className="flex flex-col">
-              <span className="text-[10px] text-gray-500 uppercase tracking-wider">Multiplier</span>
-              <span className="text-green-400 font-mono font-bold">{multiplier.toFixed(2)}x</span>
-            </div>
-            <div className="h-6 w-px bg-gray-800 mx-2"></div>
-            <div className="flex flex-col">
-              <span className="text-[10px] text-gray-500 uppercase tracking-wider">Total Bet</span>
-              <span className="text-white font-mono font-bold">${totalBet.toFixed(2)}</span>
-            </div>
-            <div className="h-6 w-px bg-gray-800 mx-2"></div>
-            <div className="flex flex-col text-right">
-              <span className="text-[10px] text-gray-500 uppercase tracking-wider">Max Payout</span>
-              <span className="text-dfinity-turquoise font-mono font-bold">${maxPayout.toFixed(2)}</span>
-            </div>
-            <button
-              onClick={() => setShowOddsExplainer(true)}
-              className="ml-3 text-gray-600 hover:text-gray-400"
-              title="How odds work"
-            >
-              ?
-            </button>
           </div>
 
           {/* Error display */}

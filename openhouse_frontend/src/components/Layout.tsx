@@ -9,8 +9,7 @@ interface LayoutProps {
 
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const location = useLocation();
-  const isHome = location.pathname === '/';
-  // Game routes need full-screen layout without footer or back button
+  // Game routes need full-screen layout
   const isGameRoute = location.pathname.startsWith('/dice') ||
                       location.pathname.startsWith('/plinko') ||
                       location.pathname.startsWith('/crash') ||
@@ -62,14 +61,6 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
       {/* Main Content */}
       <main className={`flex-1 ${isGameRoute ? 'overflow-hidden' : ''} container mx-auto ${isGameRoute ? 'px-0 py-0' : 'px-4 py-8'}`}>
-        {!isHome && !isGameRoute && (
-          <div className="mb-6">
-            <Link to="/" className="inline-flex items-center gap-2 text-pure-white/60 hover:text-dfinity-turquoise transition-colors font-mono">
-              <span>←</span>
-              <span>Back to Games</span>
-            </Link>
-          </div>
-        )}
         {children}
       </main>
 

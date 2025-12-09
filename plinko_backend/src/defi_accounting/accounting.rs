@@ -167,7 +167,6 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
                 new_bal
             });
 
-            ic_cdk::println!("Deposit successful: {} deposited {} decimals at block {}", caller, amount, block_index);
             Ok(new_balance)
         }
         Err(e) => Err(format!("Transfer failed: {:?}", e)),
@@ -373,13 +372,11 @@ async fn auto_withdraw_parent() {
          // Use withdraw_internal directly
          match withdraw_internal(parent).await {
              Ok(amount) => {
-                 ic_cdk::println!("Auto-withdraw success: {} to parent", amount);
                  log_audit(AuditEvent::SystemInfo {
                      message: crate::defi_accounting::types::sanitize_error(&format!("Auto-withdrawal success: {}", amount))
                  });
              },
              Err(e) => {
-                 ic_cdk::println!("Auto-withdraw skipped: {}", e);
                  log_audit(AuditEvent::SystemError {
                      error: crate::defi_accounting::types::sanitize_error(&format!("Auto-withdraw failed: {}", e))
                  });
@@ -660,10 +657,7 @@ pub async fn refresh_canister_balance() -> u64 {
 
     match result {
         Ok((balance,)) => {
-            let balance_u64 = balance.0.try_into().unwrap_or_else(|_| {
-                ic_cdk::println!("CRITICAL: Balance exceeds u64::MAX");
-                u64::MAX
-            });
+            let balance_u64 = balance.0.try_into().unwrap_or(u64::MAX);
             CACHED_CANISTER_BALANCE.with(|cache| {
                 *cache.borrow_mut() = balance_u64;
             });

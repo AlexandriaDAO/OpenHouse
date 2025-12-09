@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useBettingState } from './hooks/useBettingState';
 import { useDepositFlow } from './hooks/useDepositFlow';
 import { ChipStack } from './ChipStack';
@@ -14,8 +14,6 @@ export { RAIL_STYLES } from './types';
 
 export function BettingRail(props: any) {
   const navigate = useNavigate();
-  const location = useLocation();
-  const isLiquidityRoute = location.pathname.includes('/liquidity');
 
   const betting = useBettingState(props);
   const deposit = useDepositFlow(props);
@@ -43,7 +41,6 @@ export function BettingRail(props: any) {
     showDepositAnimation,
   } = betting;
 
-  const { gameRoute = '/dice' } = props;
 
   const atMax = betAmount >= maxBet || betAmount >= gameBalanceUSDT;
 
@@ -82,38 +79,29 @@ export function BettingRail(props: any) {
     </div>
   );
 
-  const ActionRow = () => (
-    <div className="action-row">
-      <button
-        onClick={deposit.openModal}
-        className={`icon-btn icon-btn--deposit ${showDepositAnimation ? 'deposit-pulse' : ''}`}
-        title="Buy Chips"
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-          <path d="M12 5v14M5 12h14"/>
-        </svg>
-      </button>
-
+  const ActionPill = () => (
+    <div className="action-pill">
       <button
         onClick={handleCashOutClick}
         disabled={deposit.isWithdrawing || gameBalance === 0n}
-        className="icon-btn icon-btn--withdraw"
+        className="action-pill-btn action-pill-btn--withdraw"
         title="Cash Out"
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-          <path d="M5 12h14"/>
-        </svg>
+        -
       </button>
-
       <button
-        onClick={() => navigate(isLiquidityRoute ? gameRoute : `${gameRoute}/liquidity`)}
-        className="icon-btn icon-btn--house"
-        title={isLiquidityRoute ? 'Play Game' : 'Be The House'}
+        onClick={() => navigate('/liquidity')}
+        className="action-pill-btn action-pill-btn--house"
+        title="Be The House"
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M3 12l9-9 9 9"/>
-          <path d="M5 10v10a1 1 0 001 1h12a1 1 0 001-1V10"/>
-        </svg>
+        ⌂
+      </button>
+      <button
+        onClick={deposit.openModal}
+        className={`action-pill-btn action-pill-btn--deposit ${showDepositAnimation ? 'deposit-pulse' : ''}`}
+        title="Buy Chips"
+      >
+        +
       </button>
     </div>
   );
@@ -190,11 +178,11 @@ export function BettingRail(props: any) {
               </div>
             </div>
 
-            {/* RIGHT: Bet Display + Action Buttons */}
+            {/* RIGHT: Bet Display + Action Pill */}
             <div className="rail-right">
               <div className="rail-right-stack">
                 <BetDisplay />
-                <ActionRow />
+                <ActionPill />
               </div>
             </div>
 
@@ -208,100 +196,75 @@ export function BettingRail(props: any) {
         <div className={`betting-rail-mobile rail-theme--${railStyle}`}>
 
           <div className="mobile-rail-grid">
-            {/* Three column layout: left controls | center pile | right controls */}
-            <div className="mobile-three-columns">
-              {/* LEFT COLUMN: Action buttons on top, balances below */}
-              <div className="mobile-col-left">
-                <div className="mobile-action-buttons">
-                  <button
-                    onClick={deposit.openModal}
-                    className={`mobile-icon-btn mobile-icon-btn--deposit ${showDepositAnimation ? 'deposit-pulse' : ''}`}
-                    title="Buy Chips"
-                  >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                      <path d="M12 5v14M5 12h14"/>
-                    </svg>
-                  </button>
-                  <button
-                    onClick={handleCashOutClick}
-                    disabled={deposit.isWithdrawing || gameBalance === 0n}
-                    className="mobile-icon-btn mobile-icon-btn--withdraw"
-                    title="Cash Out"
-                  >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                      <path d="M5 12h14"/>
-                    </svg>
-                  </button>
-                  <button
-                    onClick={() => navigate(isLiquidityRoute ? gameRoute : `${gameRoute}/liquidity`)}
-                    className="mobile-icon-btn mobile-icon-btn--house"
-                    title={isLiquidityRoute ? 'Play Game' : 'Be The House'}
-                  >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M3 12l9-9 9 9"/>
-                      <path d="M5 10v10a1 1 0 001 1h12a1 1 0 001-1V10"/>
-                    </svg>
-                  </button>
-                </div>
-                <div className="mobile-balances-row">
-                  <div className="mobile-balances-text">
-                    <div className="balance-row">
-                      <span className="balance-label">CHIPS</span>
-                      <span className="balance-value text-highlight">{formatUSDT(gameBalance)}</span>
-                    </div>
-                    <div className="balance-row">
-                      <span className="balance-label">HOUSE</span>
-                      <span className="balance-value">{formatUSDT(houseBalance)}</span>
-                    </div>
-                  </div>
-                  <button onClick={onBalanceRefresh} className="mobile-refresh-btn" title="Refresh Balances">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            {/* 3-column layout: balances | pot | chips */}
+            <div className="mobile-three-col">
+              {/* LEFT: Balances with bet controls in first row */}
+              <div className="mobile-col-balances">
+                <div className="mobile-bet-row">
+                  <button onClick={onBalanceRefresh} className="mobile-sync-icon" title="Refresh">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                       <path d="M4 12c0-4.4 3.6-8 8-8 3.1 0 5.8 1.8 7.1 4.4M20 12c0 4.4-3.6 8-8 8-3.1 0-5.8-1.8-7.1-4.4"/>
                       <path d="M20 4v4h-4M4 20v-4h4"/>
                     </svg>
                   </button>
+                  <button
+                    onClick={clearBet}
+                    disabled={disabled || betAmount === 0}
+                    className="mobile-bet-ctrl mobile-bet-ctrl--clr"
+                  >
+                    CLR
+                  </button>
+                  <span className="mobile-bet-value">${betAmount.toFixed(2)}</span>
+                  <button
+                    onClick={setMaxBet}
+                    disabled={disabled || atMax}
+                    className="mobile-bet-ctrl mobile-bet-ctrl--max"
+                  >
+                    MAX
+                  </button>
                 </div>
+                <button
+                  onClick={deposit.openModal}
+                  className={`balance-row-btn balance-row-btn--chips ${showDepositAnimation ? 'deposit-pulse' : ''}`}
+                  title="Deposit / Withdraw"
+                >
+                  <span className="balance-icon balance-icon--plusminus">+/-</span>
+                  <span className="balance-label">CHIPS</span>
+                  <span className="balance-value text-highlight">{formatUSDT(gameBalance)}</span>
+                </button>
+                <button
+                  onClick={() => navigate('/liquidity')}
+                  className="balance-row-btn balance-row-btn--house"
+                  title="Be The House"
+                >
+                  <span className="balance-icon balance-icon--house">⌂</span>
+                  <span className="balance-label">HOUSE</span>
+                  <span className="balance-value">{formatUSDT(houseBalance)}</span>
+                </button>
               </div>
 
-              {/* CENTER COLUMN: Circular chip pile */}
-              <div className="mobile-col-center">
+              {/* CENTER: Chip pile only */}
+              <div className="mobile-col-pot">
                 <ChipStack
                   amount={betAmount}
                   onRemoveChip={removeChip}
                   disabled={disabled}
                   layout="circular"
-                  circleSize={125}
+                  circleSize={100}
+                  showBetControls={false}
                 />
               </div>
 
-              {/* RIGHT COLUMN: Bet display on top, chip selector below */}
-              <div className="mobile-col-right">
-                <div className="mobile-bet-display">
-                  <button
-                    onClick={clearBet}
-                    disabled={disabled || betAmount === 0}
-                    className="mobile-clr-btn"
-                  >
-                    CLR
-                  </button>
-                  <span className="amount">${betAmount.toFixed(2)}</span>
-                  <button
-                    onClick={setMaxBet}
-                    disabled={disabled || atMax}
-                    className="mobile-max-btn"
-                  >
-                    MAX
-                  </button>
-                </div>
-                <div className="mobile-chips-scroll">
-                  <ChipSelector
-                    onAddChip={addChip}
-                    canAddChip={canAddChip}
-                    disabled={disabled}
-                    size="mobile"
-                    variant="compact"
-                  />
-                </div>
+              {/* RIGHT: Chip selector vertical */}
+              <div className="mobile-col-chips">
+                <ChipSelector
+                  onAddChip={addChip}
+                  canAddChip={canAddChip}
+                  disabled={disabled}
+                  size="sm"
+                  variant="compact"
+                  layout="vertical"
+                />
               </div>
             </div>
           </div>

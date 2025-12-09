@@ -18,7 +18,6 @@ export interface GameConfig {
   // Routes
   routes: {
     base: string;
-    liquidity: string;
   };
 
   // Liquidity config
@@ -39,7 +38,7 @@ export const GAME_REGISTRY: Record<string, GameConfig> = {
     name: 'Dice',
     icon: '🎲',
     canisterId: 'whchi-hyaaa-aaaao-a4ruq-cai',
-    routes: { base: '/dice', liquidity: '/dice/liquidity' },
+    routes: { base: '/dice' },
     liquidity: { enabled: true, minDeposit: 10, hasStatistics: true, withdrawalFeePercent: 1 },
     theme: {
       primary: 'dfinity-turquoise',
@@ -52,7 +51,7 @@ export const GAME_REGISTRY: Record<string, GameConfig> = {
     name: 'Plinko',
     icon: '🔴',
     canisterId: 'weupr-2qaaa-aaaap-abl3q-cai',
-    routes: { base: '/plinko', liquidity: '/plinko/liquidity' },
+    routes: { base: '/plinko' },
     liquidity: { enabled: true, minDeposit: 10, hasStatistics: true, withdrawalFeePercent: 1 },
     theme: {
       primary: 'orange-500',
@@ -65,8 +64,8 @@ export const GAME_REGISTRY: Record<string, GameConfig> = {
     name: 'Blackjack',
     icon: '🃏',
     canisterId: 'wvrcw-3aaaa-aaaah-arm4a-cai',
-    routes: { base: '/blackjack', liquidity: '/blackjack/liquidity' },
-    liquidity: { enabled: true, minDeposit: 10, hasStatistics: true, withdrawalFeePercent: 1 },
+    routes: { base: '/blackjack' },
+    liquidity: { enabled: false, minDeposit: 10, hasStatistics: false, withdrawalFeePercent: 1 },
     theme: {
       primary: 'green-500',
       accent: 'emerald-400',

@@ -65,10 +65,6 @@ fn take_snapshot_internal(acc: &DailyAccumulator) -> Option<u64> {
     });
 
     if let Some(reserve) = existing_reserve {
-        ic_cdk::println!(
-            "Snapshot already exists for day={}, skipping duplicate",
-            acc.day_start
-        );
         // Return the existing snapshot's reserve for consistency
         return Some(reserve);
     }
@@ -90,11 +86,6 @@ fn take_snapshot_internal(acc: &DailyAccumulator) -> Option<u64> {
     DAILY_SNAPSHOTS.with(|snapshots| {
         snapshots.borrow_mut().push(&snapshot);
     });
-
-    ic_cdk::println!(
-        "Daily snapshot taken: day={}, reserve={}, profit={}, volume={}, share_price={}",
-        acc.day_start, current_reserve, daily_profit, acc.volume_accumulated, share_price
-    );
 
     Some(current_reserve)
 }
