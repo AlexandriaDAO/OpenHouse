@@ -141,6 +141,13 @@ fn init() {
     defi_accounting::accounting::start_parent_withdrawal_timer();
     defi_accounting::accounting::start_balance_reconciliation_timer();
     defi_accounting::start_stats_timer();
+
+    // Initialize cached balance on fresh install using a one-shot timer
+    // (spawn not allowed in init mode)
+    ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
+        defi_accounting::accounting::refresh_canister_balance().await;
+        ic_cdk::println!("Init: balance cache initialized");
+    });
 }
 
 #[pre_upgrade]
@@ -154,6 +161,15 @@ fn post_upgrade() {
     defi_accounting::accounting::start_parent_withdrawal_timer();
     defi_accounting::accounting::start_balance_reconciliation_timer();
     defi_accounting::start_stats_timer();
+
+    // Initialize cached balance immediately after upgrade using a one-shot timer
+    // This prevents games being blocked until hourly reconciliation
+    // (spawn not allowed in post_upgrade mode)
+    ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
+        defi_accounting::accounting::refresh_canister_balance().await;
+        ic_cdk::println!("Post-upgrade: balance cache initialized");
+    });
+
     ic_cdk::println!("Post-upgrade: timers restarted");
 }
 
