@@ -44,6 +44,19 @@ export class PlinkoPhysicsEngine {
   private static PIN_CATEGORY = 0x0001;
   private static BALL_CATEGORY = 0x0002;
 
+  // Bucket geometry for unified physics
+  private bucketWalls: Matter.Body[] = [];
+  private bucketGate: Matter.Body | null = null;
+  private isBucketOpen = false;
+
+  // Bucket dimensions (matching TunnelPhysicsEngine for consistency)
+  private static BUCKET = {
+    TOP_Y: 5,
+    BOTTOM_Y: 70,
+    WIDTH: 140,
+    GATE_HEIGHT: 4,
+  };
+
   // Ball friction by row count (from open source, tuned for expected payout)
   private static frictionAirByRowCount: Record<number, number> = {
     8: 0.0395,
@@ -67,6 +80,7 @@ export class PlinkoPhysicsEngine {
     this.runner = Matter.Runner.create();
 
     this.placePinsAndWalls();
+    this.createBucket();
     this.createSensor();
     this.setupCollisionHandling();
   }
@@ -171,6 +185,158 @@ export class PlinkoPhysicsEngine {
 
     this.walls = [leftWall, rightWall];
     Matter.Composite.add(this.engine.world, this.walls);
+  }
+
+  /**
+   * Create bucket geometry (walls + gate) for ball filling phase.
+   * Balls drop into this bucket and are released when gate opens.
+   */
+  private createBucket() {
+    const { BUCKET, PIN_CATEGORY } = PlinkoPhysicsEngine;
+    const centerX = this.options.width / 2;
+    const boxHeight = BUCKET.BOTTOM_Y - BUCKET.TOP_Y;
+    const halfWidth = BUCKET.WIDTH / 2;
+
+    // Left wall (vertical)
+    const leftWall = Matter.Bodies.rectangle(
+      centerX - halfWidth - 4,
+      BUCKET.TOP_Y + boxHeight / 2,
+      8,
+      boxHeight + 40, // Extra height to catch balls from above
+      {
+        isStatic: true,
+        collisionFilter: {
+          category: PIN_CATEGORY,
+          mask: PlinkoPhysicsEngine.BALL_CATEGORY,
+        },
+        label: 'bucket_left_wall',
+      }
+    );
+
+    // Right wall (vertical)
+    const rightWall = Matter.Bodies.rectangle(
+      centerX + halfWidth + 4,
+      BUCKET.TOP_Y + boxHeight / 2,
+      8,
+      boxHeight + 40,
+      {
+        isStatic: true,
+        collisionFilter: {
+          category: PIN_CATEGORY,
+          mask: PlinkoPhysicsEngine.BALL_CATEGORY,
+        },
+        label: 'bucket_right_wall',
+      }
+    );
+
+    // Bottom gate (closed initially)
+    const gate = Matter.Bodies.rectangle(
+      centerX,
+      BUCKET.BOTTOM_Y - BUCKET.GATE_HEIGHT / 2,
+      BUCKET.WIDTH + 20,
+      BUCKET.GATE_HEIGHT + 4,
+      {
+        isStatic: true,
+        collisionFilter: {
+          category: PIN_CATEGORY,
+          mask: PlinkoPhysicsEngine.BALL_CATEGORY,
+        },
+        label: 'bucket_gate',
+      }
+    );
+
+    this.bucketWalls = [leftWall, rightWall];
+    this.bucketGate = gate;
+    Matter.Composite.add(this.engine.world, [...this.bucketWalls, gate]);
+  }
+
+  /**
+   * Drop a ball into the bucket from above.
+   * Ball will bounce around in bucket until gate opens.
+   */
+  public dropBallIntoBucket(id: number, delay: number = 0): void {
+    const { BUCKET } = PlinkoPhysicsEngine;
+    const centerX = this.options.width / 2;
+
+    setTimeout(() => {
+      const boxHalfWidth = BUCKET.WIDTH / 2 - this.pinRadius * 2 - 4;
+      const startX = centerX + (Math.random() * 2 - 1) * boxHalfWidth;
+      const startY = -20 - Math.random() * 30; // Start above visible area
+
+      const ball = Matter.Bodies.circle(startX, startY, this.pinRadius * 2, {
+        restitution: 0.4, // Less bouncy in bucket
+        friction: 0.3,
+        frictionAir: 0.02,
+        density: 0.001,
+        collisionFilter: {
+          category: PlinkoPhysicsEngine.BALL_CATEGORY,
+          mask: PlinkoPhysicsEngine.PIN_CATEGORY,
+        },
+        label: `ball_${id}`,
+      });
+
+      // Give slight random initial velocity
+      Matter.Body.setVelocity(ball, {
+        x: (Math.random() - 0.5) * 2,
+        y: 2 + Math.random() * 2,
+      });
+
+      Matter.Composite.add(this.engine.world, ball);
+      this.balls.set(id, ball);
+    }, delay);
+  }
+
+  /**
+   * Open the bucket gate to release all balls onto the peg board.
+   */
+  public openBucket(): void {
+    if (this.bucketGate && !this.isBucketOpen) {
+      Matter.Composite.remove(this.engine.world, this.bucketGate);
+      this.bucketGate = null;
+      this.isBucketOpen = true;
+    }
+  }
+
+  /**
+   * Reset bucket for next round (recreate gate and walls).
+   */
+  public resetBucket(): void {
+    // Remove old walls if exist
+    if (this.bucketWalls.length > 0) {
+      Matter.Composite.remove(this.engine.world, this.bucketWalls);
+    }
+    if (this.bucketGate) {
+      Matter.Composite.remove(this.engine.world, this.bucketGate);
+    }
+    this.bucketWalls = [];
+    this.bucketGate = null;
+    this.isBucketOpen = false;
+
+    // Recreate bucket for next round
+    this.createBucket();
+  }
+
+  /**
+   * Assign a predetermined path to a ball for steering.
+   * Called when backend returns paths, before bucket opens.
+   */
+  public assignPathToBall(id: number, path: boolean[]): void {
+    const targetSlot = path.filter(v => v).length;
+    this.ballTargets.set(id, targetSlot);
+  }
+
+  /**
+   * Check if all balls in bucket have settled (low velocity).
+   */
+  public areBallsSettled(): boolean {
+    const velocityThreshold = 0.3;
+    for (const ball of this.balls.values()) {
+      const speed = Math.sqrt(ball.velocity.x ** 2 + ball.velocity.y ** 2);
+      if (speed > velocityThreshold) {
+        return false;
+      }
+    }
+    return this.balls.size > 0;
   }
 
   private createSensor() {
@@ -503,6 +669,9 @@ export class PlinkoPhysicsEngine {
     this.ballLastPositions.clear();
     this.pins = [];
     this.walls = [];
+    this.bucketWalls = [];
+    this.bucketGate = null;
+    this.isBucketOpen = false;
     this.pinsLastRowXCoords = [];
   }
 

@@ -9,8 +9,13 @@ interface PendingBall {
 
 interface PlinkoPhysicsBallsProps {
   rows: number;
-  pendingBalls: PendingBall[];
-  initialStates?: Map<number, { x: number; y: number; vx: number; vy: number }>;
+  // Filling phase props
+  isFilling?: boolean;
+  fillBallCount?: number;
+  onFillingComplete?: () => void;
+  // Releasing/playing phase props
+  isReleasing?: boolean;
+  pendingBalls?: PendingBall[];
   onAllBallsLanded: () => void;
   onBallLanded?: (slotIndex: number) => void;
   staggerMs?: number;
@@ -18,17 +23,22 @@ interface PlinkoPhysicsBallsProps {
 
 export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
   rows,
-  pendingBalls,
-  initialStates,
+  isFilling = false,
+  fillBallCount = 0,
+  onFillingComplete,
+  isReleasing = false,
+  pendingBalls = [],
   onAllBallsLanded,
   onBallLanded,
   staggerMs = PLINKO_LAYOUT.BALL_STAGGER_MS,
 }) => {
   const engineRef = useRef<PlinkoPhysicsEngine | null>(null);
   const [ballStates, setBallStates] = useState<Map<number, BallState>>(new Map());
-  const droppedBallsRef = useRef<Set<number>>(new Set());
   const landedBallsRef = useRef<Set<number>>(new Set());
   const totalBallsRef = useRef<number>(0);
+  const hasStartedFillingRef = useRef(false);
+  const settleCheckIntervalRef = useRef<number | null>(null);
+  const hasNotifiedSettledRef = useRef(false);
 
   // Initialize physics engine
   useEffect(() => {
@@ -69,30 +79,84 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
     return () => {
       engine.destroy();
       engineRef.current = null;
+      if (settleCheckIntervalRef.current) {
+        clearInterval(settleCheckIntervalRef.current);
+        settleCheckIntervalRef.current = null;
+      }
     };
   }, [rows, onAllBallsLanded, onBallLanded]);
 
-  // Drop balls with stagger
+  // Handle filling phase - drop balls into bucket
   useEffect(() => {
-    if (!engineRef.current || pendingBalls.length === 0) return;
+    if (isFilling && fillBallCount > 0 && engineRef.current && !hasStartedFillingRef.current) {
+      hasStartedFillingRef.current = true;
+      hasNotifiedSettledRef.current = false;
+      totalBallsRef.current = fillBallCount;
+      landedBallsRef.current = new Set();
 
-    // Reset tracking for new batch
-    droppedBallsRef.current = new Set();
-    landedBallsRef.current = new Set();
-    totalBallsRef.current = pendingBalls.length;
+      // Drop balls into bucket with stagger
+      for (let i = 0; i < fillBallCount; i++) {
+        engineRef.current.dropBallIntoBucket(i, i * staggerMs);
+      }
 
-    // Drop each ball with stagger delay
-    pendingBalls.forEach((ball, index) => {
-      setTimeout(() => {
-        if (engineRef.current && !droppedBallsRef.current.has(ball.id)) {
-          droppedBallsRef.current.add(ball.id);
-          // Get initial state if available
-          const initialState = initialStates?.get(ball.id);
-          engineRef.current.dropBall(ball.id, ball.path, initialState);
+      // Start checking if balls have settled
+      settleCheckIntervalRef.current = window.setInterval(() => {
+        if (engineRef.current && !hasNotifiedSettledRef.current) {
+          if (engineRef.current.areBallsSettled()) {
+            hasNotifiedSettledRef.current = true;
+            onFillingComplete?.();
+          }
         }
-      }, index * staggerMs);
-    });
-  }, [pendingBalls, staggerMs, initialStates]);
+      }, 100);
+    }
+  }, [isFilling, fillBallCount, staggerMs, onFillingComplete]);
+
+  // Handle release phase - open bucket and assign paths
+  useEffect(() => {
+    if (isReleasing && pendingBalls && pendingBalls.length > 0 && engineRef.current) {
+      // Clear settle check interval
+      if (settleCheckIntervalRef.current) {
+        clearInterval(settleCheckIntervalRef.current);
+        settleCheckIntervalRef.current = null;
+      }
+
+      // Assign paths to balls before opening bucket
+      pendingBalls.forEach((ball) => {
+        engineRef.current?.assignPathToBall(ball.id, ball.path);
+      });
+
+      // Open bucket gate - balls fall naturally through pegs
+      engineRef.current.openBucket();
+    }
+  }, [isReleasing, pendingBalls]);
+
+  // Reset when not filling and not releasing (game ended)
+  useEffect(() => {
+    if (!isFilling && !isReleasing && engineRef.current) {
+      // Only reset if we previously started
+      if (hasStartedFillingRef.current) {
+        hasStartedFillingRef.current = false;
+        hasNotifiedSettledRef.current = false;
+
+        // Clear any leftover settle check
+        if (settleCheckIntervalRef.current) {
+          clearInterval(settleCheckIntervalRef.current);
+          settleCheckIntervalRef.current = null;
+        }
+
+        // Reset bucket for next round
+        engineRef.current.resetBucket();
+      }
+    }
+  }, [isFilling, isReleasing]);
+
+  // Bucket dimensions for clipping during fill phase
+  const BUCKET = {
+    TOP_Y: 5,
+    BOTTOM_Y: 70,
+    WIDTH: 140,
+  };
+  const centerX = PLINKO_LAYOUT.BOARD_WIDTH / 2;
 
   return (
     <g>
@@ -110,12 +174,30 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
         <filter id="physicsBallShadow" x="-50%" y="-50%" width="200%" height="200%">
           <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="#000" floodOpacity="0.3" />
         </filter>
+
+        {/* Clip path for bucket area during filling */}
+        <clipPath id="bucketClip">
+          <rect
+            x={centerX - BUCKET.WIDTH / 2}
+            y={BUCKET.TOP_Y}
+            width={BUCKET.WIDTH}
+            height={BUCKET.BOTTOM_Y - BUCKET.TOP_Y}
+          />
+        </clipPath>
       </defs>
 
-      {/* Render each ball */}
-      {Array.from(ballStates.entries()).map(([id, state]) => (
-        <PhysicsBall key={id} state={state} />
-      ))}
+      {/* Render balls - clip to bucket during filling, full view when releasing */}
+      {isFilling && !isReleasing ? (
+        <g clipPath="url(#bucketClip)">
+          {Array.from(ballStates.entries()).map(([id, state]) => (
+            <PhysicsBall key={id} state={state} />
+          ))}
+        </g>
+      ) : (
+        Array.from(ballStates.entries()).map(([id, state]) => (
+          <PhysicsBall key={id} state={state} />
+        ))
+      )}
     </g>
   );
 };
