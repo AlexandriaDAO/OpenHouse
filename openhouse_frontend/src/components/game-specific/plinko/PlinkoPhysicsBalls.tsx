@@ -169,13 +169,19 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
     }
   }, [isFilling, isReleasing]);
 
-  // Bucket dimensions for clipping during fill phase
+  // Calculate bucket dimensions for clipping during fill phase
+  // Must match the physics engine bucket calculation
+  const centerX = PLINKO_LAYOUT.BOARD_WIDTH / 2;
+  const pinDistanceX = (PLINKO_LAYOUT.BOARD_WIDTH - PLINKO_LAYOUT.PADDING_X * 2) / (2 + rows);
+  const rowPaddingX = PLINKO_LAYOUT.PADDING_X + ((rows - 1) * pinDistanceX) / 2;
+  const firstRowSpan = (PLINKO_LAYOUT.BOARD_WIDTH - rowPaddingX * 2);
+  const bucketWidth = Math.min(140, firstRowSpan - 20);
+
   const BUCKET = {
     TOP_Y: 5,
     BOTTOM_Y: 70,
-    WIDTH: 140,
+    WIDTH: bucketWidth,
   };
-  const centerX = PLINKO_LAYOUT.BOARD_WIDTH / 2;
 
   return (
     <g>

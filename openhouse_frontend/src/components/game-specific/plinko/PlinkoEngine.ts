@@ -190,12 +190,24 @@ export class PlinkoPhysicsEngine {
   /**
    * Create bucket geometry (walls + gate) for ball filling phase.
    * Balls drop into this bucket and are released when gate opens.
+   * Bucket width is calculated to fit within the first row of pins.
    */
   private createBucket() {
     const { BUCKET, PIN_CATEGORY } = PlinkoPhysicsEngine;
-    const centerX = this.options.width / 2;
+    const { rows, width } = this.options;
+    const { PADDING_X, PADDING_TOP } = PLINKO_LAYOUT;
+    const centerX = width / 2;
     const boxHeight = BUCKET.BOTTOM_Y - BUCKET.TOP_Y;
-    const halfWidth = BUCKET.WIDTH / 2;
+
+    // Calculate first row pin positions to size bucket appropriately
+    // First row has 3 pins, we want bucket to fit between them
+    const rowPaddingX = PADDING_X + ((rows - 1) * this.pinDistanceX) / 2;
+    const firstRowFirstPinX = rowPaddingX;
+    const firstRowLastPinX = width - rowPaddingX;
+
+    // Make bucket slightly narrower than first row span (with padding for ball radius)
+    const bucketWidth = Math.min(BUCKET.WIDTH, (firstRowLastPinX - firstRowFirstPinX) - 20);
+    const halfWidth = bucketWidth / 2;
 
     // Left wall (vertical)
     const leftWall = Matter.Bodies.rectangle(
@@ -233,7 +245,7 @@ export class PlinkoPhysicsEngine {
     const gate = Matter.Bodies.rectangle(
       centerX,
       BUCKET.BOTTOM_Y - BUCKET.GATE_HEIGHT / 2,
-      BUCKET.WIDTH + 20,
+      bucketWidth + 20,
       BUCKET.GATE_HEIGHT + 4,
       {
         isStatic: true,
@@ -245,9 +257,72 @@ export class PlinkoPhysicsEngine {
       }
     );
 
-    this.bucketWalls = [leftWall, rightWall];
+    // Add funnel walls to guide balls from bucket to first row of pins
+    // These angled walls connect bucket bottom to peg board walls
+    const funnelTopY = BUCKET.BOTTOM_Y;
+    const funnelBottomY = PADDING_TOP;
+    const funnelHeight = funnelBottomY - funnelTopY;
+
+    // Left funnel - from bucket left edge to first row left pin
+    const leftFunnelAngle = Math.atan2(firstRowFirstPinX - (centerX - halfWidth), funnelHeight);
+    const leftFunnelX = (centerX - halfWidth + firstRowFirstPinX) / 2;
+    const leftFunnelY = (funnelTopY + funnelBottomY) / 2;
+    const leftFunnelLength = Math.sqrt(
+      Math.pow(firstRowFirstPinX - (centerX - halfWidth), 2) + Math.pow(funnelHeight, 2)
+    );
+
+    const leftFunnel = Matter.Bodies.rectangle(
+      leftFunnelX,
+      leftFunnelY,
+      8,
+      leftFunnelLength + 10,
+      {
+        isStatic: true,
+        angle: -leftFunnelAngle,
+        collisionFilter: {
+          category: PIN_CATEGORY,
+          mask: PlinkoPhysicsEngine.BALL_CATEGORY,
+        },
+        label: 'bucket_left_funnel',
+      }
+    );
+
+    // Right funnel - from bucket right edge to first row right pin
+    const rightFunnelX = (centerX + halfWidth + firstRowLastPinX) / 2;
+    const rightFunnel = Matter.Bodies.rectangle(
+      rightFunnelX,
+      leftFunnelY,
+      8,
+      leftFunnelLength + 10,
+      {
+        isStatic: true,
+        angle: leftFunnelAngle,
+        collisionFilter: {
+          category: PIN_CATEGORY,
+          mask: PlinkoPhysicsEngine.BALL_CATEGORY,
+        },
+        label: 'bucket_right_funnel',
+      }
+    );
+
+    this.bucketWalls = [leftWall, rightWall, leftFunnel, rightFunnel];
     this.bucketGate = gate;
     Matter.Composite.add(this.engine.world, [...this.bucketWalls, gate]);
+  }
+
+  /**
+   * Calculate the actual bucket width based on first row pin positions.
+   */
+  private getBucketWidth(): number {
+    const { rows, width } = this.options;
+    const { PADDING_X } = PLINKO_LAYOUT;
+    const { BUCKET } = PlinkoPhysicsEngine;
+
+    const rowPaddingX = PADDING_X + ((rows - 1) * this.pinDistanceX) / 2;
+    const firstRowFirstPinX = rowPaddingX;
+    const firstRowLastPinX = width - rowPaddingX;
+
+    return Math.min(BUCKET.WIDTH, (firstRowLastPinX - firstRowFirstPinX) - 20);
   }
 
   /**
@@ -255,11 +330,11 @@ export class PlinkoPhysicsEngine {
    * Ball will bounce around in bucket until gate opens.
    */
   public dropBallIntoBucket(id: number, delay: number = 0): void {
-    const { BUCKET } = PlinkoPhysicsEngine;
     const centerX = this.options.width / 2;
+    const bucketWidth = this.getBucketWidth();
 
     setTimeout(() => {
-      const boxHalfWidth = BUCKET.WIDTH / 2 - this.pinRadius * 2 - 4;
+      const boxHalfWidth = bucketWidth / 2 - this.pinRadius * 2 - 4;
       const startX = centerX + (Math.random() * 2 - 1) * boxHalfWidth;
       const startY = -20 - Math.random() * 30; // Start above visible area
 
