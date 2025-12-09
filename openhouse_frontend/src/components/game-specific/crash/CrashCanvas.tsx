@@ -9,6 +9,14 @@ interface CrashCanvasProps {
     height?: number;
 }
 
+// Padding to keep rockets visible within canvas bounds
+const CANVAS_PADDING = {
+    left: 30,   // Space for rocket at start
+    right: 30,  // Space for rocket at end
+    top: 25,    // Space for rocket at high multipliers
+    bottom: 25, // Space for rocket at bottom
+};
+
 export const CrashCanvas: React.FC<CrashCanvasProps> = ({
     currentMultiplier,
     isCrashed,
@@ -18,7 +26,8 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
     height = 400
 }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const [rocketPos, setRocketPos] = useState({ x: 0, y: height });
+    // Initial position with padding applied
+    const [rocketPos, setRocketPos] = useState({ x: CANVAS_PADDING.left, y: height - CANVAS_PADDING.bottom });
 
     // Draw graph and update rocket position
     useEffect(() => {
@@ -31,8 +40,18 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
         // Clear canvas
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // Draw grid
-        drawGrid(ctx, canvas.width, canvas.height);
+        // Calculate the usable drawing area (with padding for rockets)
+        const drawArea = {
+            left: CANVAS_PADDING.left,
+            right: canvas.width - CANVAS_PADDING.right,
+            top: CANVAS_PADDING.top,
+            bottom: canvas.height - CANVAS_PADDING.bottom,
+            width: canvas.width - CANVAS_PADDING.left - CANVAS_PADDING.right,
+            height: canvas.height - CANVAS_PADDING.top - CANVAS_PADDING.bottom,
+        };
+
+        // Draw grid (within padded area)
+        drawGrid(ctx, canvas.width, canvas.height, drawArea);
 
         // Draw graph if we have history
         if (history.length > 0) {
@@ -51,16 +70,17 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
 
-            let lastX = 0;
-            let lastY = height;
+            let lastX = drawArea.left;
+            let lastY = drawArea.bottom;
 
             history.forEach((point, index) => {
-                const x = (index / maxX) * width;
+                // Map x to the padded drawing area
+                const x = drawArea.left + (index / maxX) * drawArea.width;
                 // Log scale for Y: log10(1) = 0, log10(100) = 2.
-                // We map 1..100 to height..0
+                // We map 1..100 to bottom..top of the draw area
                 const logMult = Math.log10(point.multiplier);
                 const logMax = Math.log10(100); // Max graph height is 100x
-                const y = height - (Math.min(logMult / logMax, 1) * height);
+                const y = drawArea.bottom - (Math.min(logMult / logMax, 1) * drawArea.height);
 
                 if (index === 0) {
                     ctx.moveTo(x, y);
@@ -77,13 +97,13 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
             // Update rocket position to the tip of the line
             setRocketPos({ x: lastX, y: lastY });
         } else {
-            // Reset rocket
-            setRocketPos({ x: 0, y: height });
+            // Reset rocket to starting position (bottom-left of draw area)
+            setRocketPos({ x: drawArea.left, y: drawArea.bottom });
         }
 
         // Draw crash line ONLY if crashed
         if (isCrashed && crashPoint) {
-            drawCrashLine(ctx, crashPoint, canvas.width, canvas.height);
+            drawCrashLine(ctx, crashPoint, drawArea);
         }
 
     }, [history, isCrashed, crashPoint, width, height]);
@@ -171,16 +191,25 @@ const RocketSVG = () => (
     </svg>
 );
 
-function drawGrid(ctx: CanvasRenderingContext2D, width: number, height: number) {
+interface DrawArea {
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+    width: number;
+    height: number;
+}
+
+function drawGrid(ctx: CanvasRenderingContext2D, canvasWidth: number, canvasHeight: number, drawArea: DrawArea) {
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
     ctx.lineWidth = 1;
 
-    // Horizontal lines (multiplier levels)
+    // Horizontal lines (multiplier levels) - span full canvas width for visual continuity
     for (let i = 0; i <= 4; i++) {
-        const y = height - (i * height / 4);
+        const y = drawArea.bottom - (i * drawArea.height / 4);
         ctx.beginPath();
         ctx.moveTo(0, y);
-        ctx.lineTo(width, y);
+        ctx.lineTo(canvasWidth, y);
         ctx.stroke();
 
         // Label
@@ -194,20 +223,19 @@ function drawGrid(ctx: CanvasRenderingContext2D, width: number, height: number) 
 function drawCrashLine(
     ctx: CanvasRenderingContext2D,
     crashPoint: number,
-    width: number,
-    height: number
+    drawArea: DrawArea
 ) {
     const logMult = Math.log10(crashPoint);
     const logMax = Math.log10(100);
-    const y = height - (Math.min(logMult / logMax, 1) * height);
+    const y = drawArea.bottom - (Math.min(logMult / logMax, 1) * drawArea.height);
 
-    // Red line at crash point
+    // Red line at crash point - span full canvas width
     ctx.strokeStyle = '#ED0047';
     ctx.lineWidth = 2;
     ctx.setLineDash([5, 5]);
     ctx.beginPath();
     ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
+    ctx.lineTo(drawArea.right + CANVAS_PADDING.right, y);
     ctx.stroke();
     ctx.setLineDash([]);
 }
