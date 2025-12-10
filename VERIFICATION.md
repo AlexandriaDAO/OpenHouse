@@ -23,6 +23,7 @@ dfx canister --network ic info CANISTER_ID
 ### Step 2: Build from Source
 
 Prerequisites:
+- [DFX](https://internetcomputer.org/docs/current/developer-docs/setup/install) (IC SDK)
 - Rust 1.91.1 (`rustup install 1.91.1 && rustup default 1.91.1`)
 - wasm32 target (`rustup target add wasm32-unknown-unknown`)
 
@@ -30,22 +31,26 @@ Prerequisites:
 git clone https://github.com/AlexandriaDAO/alexandria.git
 cd alexandria/openhouse
 
-# Build any backend (plinko_backend, crash_backend, blackjack_backend, dice_backend)
-cargo build --release --target wasm32-unknown-unknown --package plinko_backend
+# Build using dfx (adds required candid metadata to WASM)
+dfx build --network ic plinko_backend
 ```
 
 ### Step 3: Compare Hashes
 
 ```bash
-sha256sum target/wasm32-unknown-unknown/release/plinko_backend.wasm
+# The dfx-processed WASM is in .dfx/ic/canisters/<name>/
+sha256sum .dfx/ic/canisters/plinko_backend/plinko_backend.wasm
 ```
 
 The output should match the module hash in the table above (without `0x` prefix).
+
+**Important**: Use `dfx build`, not raw `cargo build`. DFX embeds candid metadata into the WASM, which affects the hash.
 
 ## Build Requirements
 
 For reproducible builds, these settings are required:
 
+- **DFX**: 0.28.0
 - **Rust**: 1.91.1
 - **Cargo.lock**: Committed to repo (locks dependency versions)
 - **Workspace profile** (Cargo.toml):

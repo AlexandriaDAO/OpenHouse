@@ -600,9 +600,18 @@ const InfoModal: React.FC<InfoModalProps> = (props) => {
             </div>
           </div>
 
-          <div className="pt-3 border-t border-gray-700/50">
+          <div className="pt-3 border-t border-gray-700/50 space-y-2">
+            <div>
+              <p className="font-semibold text-white mb-1 text-xs">Verify This Code</p>
+              <p className="text-xs text-gray-400 mb-2">
+                This game runs on the Internet Computer. You can verify the deployed code matches this open-source repository.
+              </p>
+              <div className="bg-black/30 rounded p-2 font-mono text-[10px] text-gray-400 space-y-1">
+                <p><span className="text-gray-500">Canister:</span> <span className="text-white">weupr-2qaaa-aaaap-abl3q-cai</span></p>
+                <p><span className="text-gray-500">Hash:</span> <span className="text-dfinity-turquoise break-all">9a55f67401ca119308a02fc0fd8ce0e26e005ccb99f4cea420fc9d00326a66b0</span></p>
+              </div>
+            </div>
             <p className="text-xs text-gray-400">
-              All game logic is open-source. You can verify the deployed canister's code hash matches this repository.{' '}
               <a
                 href="https://github.com/AlexandriaDAO/alexandria/blob/master/openhouse/VERIFICATION.md"
                 target="_blank"
