@@ -14,6 +14,7 @@ import { BlackjackGame } from './pages/blackjack';
 import { Admin } from './pages/Admin';
 import { Wallet } from './pages/Wallet';
 import { Liquidity } from './pages/Liquidity';
+import { Predict } from './pages/Predict';
 
 function App() {
   return (
@@ -32,6 +33,7 @@ function App() {
                   <Route path="/blackjack" element={<AdminRoute><BlackjackGame /></AdminRoute>} />
                   <Route path="/wallet" element={<Wallet />} />
                   <Route path="/liquidity" element={<Liquidity />} />
+                  <Route path="/predict" element={<Predict />} />
                   <Route path="/admin" element={<Admin />} />
                 </Routes>
               </Layout>

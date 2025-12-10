@@ -604,7 +604,7 @@ const InfoModal: React.FC<InfoModalProps> = (props) => {
             <p className="text-xs text-gray-400">
               All game logic is open-source. You can verify the deployed canister's code hash matches this repository.{' '}
               <a
-                href="https://github.com/AlexandriaDAO/alexandria/tree/master/openhouse/plinko_backend"
+                href="https://github.com/AlexandriaDAO/alexandria/blob/master/openhouse/VERIFICATION.md"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-dfinity-turquoise hover:underline"
