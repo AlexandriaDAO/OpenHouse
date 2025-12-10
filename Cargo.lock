@@ -704,13 +704,9 @@ name = "roulette_backend"
 version = "0.1.0"
 dependencies = [
  "candid",
+ "hex",
  "ic-cdk",
- "ic-cdk-timers",
- "ic-stable-structures",
- "num-bigint",
- "num-traits",
  "serde",
- "serde_json",
  "sha2",
 ]
 
