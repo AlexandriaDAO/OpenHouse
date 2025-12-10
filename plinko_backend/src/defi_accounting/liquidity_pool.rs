@@ -278,9 +278,10 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
         
         let new_shares = current.clone() + shares_to_mint.clone();
 
-        // Sanity check (should never trigger with MAX_LP_DEPOSIT in place)
+        // Logical consistency check - Nat uses arbitrary precision so this cannot
+        // mathematically occur, but we check anyway for defense in depth
         if new_shares < current {
-             ic_cdk::trap("CRITICAL: Share addition wraparound detected");
+             ic_cdk::trap("CRITICAL: Share addition inconsistency detected");
         }
 
         shares_map.insert(caller, StorableNat(new_shares));
@@ -292,9 +293,10 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
         
         let new_reserve = pool_state.reserve.clone() + amount_nat.clone();
 
-        // Sanity check (should never trigger with MAX_LP_DEPOSIT)
+        // Logical consistency check - Nat uses arbitrary precision so this cannot
+        // mathematically occur, but we check anyway for defense in depth
         if new_reserve < pool_state.reserve {
-             return Err("Pool reserve overflow detected".to_string());
+             return Err("Pool reserve inconsistency detected".to_string());
         }
 
         pool_state.reserve = new_reserve;
@@ -366,11 +368,12 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     }
 
     // Calculate fee (1% using basis points for precision)
+    // Note: Overflow is impossible with MAX_LP_DEPOSIT limit, but we handle it gracefully
     let fee_amount = match payout_u64.checked_mul(LP_WITHDRAWAL_FEE_BPS) {
         Some(product) => product / 10_000,
         None => {
-            // Overflow would occur - use saturating arithmetic as fallback
-            u64::MAX / 10_000
+            // Overflow would require withdrawing >9.2 trillion USDT, blocked by MAX_LP_DEPOSIT
+            return Err("Fee calculation overflow - withdrawal amount exceeds safe limits".to_string());
         }
     };
     let lp_amount = payout_u64.saturating_sub(fee_amount);
