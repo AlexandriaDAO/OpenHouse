@@ -51,7 +51,7 @@ export class PlinkoPhysicsEngine {
 
   // Bucket dimensions (matching TunnelPhysicsEngine for consistency)
   private static BUCKET = {
-    TOP_Y: 5,
+    TOP_Y: -50, // Extended up to accommodate tall stacks of balls
     BOTTOM_Y: 70,
     WIDTH: 140,
     GATE_HEIGHT: 4,
@@ -59,6 +59,9 @@ export class PlinkoPhysicsEngine {
 
   // Track expected number of balls for filling phase
   private expectedBallCount: number = 0;
+
+  // Track pending ball creation timeouts to cancel them if needed
+  private pendingBallTimeouts: number[] = [];
 
   // Ball friction by row count (from open source, tuned for expected payout)
   private static frictionAirByRowCount: Record<number, number> = {
@@ -293,7 +296,7 @@ export class PlinkoPhysicsEngine {
 
     console.log(`[PlinkoEngine] Scheduling ball ${id} to drop in ${delay}ms (bucket width: ${bucketWidth})`);
 
-    setTimeout(() => {
+    const timeoutId = window.setTimeout(() => {
       const boxHalfWidth = bucketWidth / 2 - this.pinRadius * 2 - 4;
       const startX = centerX + (Math.random() * 2 - 1) * boxHalfWidth;
       // Start balls at top of visible bucket area (y=0 to y=20)
@@ -325,6 +328,8 @@ export class PlinkoPhysicsEngine {
       this.balls.set(id, ball);
       console.log(`[PlinkoEngine] Ball ${id} added. Total balls in world: ${this.balls.size}`);
     }, delay);
+
+    this.pendingBallTimeouts.push(timeoutId);
   }
 
   /**
@@ -352,10 +357,34 @@ export class PlinkoPhysicsEngine {
   }
 
   /**
+   * Clear all balls from the world and reset tracking.
+   * Cancels any pending ball creations.
+   */
+  public clearAllBalls(): void {
+    console.log('[PlinkoEngine] clearAllBalls called');
+    
+    // Cancel pending timeouts
+    this.pendingBallTimeouts.forEach(id => clearTimeout(id));
+    this.pendingBallTimeouts = [];
+
+    // Remove all balls from world
+    for (const ball of this.balls.values()) {
+      Matter.Composite.remove(this.engine.world, ball);
+    }
+    
+    this.balls.clear();
+    this.ballTargets.clear();
+    this.ballLastPositions.clear();
+  }
+
+  /**
    * Reset bucket for next round (recreate gate and walls).
    */
   public resetBucket(): void {
     console.log('[PlinkoEngine] resetBucket called');
+    // Ensure no leftover balls
+    this.clearAllBalls();
+
     // Remove old walls if exist
     if (this.bucketWalls.length > 0) {
       Matter.Composite.remove(this.engine.world, this.bucketWalls);

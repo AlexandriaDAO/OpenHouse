@@ -117,6 +117,12 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
     if (justStartedFilling) {
       hasStartedFillingRef.current = false;
       console.log('[PlinkoPhysicsBalls] Filling started fresh, resetting hasStartedFillingRef');
+
+      // Clear any previous state from engine and React
+      if (engineRef.current) {
+        engineRef.current.clearAllBalls();
+        setBallStates(new Map());
+      }
     }
 
     if (isFilling && fillBallCount > 0 && engineRef.current && !hasStartedFillingRef.current) {
@@ -198,7 +204,7 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
   const bucketWidth = Math.min(140, firstRowSpan - 20);
 
   const BUCKET = {
-    TOP_Y: -5,   // Extended up to show balls as they spawn
+    TOP_Y: -50,   // Extended up to show balls as they spawn
     BOTTOM_Y: 72,  // Slightly extended to show full bucket
     WIDTH: bucketWidth,
   };
