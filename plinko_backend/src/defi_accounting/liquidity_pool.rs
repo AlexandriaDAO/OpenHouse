@@ -259,9 +259,9 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
     // Update user shares
     LP_SHARES.with(|shares| {
         // Handle initial burn if needed (only if this is the FIRST deposit)
-        // Note: We check total_shares again inside the block to be safe, 
+        // Note: We check total_shares again inside the block to be safe,
         // though the calculation logic already accounted for the burn subtraction.
-        // However, we need to physically insert the burned shares into the map 
+        // However, we need to physically insert the burned shares into the map
         // if this is indeed the first deposit.
         let total_shares = shares.borrow()
             .iter()
@@ -275,17 +275,18 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
 
         let mut shares_map = shares.borrow_mut();
         let current = shares_map.get(&caller).map_or(Nat::from(0u64), |s| s.0);
-        
+
         let new_shares = current.clone() + shares_to_mint.clone();
 
         // Logical consistency check - Nat uses arbitrary precision so this cannot
         // mathematically occur, but we check anyway for defense in depth
         if new_shares < current {
-             ic_cdk::trap("CRITICAL: Share addition inconsistency detected");
+             return Err("Share addition inconsistency detected".to_string());
         }
 
         shares_map.insert(caller, StorableNat(new_shares));
-    });
+        Ok::<(), String>(())
+    })?;
 
     // Update pool reserve
     POOL_STATE.with(|state| {

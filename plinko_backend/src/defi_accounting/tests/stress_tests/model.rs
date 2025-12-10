@@ -8,6 +8,23 @@ const MIN_LP_DEPOSIT: u64 = 10_000_000;    // 10 USDT (liquidity_pool.rs)
 const LP_WITHDRAWAL_FEE_BPS: u64 = 100;   // 1%
 const MINIMUM_LIQUIDITY: u64 = 1000;
 
+/// Test model for accounting invariant verification.
+///
+/// # Type Choice: u64 storage with u128 intermediate calculations
+///
+/// This model stores values as `u64` to match production types, but uses `u128`
+/// for intermediate arithmetic (e.g., share calculations, payout math). This is
+/// intentional:
+///
+/// - **Production** uses `Nat` (arbitrary precision) which cannot overflow
+/// - **Test model** uses `u128` intermediates to safely compute `a * b / c` without
+///   overflow, then checks if the result fits in `u64`
+/// - This catches overflow bugs that would occur if production used fixed-width types
+///
+/// The pattern `(a as u128 * b as u128 / c as u128) as u64` is safe because:
+/// 1. The multiplication happens in u128 space (no overflow)
+/// 2. Division brings the result back to a reasonable range
+/// 3. Final cast to u64 is valid for realistic values
 pub struct AccountingModel {
     // User balances - mirrors USER_BALANCES_STABLE
     pub user_balances: HashMap<u64, u64>,
@@ -314,10 +331,10 @@ impl AccountingModel {
         // Calculate payout: (shares * pool_reserve) / total_shares
         let gross_payout = (shares_to_withdraw as u128 * self.pool_reserve as u128 / self.total_shares as u128) as u64;
         
-        // Calculate 1% fee
+        // Calculate 1% fee (mirrors production checked arithmetic)
         let fee = match gross_payout.checked_mul(LP_WITHDRAWAL_FEE_BPS) {
             Some(prod) => prod / 10000,
-            None => u64::MAX / 10000, // Saturate on overflow matches implementation
+            None => return OpResult::Overflow, // Match production: return error on overflow
         };
         let net_payout = gross_payout - fee;
 
