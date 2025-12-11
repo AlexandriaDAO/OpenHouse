@@ -6,7 +6,7 @@ use serde::Serialize;
 // =============================================================================
 
 pub const DECIMALS_PER_CKUSDT: u64 = 1_000_000; // 1 ckUSDT = 1,000,000 decimals (6 decimals)
-pub const MIN_BET: u64 = 100_000; // 0.1 USDT
+pub const MIN_BET: u64 = 100_000; // 0.1 USDT (crash has higher min bet than plinko)
 pub const CKUSDT_CANISTER_ID: &str = "cngnf-vqaaa-aaaar-qag4q-cai";
 pub const CKUSDT_TRANSFER_FEE: u64 = 10_000; // 0.01 USDT
 

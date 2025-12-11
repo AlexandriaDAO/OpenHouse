@@ -1,8 +1,8 @@
-//! Simple Crash Game - Transparent Formula Casino Game
+//! Crash Game with DeFi Integration - Real ckUSDT Betting
 //!
 //! **Design Philosophy:**
 //! Stateless crash point generation using transparent mathematical formula
-//! for provably fair 1% house edge.
+//! for provably fair 1% house edge, integrated with liquidity pool for real betting.
 //!
 //! **The Formula:**
 //! crash = 0.99 / (1.0 - random)
@@ -16,15 +16,13 @@
 //! - Randomness: IC VRF (raw_rand) - no fallback
 //! - Expected value: Exactly 0.99 (1% house edge)
 //! - All crash points independently verifiable
-//! - No state, no rounds, no complex mechanics
+//! - Real ckUSDT betting with liquidity pool backing
 
 use candid::{CandidType, Deserialize, Principal};
 use ic_cdk::{init, pre_upgrade, post_upgrade, query, update};
-use ic_cdk::management_canister::raw_rand;
 use ic_stable_structures::memory_manager::{MemoryManager, VirtualMemory};
 use ic_stable_structures::DefaultMemoryImpl;
 use std::cell::RefCell;
-use std::time::Duration;
 
 // ============================================================================
 // MODULE DECLARATIONS
@@ -34,7 +32,7 @@ mod defi_accounting;
 pub mod types;
 pub mod game;
 
-pub use game::{PlayCrashResult, MultiCrashResult};
+pub use game::{PlayCrashResult, MultiCrashResult, SingleRocketResult};
 
 // ============================================================================
 // MEMORY MANAGEMENT
@@ -47,11 +45,15 @@ thread_local! {
         RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
 }
 
-// ============================================================================
-// CONSTANTS
-// ============================================================================
-
+// Constants
 const MAX_CRASH: f64 = 100.0;
+
+// Legacy result types (for non-betting pure game endpoints)
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct CrashResult {
+    pub crash_point: f64,
+    pub randomness_hash: String,
+}
 
 // ============================================================================
 // LIFECYCLE HOOKS
@@ -65,7 +67,8 @@ fn init() {
     defi_accounting::start_stats_timer();
 
     // Initialize cached balance on fresh install using a one-shot timer
-    ic_cdk_timers::set_timer(Duration::ZERO, async {
+    // (spawn not allowed in init mode)
+    ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
         defi_accounting::accounting::refresh_canister_balance().await;
         ic_cdk::println!("Init: balance cache initialized");
     });
@@ -84,7 +87,9 @@ fn post_upgrade() {
     defi_accounting::start_stats_timer();
 
     // Initialize cached balance immediately after upgrade using a one-shot timer
-    ic_cdk_timers::set_timer(Duration::ZERO, async {
+    // This prevents games being blocked until hourly reconciliation
+    // (spawn not allowed in post_upgrade mode)
+    ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
         defi_accounting::accounting::refresh_canister_balance().await;
         ic_cdk::println!("Post-upgrade: balance cache initialized");
     });
@@ -113,9 +118,11 @@ fn is_canister_solvent() -> bool {
 }
 
 // ============================================================================
-// GAME ENDPOINTS (BETTING)
+// GAME ENDPOINTS (BETTING) - BREAKING CHANGE: Now requires bet_amount
 // ============================================================================
 
+/// Play crash game with real ckUSDT bet
+/// BREAKING CHANGE: Now requires bet_amount parameter
 #[update]
 async fn play_crash(bet_amount: u64, target_multiplier: f64) -> Result<PlayCrashResult, String> {
     if !is_canister_solvent() {
@@ -124,12 +131,24 @@ async fn play_crash(bet_amount: u64, target_multiplier: f64) -> Result<PlayCrash
     game::play_crash(bet_amount, target_multiplier, ic_cdk::api::msg_caller()).await
 }
 
+/// Play crash game with multiple rockets
+/// BREAKING CHANGE: Now requires bet_per_rocket parameter
 #[update]
-async fn play_crash_multi(bet_amount: u64, target_multiplier: f64, rocket_count: u8) -> Result<MultiCrashResult, String> {
+async fn play_crash_multi(bet_per_rocket: u64, target_multiplier: f64, rocket_count: u8) -> Result<MultiCrashResult, String> {
     if !is_canister_solvent() {
         return Err("Game temporarily paused - insufficient funds.".to_string());
     }
-    game::play_crash_multi(bet_amount, target_multiplier, rocket_count, ic_cdk::api::msg_caller()).await
+    game::play_crash_multi(bet_per_rocket, target_multiplier, rocket_count, ic_cdk::api::msg_caller()).await
+}
+
+#[query]
+fn get_max_bet() -> u64 {
+    game::get_max_bet()
+}
+
+#[query]
+fn get_max_bet_per_rocket(rocket_count: u8) -> Result<u64, String> {
+    game::get_max_bet_per_rocket(rocket_count)
 }
 
 // =============================================================================
@@ -304,7 +323,7 @@ fn get_stats_count() -> u64 {
 }
 
 // ============================================================================
-// EXISTING QUERY FUNCTIONS (PRESERVED)
+// EXISTING PURE GAME LOGIC (PRESERVED FOR BACKWARDS COMPATIBILITY)
 // ============================================================================
 
 /// Get the crash formula as a string
@@ -316,36 +335,28 @@ fn get_crash_formula() -> String {
 /// Get expected value (should be 0.99)
 #[query]
 fn get_expected_value() -> f64 {
-    0.99  // Theoretical - actual calculation would require integration
+    0.99
 }
-
 
 /// Calculate probability of reaching a specific multiplier
 /// Returns P(crash ≥ target)
 #[query]
 fn get_win_probability(target: f64) -> Result<f64, String> {
-    // Validate input is a finite number
     if !target.is_finite() {
         return Err("Target must be a finite number".to_string());
     }
-
-    // If target < 1.0, crash will always be >= target (since min crash is 1.0)
     if target < 1.0 {
         return Ok(1.0);
     }
-    // If target exceeds max possible crash, probability is 0
     if target > MAX_CRASH {
         return Ok(0.0);
     }
-    // Formula: P(crash ≥ X) = 0.99 / X
     Ok((0.99 / target).min(1.0))
 }
 
 /// Get example crash probabilities for common targets
 #[query]
 fn get_probability_table() -> Vec<(f64, f64)> {
-    // Returns (target, probability) pairs
-    // Using const array to avoid allocations
     const TARGETS: [f64; 8] = [1.1, 1.5, 2.0, 3.0, 5.0, 10.0, 50.0, 100.0];
     TARGETS.iter()
         .map(|&t| (t, get_win_probability(t).unwrap_or(0.0)))
@@ -354,5 +365,80 @@ fn get_probability_table() -> Vec<(f64, f64)> {
 
 #[query]
 fn greet(name: String) -> String {
-    format!("Simple Crash: Transparent 1% edge, {} wins or loses fairly with USDT!", name)
+    format!("Crash Game with DeFi: {} can now bet with real USDT!", name)
+}
+
+// ============================================================================
+// INTERNAL FUNCTIONS (for pure game logic helpers)
+// ============================================================================
+
+/// Calculate crash point using the formula
+/// Exposed for testing only - actual game uses game::calculate_crash_point
+pub fn calculate_crash_point(random: f64) -> f64 {
+    let random = random.max(0.0).min(0.99999);
+    let crash = 0.99 / (1.0 - random);
+    crash.min(MAX_CRASH)
+}
+
+// ============================================================================
+// TESTS
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_crash_formula_at_boundaries() {
+        assert!((calculate_crash_point(0.0) - 0.99).abs() < 0.01);
+        assert!((calculate_crash_point(0.5) - 1.98).abs() < 0.01);
+        assert!((calculate_crash_point(0.9) - 9.9).abs() < 0.1);
+        let high_crash = calculate_crash_point(0.99);
+        assert!((high_crash - 99.0).abs() < 1.0);
+        assert!(high_crash <= MAX_CRASH);
+    }
+
+    #[test]
+    fn test_win_probability_formula() {
+        assert!((get_win_probability(2.0).unwrap() - 0.495).abs() < 0.001);
+        assert!((get_win_probability(10.0).unwrap() - 0.099).abs() < 0.001);
+        assert!((get_win_probability(100.0).unwrap() - 0.0099).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_expected_return_constant_house_edge() {
+        let targets = vec![1.1, 2.0, 5.0, 10.0, 50.0, 100.0];
+        for target in targets {
+            let win_prob = get_win_probability(target).unwrap();
+            let expected_return = win_prob * target;
+            assert!(
+                (expected_return - 0.99).abs() < 0.01,
+                "Target {}: expected return = {}, should be 0.99",
+                target, expected_return
+            );
+        }
+    }
+
+    #[test]
+    fn test_greet() {
+        let result = greet("Alice".to_string());
+        assert!(result.contains("Alice"));
+        assert!(result.contains("USDT"));
+    }
+
+    #[test]
+    fn test_win_probability_edge_cases() {
+        assert_eq!(get_win_probability(0.5).unwrap(), 1.0);
+        assert_eq!(get_win_probability(0.99).unwrap(), 1.0);
+        assert_eq!(get_win_probability(1001.0).unwrap(), 0.0);
+        assert!(get_win_probability(f64::NAN).is_err());
+        assert!(get_win_probability(f64::INFINITY).is_err());
+    }
+
+    #[test]
+    fn test_game_calculate_crash_point() {
+        // Test using game module's function
+        assert!((game::calculate_crash_point(0.0) - 0.99).abs() < 0.01);
+        assert!((game::calculate_crash_point(0.5) - 1.98).abs() < 0.01);
+    }
 }

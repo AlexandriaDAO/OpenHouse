@@ -1,54 +1,144 @@
-use crate::defi_accounting::{self as accounting, liquidity_pool};
-use crate::types::MIN_BET;
 use candid::{CandidType, Deserialize, Principal};
 use ic_cdk::management_canister::raw_rand;
+use crate::types::MIN_BET;
+use crate::defi_accounting::{self as accounting, liquidity_pool};
+use serde::Serialize;
+use sha2::{Sha256, Digest};
 
+// Constants
 const MAX_CRASH: f64 = 100.0;
 const MAX_ROCKETS: u8 = 10;
 
-#[derive(CandidType, Deserialize, Clone, Debug)]
+// Max multiplier for bet validation (100x max crash)
+// This must match MAX_CRASH
+const MAX_MULTIPLIER_SCALE: u64 = 100_000_000; // 100.0 * 1_000_000 (6 decimal precision)
+const MULTIPLIER_SCALE: u64 = 1_000_000; // 6 decimal precision for multiplier
+
+// =============================================================================
+// GAME RESULT TYPES
+// =============================================================================
+
+#[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
 pub struct PlayCrashResult {
-    pub crash_point: f64,              // Where it crashed
-    pub won: bool,                     // Did user win?
-    pub target_multiplier: f64,        // User's target
-    pub payout: u64,                   // Payout in ckUSDT decimals - 6 decimals (0 if lost)
-    pub profit: i64,                   // User profit/loss (+payout - bet)
-    pub bet_amount: u64,               // Original bet amount
-    pub randomness_hash: String,       // IC randomness hash
+    pub crash_point: f64,
+    pub won: bool,
+    pub target_multiplier: f64,
+    pub bet_amount: u64,
+    pub payout: u64,
+    pub profit: i64,
+    pub randomness_hash: String,
 }
 
-#[derive(CandidType, Deserialize, Clone, Debug)]
+#[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
 pub struct SingleRocketResult {
-    pub rocket_index: u8,           // 0-9
-    pub crash_point: f64,           // Where this rocket crashed
-    pub reached_target: bool,       // Did it reach the target?
-    pub payout: u64,                // Payout for this rocket (0 if crashed early)
+    pub rocket_index: u8,
+    pub crash_point: f64,
+    pub reached_target: bool,
+    pub payout: u64,
 }
 
-#[derive(CandidType, Deserialize, Clone, Debug)]
+#[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
 pub struct MultiCrashResult {
-    pub rockets: Vec<SingleRocketResult>,  // Individual results
-    pub target_multiplier: f64,            // Shared target
-    pub rocket_count: u8,                  // How many rockets launched
-    pub rockets_succeeded: u8,             // How many reached target
-    pub total_payout: u64,                 // Sum of all payouts
-    pub total_profit: i64,                 // Total profit/loss
-    pub total_bet: u64,                    // Total bet (bet_amount * count)
-    pub master_randomness_hash: String,    // VRF seed hash for verification
+    pub rockets: Vec<SingleRocketResult>,
+    pub target_multiplier: f64,
+    pub rocket_count: u8,
+    pub rockets_succeeded: u8,
+    pub bet_per_rocket: u64,
+    pub total_bet: u64,
+    pub total_payout: u64,
+    pub net_profit: i64,
+    pub master_randomness_hash: String,
 }
 
-pub async fn play_crash(bet_amount: u64, target_multiplier: f64, caller: Principal)
-    -> Result<PlayCrashResult, String>
-{
+// =============================================================================
+// HELPER FUNCTIONS
+// =============================================================================
+
+/// Calculate max bet based on pool solvency and max potential multiplier
+pub fn calculate_max_bet() -> u64 {
+    let max_allowed = accounting::get_max_allowed_payout();
+    if max_allowed == 0 {
+        return 0;
+    }
+    // max_bet = max_allowed / max_multiplier (100x)
+    // Use u128 to prevent overflow during calculation
+    let numerator = (max_allowed as u128) * (MULTIPLIER_SCALE as u128);
+    let max_bet = numerator / (MAX_MULTIPLIER_SCALE as u128);
+
+    max_bet as u64
+}
+
+/// Calculate payout from bet and multiplier using safe math
+fn calculate_payout(bet_amount: u64, multiplier: f64) -> Result<u64, String> {
+    let payout = (bet_amount as f64) * multiplier;
+    if !payout.is_finite() {
+        return Err("Payout calculation overflow".to_string());
+    }
+    if payout > u64::MAX as f64 {
+        return Err("Payout exceeds u64 limit".to_string());
+    }
+    Ok(payout as u64)
+}
+
+/// Convert VRF bytes to float in range [0.0, 1.0)
+fn bytes_to_float(bytes: &[u8]) -> Result<f64, String> {
+    if bytes.len() < 8 {
+        return Err("Insufficient randomness bytes".to_string());
+    }
+    let mut byte_array = [0u8; 8];
+    byte_array.copy_from_slice(&bytes[0..8]);
+    let random_u64 = u64::from_be_bytes(byte_array);
+    let random = (random_u64 >> 11) as f64 / (1u64 << 53) as f64;
+    Ok(random)
+}
+
+/// Derive an independent float for a specific rocket index
+fn derive_rocket_random(vrf_bytes: &[u8], rocket_index: u8) -> Result<f64, String> {
+    let mut hasher = Sha256::new();
+    hasher.update(vrf_bytes);
+    hasher.update([rocket_index]);
+    let hash = hasher.finalize();
+
+    let mut byte_array = [0u8; 8];
+    byte_array.copy_from_slice(&hash[0..8]);
+    let random_u64 = u64::from_be_bytes(byte_array);
+    let random = (random_u64 >> 11) as f64 / (1u64 << 53) as f64;
+    Ok(random)
+}
+
+/// Calculate crash point using the formula: crash = 0.99 / (1.0 - random)
+pub fn calculate_crash_point(random: f64) -> f64 {
+    let random = random.max(0.0).min(0.99999);
+    let crash = 0.99 / (1.0 - random);
+    crash.min(MAX_CRASH)
+}
+
+/// Create SHA256 hash of IC randomness bytes for audit/display
+fn create_randomness_hash(bytes: &[u8]) -> String {
+    let hash_bytes = if bytes.len() >= 32 {
+        &bytes[0..32]
+    } else {
+        bytes
+    };
+    let mut hasher = Sha256::new();
+    hasher.update(hash_bytes);
+    format!("{:x}", hasher.finalize())
+}
+
+// =============================================================================
+// MAIN GAME LOGIC
+// =============================================================================
+
+pub async fn play_crash(bet_amount: u64, target_multiplier: f64, caller: Principal) -> Result<PlayCrashResult, String> {
     // 1. Check user balance
     let user_balance = accounting::get_balance(caller);
     if user_balance < bet_amount {
-        return Err("Insufficient balance for bet".to_string());
+        return Err("INSUFFICIENT_BALANCE".to_string());
     }
 
-    // 2. Validate minimum bet
+    // 2. Validate minimum bet (0.1 USDT)
     if bet_amount < MIN_BET {
-        return Err(format!("Minimum bet is {} ckUSDT", MIN_BET));
+        return Err("Invalid bet: minimum is 0.1 USDT".to_string());
     }
 
     // 3. Validate target multiplier
@@ -63,20 +153,24 @@ pub async fn play_crash(bet_amount: u64, target_multiplier: f64, caller: Princip
     }
 
     // 4. Check max payout against house limit
-    let max_potential_payout = (target_multiplier * bet_amount as f64) as u64;
+    let max_potential_payout = calculate_payout(bet_amount, target_multiplier)?;
     let max_allowed = accounting::get_max_allowed_payout();
     if max_potential_payout > max_allowed {
-        return Err(format!("Potential payout {} exceeds house limit {}", max_potential_payout, max_allowed));
+        return Err("Invalid bet: exceeds house limit".to_string());
     }
 
-    // 5. Get VRF randomness BEFORE deducting (fail-safe)
+    // 5. Get VRF randomness BEFORE deducting balance (fail safe)
     let random_bytes = raw_rand().await
         .map_err(|e| format!("Randomness unavailable: {:?}", e))?;
 
+    if random_bytes.len() < 8 {
+        return Err("Insufficient randomness".to_string());
+    }
+
     // 6. Deduct bet from balance
-    let balance_after = user_balance.checked_sub(bet_amount)
-        .ok_or("Insufficient balance during deduction")?;
-    accounting::update_balance(caller, balance_after)?;
+    let balance_after_bet = user_balance.checked_sub(bet_amount)
+        .ok_or("Balance underflow")?;
+    accounting::update_balance(caller, balance_after_bet)?;
 
     // 7. Record volume for statistics
     crate::defi_accounting::record_bet_volume(bet_amount);
@@ -87,64 +181,57 @@ pub async fn play_crash(bet_amount: u64, target_multiplier: f64, caller: Princip
 
     // 9. Determine outcome
     let won = crash_point >= target_multiplier;
-    let payout = if won { (target_multiplier * bet_amount as f64) as u64 } else { 0 };
+    let payout = if won {
+        calculate_payout(bet_amount, target_multiplier)?
+    } else {
+        0
+    };
     let profit = (payout as i64) - (bet_amount as i64);
 
     // 10. Credit payout to user
     let current_balance = accounting::get_balance(caller);
     let new_balance = current_balance.checked_add(payout)
-        .ok_or("Balance overflow")?;
+        .ok_or("Balance overflow when adding winnings")?;
     accounting::update_balance(caller, new_balance)?;
 
-    // 11. Settle with pool (CRITICAL)
+    // 11. Settle with pool
     if let Err(e) = liquidity_pool::settle_bet(bet_amount, payout) {
-        // Rollback on failure
-        let refund = current_balance.checked_add(bet_amount)
+        // CRITICAL: Rollback if pool settlement fails
+        let refund_balance = current_balance.checked_add(bet_amount)
             .ok_or("Refund calculation overflow")?;
-        accounting::update_balance(caller, refund)?;
-        return Err(format!("Settlement failed: {}", e));
+        accounting::update_balance(caller, refund_balance)?;
+
+        ic_cdk::println!("CRITICAL: Crash payout failure. Refunded {} to {}", bet_amount, caller);
+        return Err(format!("House settlement failed. Bet refunded. Error: {}", e));
     }
 
-    // 12. Return result with randomness hash
+    // 12. Create randomness hash
     let randomness_hash = create_randomness_hash(&random_bytes);
-    Ok(PlayCrashResult { 
-        crash_point, 
-        won, 
-        target_multiplier, 
-        payout, 
-        profit, 
-        bet_amount, 
-        randomness_hash 
+
+    Ok(PlayCrashResult {
+        crash_point,
+        won,
+        target_multiplier,
+        bet_amount,
+        payout,
+        profit,
+        randomness_hash,
     })
 }
 
-pub async fn play_crash_multi(bet_amount: u64, target_multiplier: f64, rocket_count: u8, caller: Principal)
-    -> Result<MultiCrashResult, String>
-{
-    // 1. Validate rocket_count
+pub async fn play_crash_multi(bet_per_rocket: u64, target_multiplier: f64, rocket_count: u8, caller: Principal) -> Result<MultiCrashResult, String> {
+    // 1. Validate inputs
     if rocket_count < 1 {
         return Err("Must launch at least 1 rocket".to_string());
     }
     if rocket_count > MAX_ROCKETS {
         return Err(format!("Maximum {} rockets allowed", MAX_ROCKETS));
     }
-    
-    // 2. Calculate total bet
-    let total_bet = bet_amount.checked_mul(rocket_count as u64)
-        .ok_or("Total bet overflow")?;
-
-    // 3. Check user balance
-    let user_balance = accounting::get_balance(caller);
-    if user_balance < total_bet {
-        return Err("Insufficient balance for total bet".to_string());
+    if bet_per_rocket < MIN_BET {
+        return Err("Invalid bet: minimum is 0.1 USDT per rocket".to_string());
     }
 
-    // 4. Validate minimum bet (per rocket)
-    if bet_amount < MIN_BET {
-        return Err(format!("Minimum bet per rocket is {} ckUSDT", MIN_BET));
-    }
-
-    // 5. Validate target multiplier
+    // Validate target multiplier
     if target_multiplier < 1.01 {
         return Err("Target must be at least 1.01x".to_string());
     }
@@ -155,29 +242,43 @@ pub async fn play_crash_multi(bet_amount: u64, target_multiplier: f64, rocket_co
         return Err("Target must be a finite number".to_string());
     }
 
-    // 6. Check max total payout against house limit
-    let max_payout_per_rocket = (target_multiplier * bet_amount as f64) as u64;
-    let max_total_payout = max_payout_per_rocket.checked_mul(rocket_count as u64)
-        .ok_or("Max payout calculation overflow")?;
-        
-    let max_allowed = accounting::get_max_allowed_payout();
-    if max_total_payout > max_allowed {
-        return Err(format!("Potential total payout {} exceeds house limit {}", max_total_payout, max_allowed));
+    let total_bet = bet_per_rocket.checked_mul(rocket_count as u64)
+        .ok_or("Total bet calculation overflow")?;
+
+    // 2. Check user balance
+    let user_balance = accounting::get_balance(caller);
+    if user_balance < total_bet {
+        return Err("INSUFFICIENT_BALANCE".to_string());
     }
 
-    // 7. Get VRF randomness
+    // 3. Check max payout against house limit
+    // Worst case: all rockets win at target multiplier
+    let max_payout_per_rocket = calculate_payout(bet_per_rocket, target_multiplier)?;
+    let max_potential_payout = max_payout_per_rocket.checked_mul(rocket_count as u64)
+        .ok_or("Max payout calculation overflow")?;
+
+    let max_allowed = accounting::get_max_allowed_payout();
+    if max_potential_payout > max_allowed {
+        return Err("Invalid bet: exceeds house limit for total payout".to_string());
+    }
+
+    // 4. Get VRF randomness
     let random_bytes = raw_rand().await
         .map_err(|e| format!("Randomness unavailable: {:?}", e))?;
 
-    // 8. Deduct total bet
-    let balance_after = user_balance.checked_sub(total_bet)
-        .ok_or("Insufficient balance during deduction")?;
-    accounting::update_balance(caller, balance_after)?;
+    if random_bytes.len() < 32 {
+        return Err("Insufficient randomness".to_string());
+    }
 
-    // 9. Record volume
+    // 5. Deduct total bet
+    let balance_after_bet = user_balance.checked_sub(total_bet)
+        .ok_or("Balance underflow")?;
+    accounting::update_balance(caller, balance_after_bet)?;
+
+    // 6. Record volume
     crate::defi_accounting::record_bet_volume(total_bet);
 
-    // 10. Process rockets
+    // 7. Process each rocket
     let mut rockets = Vec::with_capacity(rocket_count as usize);
     let mut rockets_succeeded: u8 = 0;
     let mut total_payout: u64 = 0;
@@ -188,7 +289,7 @@ pub async fn play_crash_multi(bet_amount: u64, target_multiplier: f64, rocket_co
         let reached_target = crash_point >= target_multiplier;
 
         let payout = if reached_target {
-            (target_multiplier * bet_amount as f64) as u64
+            calculate_payout(bet_per_rocket, target_multiplier)?
         } else {
             0
         };
@@ -196,7 +297,8 @@ pub async fn play_crash_multi(bet_amount: u64, target_multiplier: f64, rocket_co
         if reached_target {
             rockets_succeeded += 1;
         }
-        total_payout += payout;
+        total_payout = total_payout.checked_add(payout)
+            .ok_or("Total payout overflow")?;
 
         rockets.push(SingleRocketResult {
             rocket_index: i,
@@ -205,75 +307,74 @@ pub async fn play_crash_multi(bet_amount: u64, target_multiplier: f64, rocket_co
             payout,
         });
     }
-    
-    let total_profit = (total_payout as i64) - (total_bet as i64);
 
-    // 11. Credit payout
+    // 8. Credit total payout
     let current_balance = accounting::get_balance(caller);
     let new_balance = current_balance.checked_add(total_payout)
-        .ok_or("Balance overflow")?;
+        .ok_or("Balance overflow when adding winnings")?;
     accounting::update_balance(caller, new_balance)?;
 
-    // 12. Settle with pool
+    // 9. Settle with pool
     if let Err(e) = liquidity_pool::settle_bet(total_bet, total_payout) {
-        let refund = current_balance.checked_add(total_bet)
+        // Rollback on failure
+        let refund_balance = current_balance.checked_add(total_bet)
             .ok_or("Refund calculation overflow")?;
-        accounting::update_balance(caller, refund)?;
-        return Err(format!("Settlement failed: {}", e));
+        accounting::update_balance(caller, refund_balance)?;
+
+        ic_cdk::println!("CRITICAL: Multi-rocket payout failure. Refunded {} to {}", total_bet, caller);
+        return Err(format!("House settlement failed. Bet refunded. Error: {}", e));
     }
 
-    // 13. Return result
+    // 10. Aggregate results
+    let net_profit = (total_payout as i64) - (total_bet as i64);
     let master_randomness_hash = create_randomness_hash(&random_bytes);
+
     Ok(MultiCrashResult {
         rockets,
         target_multiplier,
         rocket_count,
         rockets_succeeded,
-        total_payout,
-        total_profit,
+        bet_per_rocket,
         total_bet,
+        total_payout,
+        net_profit,
         master_randomness_hash,
     })
 }
 
-// ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
+/// Get the maximum bet allowed for a single rocket crash game
+pub fn get_max_bet() -> u64 {
+    calculate_max_bet()
+}
 
-fn bytes_to_float(bytes: &[u8]) -> Result<f64, String> {
-    if bytes.len() < 8 {
-        return Err("Insufficient randomness bytes".to_string());
+/// Get the maximum bet per rocket for multi-rocket game
+pub fn get_max_bet_per_rocket(rocket_count: u8) -> Result<u64, String> {
+    if rocket_count == 0 { return Ok(0); }
+
+    let max_allowed = accounting::get_max_allowed_payout();
+    if max_allowed == 0 { return Ok(0); }
+
+    // Max bet = Max Allowed Payout / (Rockets * Max Multiplier)
+    // Use u128 for calculation to prevent overflow
+    let max_allowed_u128 = max_allowed as u128;
+    let rockets_u128 = rocket_count as u128;
+    let scale_u128 = MULTIPLIER_SCALE as u128;
+
+    let numerator = max_allowed_u128.checked_mul(scale_u128)
+        .ok_or("Overflow in max bet calculation")?;
+
+    let denominator = rockets_u128.checked_mul(MAX_MULTIPLIER_SCALE as u128)
+        .ok_or("Overflow in denominator")?;
+
+    if denominator == 0 {
+        return Ok(0);
     }
-    let mut byte_array = [0u8; 8];
-    byte_array.copy_from_slice(&bytes[0..8]);
-    let random_u64 = u64::from_be_bytes(byte_array);
-    let random = (random_u64 >> 11) as f64 / (1u64 << 53) as f64;
-    Ok(random)
-}
 
-fn derive_rocket_random(vrf_bytes: &[u8], rocket_index: u8) -> Result<f64, String> {
-    use sha2::{Sha256, Digest};
-    let mut hasher = Sha256::new();
-    hasher.update(vrf_bytes);
-    hasher.update([rocket_index]); 
-    let hash = hasher.finalize();
-    let mut byte_array = [0u8; 8];
-    byte_array.copy_from_slice(&hash[0..8]);
-    let random_u64 = u64::from_be_bytes(byte_array);
-    let random = (random_u64 >> 11) as f64 / (1u64 << 53) as f64;
-    Ok(random)
-}
+    let max_bet = numerator / denominator;
 
-pub fn calculate_crash_point(random: f64) -> f64 {
-    let random = random.max(0.0).min(0.99999);
-    let crash = 0.99 / (1.0 - random);
-    crash.min(MAX_CRASH)
-}
+    if max_bet > u64::MAX as u128 {
+        return Ok(u64::MAX);
+    }
 
-fn create_randomness_hash(bytes: &[u8]) -> String {
-    use sha2::{Sha256, Digest};
-    let hash_bytes = if bytes.len() >= 32 { &bytes[0..32] } else { bytes };
-    let mut hasher = Sha256::new();
-    hasher.update(hash_bytes);
-    format!("{:x}", hasher.finalize())
+    Ok(max_bet as u64)
 }

@@ -1,10 +1,11 @@
+// Crash Game Result Types
 type PlayCrashResult = record {
   crash_point: float64;
   won: bool;
   target_multiplier: float64;
+  bet_amount: nat64;
   payout: nat64;
   profit: int64;
-  bet_amount: nat64;
   randomness_hash: text;
 };
 
@@ -20,9 +21,10 @@ type MultiCrashResult = record {
   target_multiplier: float64;
   rocket_count: nat8;
   rockets_succeeded: nat8;
-  total_payout: nat64;
-  total_profit: int64;
+  bet_per_rocket: nat64;
   total_bet: nat64;
+  total_payout: nat64;
+  net_profit: int64;
   master_randomness_hash: text;
 };
 
@@ -140,18 +142,24 @@ type AuditEntry = record {
 };
 
 service : {
-  // Existing pure game functions
-  get_crash_formula: () -> (text) query;
-  get_expected_value: () -> (float64) query;
-  get_win_probability: (float64) -> (variant { Ok: float64; Err: text }) query;
-  get_probability_table: () -> (vec record { float64; float64 }) query;
-  greet: (text) -> (text) query;
+  // ============================================================================
+  // CRASH GAME - BETTING ENDPOINTS (BREAKING CHANGE)
+  // ============================================================================
 
-  // NEW: Betting game functions
-  play_crash : (nat64, float64) -> (variant { Ok : PlayCrashResult; Err : text });
-  play_crash_multi : (nat64, float64, nat8) -> (variant { Ok : MultiCrashResult; Err : text });
+  // Play crash with real bet - BREAKING: now requires bet_amount first parameter
+  play_crash: (nat64, float64) -> (variant { Ok: PlayCrashResult; Err: text });
 
-  // NEW: User accounting
+  // Multi-rocket mode - BREAKING: now requires bet_per_rocket first parameter
+  play_crash_multi: (nat64, float64, nat8) -> (variant { Ok: MultiCrashResult; Err: text });
+
+  // Max bet queries
+  get_max_bet: () -> (nat64) query;
+  get_max_bet_per_rocket: (nat8) -> (variant { Ok: nat64; Err: text }) query;
+
+  // ============================================================================
+  // USER ACCOUNTING
+  // ============================================================================
+
   deposit: (nat64) -> (variant { Ok: nat64; Err: text });
   withdraw_all: () -> (variant { Ok: nat64; Err: text });
   retry_withdrawal: () -> (variant { Ok: nat64; Err: text });
@@ -162,7 +170,10 @@ service : {
   get_max_allowed_payout: () -> (nat64) query;
   get_my_withdrawal_status: () -> (opt PendingWithdrawal) query;
 
-  // NEW: LP operations
+  // ============================================================================
+  // LIQUIDITY POOL
+  // ============================================================================
+
   deposit_liquidity: (nat64, opt nat) -> (variant { Ok: nat; Err: text });
   withdraw_all_liquidity: () -> (variant { Ok: nat64; Err: text });
   get_pool_stats: () -> (PoolStats) query;
@@ -172,7 +183,10 @@ service : {
   calculate_shares_preview: (nat64) -> (variant { Ok: nat; Err: text }) query;
   can_accept_bets: () -> (bool) query;
 
-  // NEW: Admin
+  // ============================================================================
+  // ADMIN ENDPOINTS
+  // ============================================================================
+
   admin_health_check: () -> (variant { Ok: HealthCheck; Err: text });
   admin_get_all_pending_withdrawals: () -> (variant { Ok: vec PendingWithdrawalInfo; Err: text }) query;
   admin_get_orphaned_funds_report: (opt nat64) -> (variant { Ok: OrphanedFundsReport; Err: text }) query;
@@ -184,9 +198,22 @@ service : {
   admin_get_audit_log: (nat64, nat64) -> (variant { Ok: vec AuditEntry; Err: text }) query;
   admin_get_audit_log_count: () -> (variant { Ok: nat64; Err: text }) query;
 
-  // NEW: Statistics
+  // ============================================================================
+  // STATISTICS
+  // ============================================================================
+
   get_daily_stats: (nat32) -> (vec DailySnapshot) query;
   get_pool_apy: (opt nat32) -> (ApyInfo) query;
   get_stats_range: (nat64, nat64) -> (vec DailySnapshot) query;
   get_stats_count: () -> (nat64) query;
+
+  // ============================================================================
+  // PURE GAME LOGIC (preserved for transparency)
+  // ============================================================================
+
+  get_crash_formula: () -> (text) query;
+  get_expected_value: () -> (float64) query;
+  get_win_probability: (float64) -> (variant { Ok: float64; Err: text }) query;
+  get_probability_table: () -> (vec record { float64; float64 }) query;
+  greet: (text) -> (text) query;
 }
