@@ -1,618 +1,304 @@
+// European Roulette Game Logic
+
 use crate::types::*;
-use crate::seed::{generate_shuffle_seed, maybe_schedule_seed_rotation};
-use crate::defi_accounting::{self as accounting, liquidity_pool};
-use candid::Principal;
-use ic_stable_structures::{StableBTreeMap, DefaultMemoryImpl};
-use ic_stable_structures::memory_manager::{MemoryId, VirtualMemory};
-use std::cell::RefCell;
-use sha2::Digest;
+use crate::board::*;
+use ic_cdk::management_canister::raw_rand;
+use sha2::{Sha256, Digest};
 
-// =============================================================================
-// CONSTANTS
-// =============================================================================
+const MAX_BETS_PER_SPIN: usize = 20;
 
-const MIN_BET: u64 = 1_000_000; // 1 ckUSDT (assuming 6 decimals, wait. Dice uses 10_000 for 0.01. )
-// Checking dice_backend: DECIMALS_PER_CKUSDT = 1_000_000. MIN_BET = 10_000 (0.01).
-// Plan says MIN_BET: 100_000 (0.1?).
-// Plan says: "MIN_BET: 100_000 // 0.001 ICP (1M = 0.01 ICP)" -> This assumes 100M decimals for ICP.
-// dice_backend uses ckUSDT (6 decimals).
-// The plan says: "1% house edge".
-// I should check what token we are using.
-// dice_backend uses ckUSDT.
-// The plan mentions ICP in comments but `dice_backend` uses ckUSDT logic.
-// I will use `dice_backend` constants if possible or define my own.
-// `dice_backend` has `DECIMALS_PER_CKUSDT = 1_000_000`.
-// I'll set MIN_BET = 10_000 (0.01 USDT) to match Dice, or 100_000 (0.1 USDT).
-// Plan says: "0.01 ICP". ICP has 8 decimals.
-// If we are using ckUSDT, 0.01 USDT is 10,000.
-// I'll stick to 10,000 (0.01 units).
+/// Execute a spin with the given bets
+pub async fn spin(bets: Vec<Bet>) -> Result<SpinResult, String> {
+    // 1. Validate inputs
+    if bets.is_empty() {
+        return Err("No bets placed".to_string());
+    }
+    if bets.len() > MAX_BETS_PER_SPIN {
+        return Err(format!("Maximum {} bets per spin", MAX_BETS_PER_SPIN));
+    }
 
-const DECIMALS: u64 = 1_000_000;
-const MIN_BET_AMOUNT: u64 = 10_000; // 0.01
-const MAX_WIN: u64 = 10_000_000_000; // 10,000.00
-// Memory IDs
-const GAMES_MEMORY_ID: MemoryId = MemoryId::new(40);
-const STATS_MEMORY_ID: MemoryId = MemoryId::new(41);
+    // 2. Validate each bet
+    for bet in &bets {
+        validate_bet(bet)?;
+    }
 
-// =============================================================================
-// STATE
-// =============================================================================
+    // 3. Get VRF randomness from IC
+    let random_bytes = raw_rand().await
+        .map_err(|e| format!("Randomness failed: {:?}", e))?;
 
-thread_local! {
-    static GAMES: RefCell<StableBTreeMap<u64, RouletteGame, VirtualMemory<DefaultMemoryImpl>>> = RefCell::new(
-        StableBTreeMap::init(
-            crate::MEMORY_MANAGER.with(|m| m.borrow().get(GAMES_MEMORY_ID))
-        )
-    );
-    static NEXT_GAME_ID: RefCell<u64> = RefCell::new(1);
-    static STATS: RefCell<StableBTreeMap<u64, GameStats, VirtualMemory<DefaultMemoryImpl>>> = RefCell::new(
-        StableBTreeMap::init(
-            crate::MEMORY_MANAGER.with(|m| m.borrow().get(STATS_MEMORY_ID))
-        )
-    );
-}
-
-// =============================================================================
-// HELPER FUNCTIONS
-// =============================================================================
-
-fn get_next_game_id() -> u64 {
-    NEXT_GAME_ID.with(|id| {
-        let current = *id.borrow();
-        *id.borrow_mut() = current + 1;
-        current
-    })
-}
-
-/// Draw a card from an "infinite shoe" using cryptographic randomness.
-///
-/// # Infinite Shoe Implementation
-/// This implementation uses random-with-replacement card generation,
-/// meaning each card is drawn independently with equal probability.
-/// This is equivalent to an infinite deck where previously drawn cards
-/// do not affect future draws.
-///
-/// ## House Edge Impact
-/// Using an infinite shoe slightly increases the house edge compared to
-/// finite deck roulette:
-/// - Single deck: ~0.17% house edge
-/// - 8-deck shoe: ~0.46% house edge
-/// - Infinite shoe: ~0.47% house edge
-///
-/// The difference is minimal (~0.01%) and acceptable for this implementation.
-/// The infinite shoe simplifies implementation and ensures provable fairness
-/// without needing to track card removal.
-///
-/// ## Fairness Guarantee
-/// Cards are generated using SHA-256 hash of:
-/// - Server seed (from IC VRF)
-/// - Client seed (provided by player)
-/// - Card index (incremented per draw)
-///
-/// This ensures:
-/// 1. Cards cannot be predicted without knowing the server seed
-/// 2. Players can verify fairness after seed rotation
-/// 3. No bias in card distribution (uniform across 52 cards)
-fn draw_card(seed_bytes: &[u8; 32], index: usize) -> Card {
-    // Use seed bytes to pick a card.
-    // We need 1 byte per card (0-51).
-    // If index exceeds 32, we would need more randomness.
-    // For now, we assume we don't draw more than 32 cards per "seed generation".
-    // If we do, we should cycle the hash.
-    
-    // Simple infinite shoe implementation:
-    // byte % 52.
-    // 0-12: Hearts, 13-25: Diamonds, 26-38: Clubs, 39-51: Spades.
-    
-    let byte = seed_bytes[index % 32];
-    // Improve randomness by hashing the seed with index if needed, but simple mod is ok for now
-    // assuming uniform distribution of bytes.
-    // Actually, simple mod 52 on a u8 (0-255) introduces bias.
-    // 255 % 52 = 47. 0-47 appear 5 times, 48-51 appear 4 times.
-    // Bias is small but exists.
-    // Better: use rejection sampling or a larger range.
-    // Let's usage a simple hash of (seed + index) to get a u64 or larger.
-    
-    let mut hasher = sha2::Sha256::new();
-    hasher.update(seed_bytes);
-    hasher.update((index as u64).to_be_bytes());
+    // 4. Generate randomness hash for verification
+    let mut hasher = Sha256::new();
+    hasher.update(&random_bytes);
     let hash = hasher.finalize();
-    let val = u64::from_be_bytes(hash[0..8].try_into().unwrap());
-    
-    let card_idx = (val % 52) as u8;
-    let suit_idx = card_idx / 13;
-    let rank_idx = card_idx % 13;
-    
-    let suit = match suit_idx {
-        0 => Suit::Hearts,
-        1 => Suit::Diamonds,
-        2 => Suit::Clubs,
-        _ => Suit::Spades,
-    };
-    
-    let rank = match rank_idx {
-        0 => Rank::Ace,
-        1 => Rank::Two,
-        2 => Rank::Three,
-        3 => Rank::Four,
-        4 => Rank::Five,
-        5 => Rank::Six,
-        6 => Rank::Seven,
-        7 => Rank::Eight,
-        8 => Rank::Nine,
-        9 => Rank::Ten,
-        10 => Rank::Jack,
-        11 => Rank::Queen,
-        _ => Rank::King,
-    };
-    
-    Card { suit, rank }
+    let randomness_hash = hex::encode(hash);
+
+    // 5. Convert to winning number (0-36)
+    let winning_number = bytes_to_number(&random_bytes);
+    let color = get_color(winning_number);
+
+    // 6. Evaluate each bet
+    let bet_results: Vec<BetResult> = bets.iter()
+        .map(|bet| evaluate_bet(bet, winning_number))
+        .collect();
+
+    // 7. Calculate totals
+    let total_bet: u64 = bets.iter().map(|b| b.amount).sum();
+    let total_payout: u64 = bet_results.iter().map(|r| r.payout).sum();
+    let net_result = total_payout as i64 - total_bet as i64;
+
+    Ok(SpinResult {
+        winning_number,
+        color,
+        bets: bet_results,
+        total_bet,
+        total_payout,
+        net_result,
+        randomness_hash,
+    })
 }
 
-fn update_stats(result: &GameResult) {
-    STATS.with(|s| {
-        let mut stats_map = s.borrow_mut();
-        let mut stats = stats_map.get(&0).unwrap_or_default();
-        stats.total_games += 1;
-        match result {
-            GameResult::PlayerWin => stats.total_player_wins += 1,
-            GameResult::DealerWin => stats.total_dealer_wins += 1,
-            GameResult::Push => stats.total_pushes += 1,
-            GameResult::Roulette => stats.total_roulettes += 1,
+/// Validate a single bet
+fn validate_bet(bet: &Bet) -> Result<(), String> {
+    if bet.amount == 0 {
+        return Err("Bet amount must be > 0".to_string());
+    }
+
+    match &bet.bet_type {
+        BetType::Straight(n) => {
+            if *n > 36 {
+                return Err(format!("Invalid number: {} (must be 0-36)", n));
+            }
         }
-        stats_map.insert(0, stats);
-    });
+        BetType::Split(a, b) => {
+            if *a > 36 || *b > 36 {
+                return Err("Split numbers must be 0-36".to_string());
+            }
+            if !is_valid_split(*a, *b) {
+                return Err(format!("Invalid split: {} and {} are not adjacent", a, b));
+            }
+        }
+        BetType::Street(start) => {
+            if !is_valid_street(*start) {
+                return Err(format!("Invalid street start: {} (must be 1,4,7,...,34)", start));
+            }
+        }
+        BetType::Corner(top_left) => {
+            if !is_valid_corner(*top_left) {
+                return Err(format!("Invalid corner: {}", top_left));
+            }
+        }
+        BetType::SixLine(start) => {
+            if !is_valid_six_line(*start) {
+                return Err(format!("Invalid six line start: {} (must be 1,4,7,...,31)", start));
+            }
+        }
+        BetType::Column(col) => {
+            if *col < 1 || *col > 3 {
+                return Err(format!("Invalid column: {} (must be 1-3)", col));
+            }
+        }
+        BetType::Dozen(dozen) => {
+            if *dozen < 1 || *dozen > 3 {
+                return Err(format!("Invalid dozen: {} (must be 1-3)", dozen));
+            }
+        }
+        // Red, Black, Even, Odd, Low, High - always valid
+        BetType::Red | BetType::Black | BetType::Even |
+        BetType::Odd | BetType::Low | BetType::High => {}
+    }
+
+    Ok(())
 }
 
-// =============================================================================
-// GAME LOGIC
-// =============================================================================
+/// Convert random bytes to a number 0-36
+/// Uses first 8 bytes as u64, mod 37 for fair distribution
+/// Bias is negligible: 37 divides into 2^64 almost evenly
+fn bytes_to_number(bytes: &[u8]) -> u8 {
+    let val = u64::from_be_bytes(bytes[0..8].try_into().unwrap());
+    (val % 37) as u8
+}
 
-pub async fn start_game(bet_amount: u64, client_seed: String, caller: Principal) -> Result<GameStartResult, String> {
-    // 1. Validate
-    if bet_amount < MIN_BET_AMOUNT {
-        return Err(format!("Minimum bet is {:.2}", MIN_BET_AMOUNT as f64 / DECIMALS as f64));
-    }
-
-    if client_seed.len() > 256 {
-        return Err("Client seed too long (max 256 characters)".to_string());
-    }
-    
-    let user_balance = accounting::get_balance(caller);
-    if user_balance < bet_amount {
-        return Err("Insufficient balance".to_string());
-    }
-
-    // Check House Limit
-    let max_payout = (bet_amount as f64 * 2.5) as u64; // Roulette pays 3:2 + bet back = 2.5x
-    let max_allowed = accounting::get_max_allowed_payout();
-    if max_allowed == 0 {
-        return Err("House balance not initialized".to_string());
-    }
-    if max_payout > max_allowed {
-        return Err(format!("Max payout exceeds house limit"));
-    }
-
-    // 2. Deduct bet
-    let balance_after_bet = user_balance.checked_sub(bet_amount).ok_or("Balance error")?;
-    accounting::update_balance(caller, balance_after_bet)?;
-    crate::defi_accounting::record_bet_volume(bet_amount);
-    maybe_schedule_seed_rotation();
-
-    // 3. Generate randomness
-    let (seed_bytes, _, _) = generate_shuffle_seed(&client_seed)?;
-    
-    // 4. Deal cards
-    let p_card1 = draw_card(&seed_bytes, 0);
-    let d_card1 = draw_card(&seed_bytes, 1);
-    let p_card2 = draw_card(&seed_bytes, 2);
-    let d_card2 = draw_card(&seed_bytes, 3); // Hidden
-
-    let mut player_hand = Hand::new();
-    player_hand.add_card(p_card1);
-    player_hand.add_card(p_card2);
-    
-    let mut dealer_hand = Hand::new();
-    dealer_hand.add_card(d_card1.clone());
-    // Hidden card stored separately until reveal
-
-    let is_roulette = player_hand.is_roulette();
-    let can_split = player_hand.can_split();
-    let can_double = true; // Always allowed on first two cards
-    
-    let game_id = get_next_game_id();
-    
-    // Handle Instant Roulette
-    let mut payout = 0;
-    let mut results = vec![None];
-    let mut game_over = false;
-    
-    if is_roulette {
-        // Check if dealer also has roulette?
-        // Standard rule: if dealer showing Ace or Ten, they peek.
-        // If dealer also has roulette, it's a Push.
-        // If dealer doesn't, Player wins 3:2.
-        // For simplicity/fairness in this version:
-        // We reveal dealer card immediately if player has roulette.
-        dealer_hand.add_card(d_card2.clone()); // Reveal
-        if dealer_hand.is_roulette() {
-            // Push
-            payout = bet_amount;
-            results = vec![Some(GameResult::Push)];
-            update_stats(&GameResult::Push);
-        } else {
-            // Player Win 3:2
-            payout = (bet_amount as f64 * 2.5) as u64;
-            results = vec![Some(GameResult::Roulette)];
-            update_stats(&GameResult::Roulette);
+/// Evaluate a bet against the winning number
+fn evaluate_bet(bet: &Bet, winning: u8) -> BetResult {
+    let (won, multiplier) = match &bet.bet_type {
+        BetType::Straight(n) => (*n == winning, 35u64),
+        BetType::Split(a, b) => (*a == winning || *b == winning, 17),
+        BetType::Street(start) => {
+            let nums = get_street_numbers(*start);
+            (nums.contains(&winning), 11)
         }
-        
-        // Settle
-        if payout > 0 {
-             // Settle with pool FIRST
-             if let Err(e) = liquidity_pool::settle_bet(bet_amount, payout) {
-                 // Refund bet on failure
-                 let current_bal = accounting::get_balance(caller);
-                 accounting::update_balance(caller, current_bal + bet_amount)?;
-                 return Err(format!("House cannot afford roulette payout: {}", e));
-             }
-
-             // Pool succeeded - credit user
-             let new_bal = accounting::get_balance(caller) + payout;
-             accounting::update_balance(caller, new_bal)?;
-        } else {
-             // Loss (impossible for Roulette but for general logic)
-             let _ = liquidity_pool::settle_bet(bet_amount, 0);
+        BetType::Corner(top_left) => {
+            let nums = get_corner_numbers(*top_left);
+            (nums.contains(&winning), 8)
         }
-        game_over = true;
-    }
+        BetType::SixLine(start) => {
+            let nums = get_six_line_numbers(*start);
+            (nums.contains(&winning), 5)
+        }
+        BetType::Column(col) => (get_column(winning) == Some(*col), 2),
+        BetType::Dozen(dozen) => (get_dozen(winning) == Some(*dozen), 2),
+        BetType::Red => (get_color(winning) == Color::Red, 1),
+        BetType::Black => (get_color(winning) == Color::Black, 1),
+        BetType::Even => (winning != 0 && winning.is_multiple_of(2), 1),
+        BetType::Odd => (winning != 0 && !winning.is_multiple_of(2), 1),
+        BetType::Low => ((1..=18).contains(&winning), 1),
+        BetType::High => ((19..=36).contains(&winning), 1),
+    };
 
-    let game = RouletteGame {
-        game_id,
-        player: caller,
-        bet_amount,
-        player_hands: vec![player_hand.clone()],
-        dealer_hand: dealer_hand.clone(), // If game over, includes hidden. If not, just showing.
-        dealer_hidden_card: if game_over { None } else { Some(d_card2) },
-        current_hand_index: 0,
-        is_active: !game_over,
-        is_doubled: vec![false],
-        results,
+    // Payout includes original bet back (e.g., 35:1 means bet + 35*bet)
+    // Use saturating arithmetic to prevent overflow on large bets
+    let payout = if won {
+        bet.amount.saturating_add(bet.amount.saturating_mul(multiplier))
+    } else {
+        0
+    };
+
+    BetResult {
+        bet_type: bet.bet_type.clone(),
+        amount: bet.amount,
+        won,
         payout,
-        timestamp: ic_cdk::api::time(),
-        client_seed: client_seed.clone(),
-        card_draw_counter: 4,
-    };
-
-    if !game_over {
-        GAMES.with(|g| g.borrow_mut().insert(game_id, game));
     }
-
-    Ok(GameStartResult {
-        game_id,
-        player_hand,
-        dealer_showing: d_card1,
-        is_roulette,
-        can_double: !game_over,
-        can_split: !game_over && can_split,
-    })
 }
 
-pub async fn hit(game_id: u64, caller: Principal) -> Result<ActionResult, String> {
-    let mut game = GAMES.with(|g| g.borrow().get(&game_id)).ok_or("Game not found")?;
-    
-    if game.player != caller { return Err("Not your game".to_string()); }
-    if !game.is_active { return Err("Game ended".to_string()); }
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    // Generate randomness
-    // Use stored client_seed with incremented counter
-    let (seed_bytes, _, _) = generate_shuffle_seed(&game.client_seed)?;
-    let new_card = draw_card(&seed_bytes, game.card_draw_counter as usize);
-    game.card_draw_counter += 1;
-    
-    let hand_idx = game.current_hand_index as usize;
-    if hand_idx >= game.player_hands.len() { return Err("Invalid hand index".to_string()); }
-    
-    game.player_hands[hand_idx].add_card(new_card);
-    
-    let hand_value = game.player_hands[hand_idx].value();
-    let mut game_over = false;
-    
-    if hand_value > 21 {
-        // Bust
-        // If this was the last hand, game over (dealer wins).
-        // If split, move to next hand?
-        if hand_idx + 1 < game.player_hands.len() {
-             game.current_hand_index += 1;
-        } else {
-             // All hands played. Resolve.
-             return resolve_game(game, caller).await;
-        }
-    } else if hand_value == 21 {
-        // Auto-stand
-         if hand_idx + 1 < game.player_hands.len() {
-             game.current_hand_index += 1;
-        } else {
-             // All hands played. Dealer's turn.
-             return resolve_game(game, caller).await;
-        }
-    }
-    
-    GAMES.with(|g| g.borrow_mut().insert(game_id, game.clone()));
-    
-    Ok(ActionResult {
-        player_hand: game.player_hands[hand_idx].clone(),
-        dealer_hand: Some(game.dealer_hand.clone()),
-        result: None,
-        payout: 0,
-        can_hit: hand_value < 21,
-        can_double: false, // No double after hit
-        can_split: false,
-        game_over: false,
-    })
-}
+    #[test]
+    fn test_validate_straight() {
+        let bet = Bet { bet_type: BetType::Straight(17), amount: 100 };
+        assert!(validate_bet(&bet).is_ok());
 
-pub async fn stand(game_id: u64, caller: Principal) -> Result<ActionResult, String> {
-    let mut game = GAMES.with(|g| g.borrow().get(&game_id)).ok_or("Game not found")?;
-    if game.player != caller { return Err("Not your game".to_string()); }
-    if !game.is_active { return Err("Game ended".to_string()); }
+        let invalid = Bet { bet_type: BetType::Straight(37), amount: 100 };
+        assert!(validate_bet(&invalid).is_err());
 
-    if (game.current_hand_index as usize) + 1 < game.player_hands.len() {
-        game.current_hand_index += 1;
-        GAMES.with(|g| g.borrow_mut().insert(game_id, game.clone()));
-        
-        return Ok(ActionResult {
-            player_hand: game.player_hands[game.current_hand_index as usize].clone(),
-            dealer_hand: Some(game.dealer_hand.clone()),
-            result: None,
-            payout: 0,
-            can_hit: true,
-            can_double: true,
-            can_split: game.player_hands[game.current_hand_index as usize].can_split(),
-            game_over: false,
-        });
+        let zero_amount = Bet { bet_type: BetType::Straight(0), amount: 0 };
+        assert!(validate_bet(&zero_amount).is_err());
     }
 
-    // Dealer plays
-    resolve_game(game, caller).await
-}
+    #[test]
+    fn test_validate_split() {
+        // Valid splits
+        let bet = Bet { bet_type: BetType::Split(1, 2), amount: 100 };
+        assert!(validate_bet(&bet).is_ok());
 
-pub async fn double_down(game_id: u64, caller: Principal) -> Result<ActionResult, String> {
-    let mut game = GAMES.with(|g| g.borrow().get(&game_id)).ok_or("Game not found")?;
-    if game.player != caller { return Err("Not your game".to_string()); }
-    if !game.is_active { return Err("Game ended".to_string()); }
-    
-    let hand_idx = game.current_hand_index as usize;
-    if game.player_hands[hand_idx].cards.len() != 2 {
-        return Err("Can only double on first two cards".to_string());
-    }
-    
-    // Check house limit BEFORE deducting extra bet
-    let extra_bet = game.bet_amount;
+        let bet = Bet { bet_type: BetType::Split(1, 4), amount: 100 };
+        assert!(validate_bet(&bet).is_ok());
 
-    // Calculate new total potential payout after double
-    let mut total_wager_after_double = 0u64;
-    for (i, is_dbl) in game.is_doubled.iter().enumerate() {
-        if i == hand_idx {
-            total_wager_after_double += game.bet_amount * 2;
-        } else {
-            total_wager_after_double += if *is_dbl { game.bet_amount * 2 } else { game.bet_amount };
-        }
+        // Invalid split
+        let invalid = Bet { bet_type: BetType::Split(1, 5), amount: 100 };
+        assert!(validate_bet(&invalid).is_err());
     }
 
-    let max_payout = (total_wager_after_double as f64 * 2.0) as u64;
-    let max_allowed = accounting::get_max_allowed_payout();
-    if max_payout > max_allowed {
-        return Err(format!(
-            "Double would exceed house limit. Max payout {} exceeds limit {}",
-            max_payout, max_allowed
-        ));
+    #[test]
+    fn test_validate_street() {
+        let bet = Bet { bet_type: BetType::Street(1), amount: 100 };
+        assert!(validate_bet(&bet).is_ok());
+
+        let invalid = Bet { bet_type: BetType::Street(2), amount: 100 };
+        assert!(validate_bet(&invalid).is_err());
     }
 
-    let user_balance = accounting::get_balance(caller);
-    if user_balance < extra_bet { return Err("Insufficient balance for double".to_string()); }
-    
-    let balance_after = user_balance.checked_sub(extra_bet).ok_or("Balance error")?;
-    accounting::update_balance(caller, balance_after)?;
-    crate::defi_accounting::record_bet_volume(extra_bet);
-    
-    game.is_doubled[hand_idx] = true;
-    
-    // Draw one card
-    let (seed_bytes, _, _) = generate_shuffle_seed(&game.client_seed)?;
-    let new_card = draw_card(&seed_bytes, game.card_draw_counter as usize);
-    game.card_draw_counter += 1;
-    game.player_hands[hand_idx].add_card(new_card);
-    
-    // Auto stand
-    if hand_idx + 1 < game.player_hands.len() {
-        game.current_hand_index += 1;
-        GAMES.with(|g| g.borrow_mut().insert(game_id, game.clone()));
-         return Ok(ActionResult {
-            player_hand: game.player_hands[hand_idx].clone(),
-            dealer_hand: Some(game.dealer_hand.clone()),
-            result: None,
-            payout: 0,
-            can_hit: true, // Next hand can hit
-            can_double: true,
-            can_split: game.player_hands[game.current_hand_index as usize].can_split(),
-            game_over: false,
-        });
-    }
-    
-    resolve_game(game, caller).await
-}
+    #[test]
+    fn test_validate_column_dozen() {
+        let col = Bet { bet_type: BetType::Column(1), amount: 100 };
+        assert!(validate_bet(&col).is_ok());
 
-pub async fn split(game_id: u64, caller: Principal) -> Result<ActionResult, String> {
-    let mut game = GAMES.with(|g| g.borrow().get(&game_id)).ok_or("Game not found")?;
-    if game.player != caller { return Err("Not your game".to_string()); }
-    if !game.is_active { return Err("Game ended".to_string()); }
-    
-    let hand_idx = game.current_hand_index as usize;
-    let hand = &game.player_hands[hand_idx];
-    if !hand.can_split() { return Err("Cannot split".to_string()); }
-    
-    // Check house limit BEFORE deducting extra bet
-    let extra_bet = game.bet_amount;
+        let invalid_col = Bet { bet_type: BetType::Column(4), amount: 100 };
+        assert!(validate_bet(&invalid_col).is_err());
 
-    // Calculate new total potential payout after split
-    let mut total_wager_after_split = 0u64;
-    for is_dbl in &game.is_doubled {
-        total_wager_after_split += if *is_dbl { game.bet_amount * 2 } else { game.bet_amount };
-    }
-    total_wager_after_split += game.bet_amount;
+        let dozen = Bet { bet_type: BetType::Dozen(3), amount: 100 };
+        assert!(validate_bet(&dozen).is_ok());
 
-    let max_payout = (total_wager_after_split as f64 * 2.0) as u64;
-    let max_allowed = accounting::get_max_allowed_payout();
-    if max_payout > max_allowed {
-        return Err(format!(
-            "Split would exceed house limit. Max payout {} exceeds limit {}",
-            max_payout, max_allowed
-        ));
+        let invalid_dozen = Bet { bet_type: BetType::Dozen(0), amount: 100 };
+        assert!(validate_bet(&invalid_dozen).is_err());
     }
 
-    let user_balance = accounting::get_balance(caller);
-    if user_balance < extra_bet { return Err("Insufficient balance for split".to_string()); }
-    
-    let balance_after = user_balance.checked_sub(extra_bet).ok_or("Balance error")?;
-    accounting::update_balance(caller, balance_after)?;
-    crate::defi_accounting::record_bet_volume(extra_bet);
-    
-    // Split logic
-    let card1 = hand.cards[0].clone();
-    let card2 = hand.cards[1].clone();
-    
-    let (seed_bytes, _, _) = generate_shuffle_seed(&game.client_seed)?;
-    let new_card1 = draw_card(&seed_bytes, game.card_draw_counter as usize);
-    let new_card2 = draw_card(&seed_bytes, game.card_draw_counter as usize + 1);
-    game.card_draw_counter += 2;
-    
-    let mut hand1 = Hand::new_split();
-    hand1.add_card(card1);
-    hand1.add_card(new_card1);
-    
-    let mut hand2 = Hand::new_split();
-    hand2.add_card(card2);
-    hand2.add_card(new_card2);
-    
-    game.player_hands[hand_idx] = hand1;
-    game.player_hands.insert(hand_idx + 1, hand2);
-    game.is_doubled.insert(hand_idx + 1, false);
-    game.results.push(None); // Add slot for result
-    
-    GAMES.with(|g| g.borrow_mut().insert(game_id, game.clone()));
-    
-    Ok(ActionResult {
-        player_hand: game.player_hands[hand_idx].clone(),
-        dealer_hand: Some(game.dealer_hand.clone()),
-        result: None,
-        payout: 0,
-        can_hit: true,
-        can_double: true,
-        can_split: false, // No re-split for now
-        game_over: false,
-    })
-}
-
-async fn resolve_game(mut game: RouletteGame, caller: Principal) -> Result<ActionResult, String> {
-    // Reveal dealer card
-    if let Some(hidden) = game.dealer_hidden_card.take() {
-        game.dealer_hand.add_card(hidden);
-    }
-    
-    // Dealer plays if any player hand is not bust?
-    // Standard: Dealer plays if there is at least one non-bust hand.
-    let any_not_bust = game.player_hands.iter().any(|h| !h.is_bust());
-    
-    if any_not_bust {
-        let (seed_bytes, _, _) = generate_shuffle_seed(&game.client_seed).map_err(|e| e.to_string())?;
-        
-        while game.dealer_hand.value() < 17 {
-             let new_card = draw_card(&seed_bytes, game.card_draw_counter as usize);
-             game.card_draw_counter += 1;
-             game.dealer_hand.add_card(new_card);
-        }
-    }
-    
-    let dealer_value = game.dealer_hand.value();
-    let mut total_payout = 0;
-    
-    for (i, hand) in game.player_hands.iter().enumerate() {
-        let val = hand.value();
-        let bet = if game.is_doubled[i] { game.bet_amount * 2 } else { game.bet_amount };
-        
-        let result = if val > 21 {
-            GameResult::DealerWin
-        } else if dealer_value > 21 {
-            GameResult::PlayerWin
-        } else if val > dealer_value {
-            GameResult::PlayerWin
-        } else if val < dealer_value {
-            GameResult::DealerWin
-        } else {
-            GameResult::Push
-        };
-        
-        game.results[i] = Some(result.clone());
-        update_stats(&result);
-        
-        let hand_payout = match result {
-            GameResult::PlayerWin => bet * 2,
-            GameResult::Push => bet,
-            _ => 0,
-        };
-        total_payout += hand_payout;
-    }
-    
-    game.payout = total_payout;
-    game.is_active = false;
-    
-    // Settle
-    let total_bet: u64 = game.is_doubled.iter().map(|&d| if d { game.bet_amount * 2 } else { game.bet_amount }).sum();
-
-    // Step 1: Attempt pool settlement FIRST
-    if let Err(e) = liquidity_pool::settle_bet(total_bet, total_payout) {
-        // Pool cannot afford payout - refund ONLY the original bet, no payout
-        let current_bal = accounting::get_balance(caller);
-        let refund_bal = current_bal.checked_add(total_bet)
-            .ok_or("Balance overflow on refund")?;
-        accounting::update_balance(caller, refund_bal)?;
-
-        ic_cdk::println!("CRITICAL: Payout failure for game {}. Refunded {} to {}",
-            game.game_id, total_bet, caller);
-
-        return Err(format!(
-            "House cannot afford payout. Your bet of {} has been REFUNDED. {}",
-            total_bet, e
-        ));
+    #[test]
+    fn test_evaluate_straight_win() {
+        let bet = Bet { bet_type: BetType::Straight(17), amount: 100 };
+        let result = evaluate_bet(&bet, 17);
+        assert!(result.won);
+        assert_eq!(result.payout, 3600); // 100 + 100*35
     }
 
-    // Step 2: Pool settlement succeeded - now credit user their payout
-    if total_payout > 0 {
-        let current_bal = accounting::get_balance(caller);
-        let new_bal = current_bal.checked_add(total_payout)
-            .ok_or("Balance overflow when adding winnings")?;
-        accounting::update_balance(caller, new_bal)?;
+    #[test]
+    fn test_evaluate_straight_lose() {
+        let bet = Bet { bet_type: BetType::Straight(17), amount: 100 };
+        let result = evaluate_bet(&bet, 18);
+        assert!(!result.won);
+        assert_eq!(result.payout, 0);
     }
-    
-    GAMES.with(|g| g.borrow_mut().insert(game.game_id, game.clone()));
-    
-    Ok(ActionResult {
-        player_hand: game.player_hands.last().unwrap().clone(),
-        dealer_hand: Some(game.dealer_hand.clone()),
-        result: game.results.last().unwrap().clone(), // Show last result
-        payout: total_payout,
-        can_hit: false,
-        can_double: false,
-        can_split: false,
-        game_over: true,
-    })
-}
 
-pub fn get_game(game_id: u64) -> Option<RouletteGame> {
-    GAMES.with(|g| g.borrow().get(&game_id))
-}
+    #[test]
+    fn test_evaluate_red() {
+        let bet = Bet { bet_type: BetType::Red, amount: 100 };
 
-pub fn get_stats() -> GameStats {
-    STATS.with(|s| s.borrow().get(&0).unwrap_or_default())
+        // Red wins on red numbers
+        let result = evaluate_bet(&bet, 1); // 1 is red
+        assert!(result.won);
+        assert_eq!(result.payout, 200); // 100 + 100*1
+
+        // Red loses on black
+        let result = evaluate_bet(&bet, 2); // 2 is black
+        assert!(!result.won);
+        assert_eq!(result.payout, 0);
+
+        // Red loses on 0 (green)
+        let result = evaluate_bet(&bet, 0);
+        assert!(!result.won);
+        assert_eq!(result.payout, 0);
+    }
+
+    #[test]
+    fn test_evaluate_even_odd() {
+        let even_bet = Bet { bet_type: BetType::Even, amount: 100 };
+        let odd_bet = Bet { bet_type: BetType::Odd, amount: 100 };
+
+        // Even wins on 2
+        assert!(evaluate_bet(&even_bet, 2).won);
+        assert!(!evaluate_bet(&odd_bet, 2).won);
+
+        // Odd wins on 3
+        assert!(!evaluate_bet(&even_bet, 3).won);
+        assert!(evaluate_bet(&odd_bet, 3).won);
+
+        // Both lose on 0
+        assert!(!evaluate_bet(&even_bet, 0).won);
+        assert!(!evaluate_bet(&odd_bet, 0).won);
+    }
+
+    #[test]
+    fn test_evaluate_low_high() {
+        let low_bet = Bet { bet_type: BetType::Low, amount: 100 };
+        let high_bet = Bet { bet_type: BetType::High, amount: 100 };
+
+        // Low wins on 1-18
+        assert!(evaluate_bet(&low_bet, 1).won);
+        assert!(evaluate_bet(&low_bet, 18).won);
+        assert!(!evaluate_bet(&low_bet, 19).won);
+
+        // High wins on 19-36
+        assert!(!evaluate_bet(&high_bet, 18).won);
+        assert!(evaluate_bet(&high_bet, 19).won);
+        assert!(evaluate_bet(&high_bet, 36).won);
+
+        // Both lose on 0
+        assert!(!evaluate_bet(&low_bet, 0).won);
+        assert!(!evaluate_bet(&high_bet, 0).won);
+    }
+
+    #[test]
+    fn test_bytes_to_number() {
+        // Test with known bytes
+        let bytes = [0u8; 32];
+        assert_eq!(bytes_to_number(&bytes), 0);
+
+        let bytes = [0, 0, 0, 0, 0, 0, 0, 37, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(bytes_to_number(&bytes), 0); // 37 % 37 = 0
+
+        let bytes = [0, 0, 0, 0, 0, 0, 0, 36, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(bytes_to_number(&bytes), 36);
+    }
 }

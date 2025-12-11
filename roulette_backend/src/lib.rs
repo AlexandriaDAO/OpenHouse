@@ -1,218 +1,99 @@
-// use ic_cdk::{init, post_upgrade, pre_upgrade, query, update};
-// use ic_stable_structures::memory_manager::{MemoryManager, VirtualMemory};
-// use ic_stable_structures::DefaultMemoryImpl;
-// use std::cell::RefCell;
+// European Roulette Backend - Canister Endpoints
 
-// mod defi_accounting;
-// pub mod types;
-// pub mod seed;
-// pub mod game;
+use ic_cdk::{query, update, init};
 
-// pub use types::{Card, Hand, GameResult, GameAction, GameStartResult, ActionResult, GameStats, RouletteGame};
+mod types;
+mod game;
+mod board;
 
-// // =============================================================================
-// // MEMORY MANAGEMENT
-// // =============================================================================
+pub use types::*;
+use board::{RED_NUMBERS, BLACK_NUMBERS};
 
-// type Memory = VirtualMemory<DefaultMemoryImpl>;
+#[init]
+fn init() {
+    ic_cdk::println!("Roulette Backend Initialized - European Roulette (2.70% house edge)");
+}
 
-// thread_local! {
-//     static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
-//         RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
-// }
+/// Execute a spin with the given bets
+/// Returns the winning number, color, and results for each bet
+#[update]
+async fn spin(bets: Vec<Bet>) -> Result<SpinResult, String> {
+    game::spin(bets).await
+}
 
-// #[init]
-// fn init() {
-//     ic_cdk::println!("Roulette Backend Initialized");
-//     defi_accounting::accounting::start_parent_withdrawal_timer();
-//     defi_accounting::start_stats_timer();
-// }
+/// Get the board layout (red and black numbers)
+#[query]
+fn get_board_layout() -> BoardLayout {
+    BoardLayout {
+        red_numbers: RED_NUMBERS.to_vec(),
+        black_numbers: BLACK_NUMBERS.to_vec(),
+    }
+}
 
-// #[pre_upgrade]
-// fn pre_upgrade() {
-//     // StableBTreeMap persists automatically
-// }
+/// Get payout information for all bet types
+#[query]
+fn get_payouts() -> Vec<PayoutInfo> {
+    vec![
+        PayoutInfo {
+            bet_type: "Straight".into(),
+            payout_multiplier: 35,
+            description: "Single number (0-36)".into(),
+        },
+        PayoutInfo {
+            bet_type: "Split".into(),
+            payout_multiplier: 17,
+            description: "Two adjacent numbers".into(),
+        },
+        PayoutInfo {
+            bet_type: "Street".into(),
+            payout_multiplier: 11,
+            description: "Three numbers in a row".into(),
+        },
+        PayoutInfo {
+            bet_type: "Corner".into(),
+            payout_multiplier: 8,
+            description: "Four numbers in a square".into(),
+        },
+        PayoutInfo {
+            bet_type: "Six Line".into(),
+            payout_multiplier: 5,
+            description: "Six numbers (two rows)".into(),
+        },
+        PayoutInfo {
+            bet_type: "Column".into(),
+            payout_multiplier: 2,
+            description: "12 numbers in a column".into(),
+        },
+        PayoutInfo {
+            bet_type: "Dozen".into(),
+            payout_multiplier: 2,
+            description: "12 numbers (1-12, 13-24, 25-36)".into(),
+        },
+        PayoutInfo {
+            bet_type: "Red/Black".into(),
+            payout_multiplier: 1,
+            description: "18 numbers by color".into(),
+        },
+        PayoutInfo {
+            bet_type: "Even/Odd".into(),
+            payout_multiplier: 1,
+            description: "18 numbers by parity".into(),
+        },
+        PayoutInfo {
+            bet_type: "Low/High".into(),
+            payout_multiplier: 1,
+            description: "1-18 or 19-36".into(),
+        },
+    ]
+}
 
-// #[post_upgrade]
-// fn post_upgrade() {
-//     seed::restore_seed_state();
-//     defi_accounting::accounting::start_parent_withdrawal_timer();
-//     defi_accounting::start_stats_timer();
-// }
+/// Greet a player
+#[query]
+fn greet(name: String) -> String {
+    format!(
+        "Welcome to OpenHouse Roulette, {}! Place your bets - European rules, 2.70% house edge.",
+        name
+    )
+}
 
-// // === GAME ENDPOINTS ===
-
-// #[update]
-// async fn start_game(bet_amount: u64, client_seed: String) -> Result<GameStartResult, String> {
-//     game::start_game(bet_amount, client_seed, ic_cdk::api::msg_caller()).await
-// }
-
-// #[update]
-// async fn hit(game_id: u64) -> Result<ActionResult, String> {
-//     game::hit(game_id, ic_cdk::api::msg_caller()).await
-// }
-
-// #[update]
-// async fn stand(game_id: u64) -> Result<ActionResult, String> {
-//     game::stand(game_id, ic_cdk::api::msg_caller()).await
-// }
-
-// #[update]
-// async fn double_down(game_id: u64) -> Result<ActionResult, String> {
-//     game::double_down(game_id, ic_cdk::api::msg_caller()).await
-// }
-
-// #[update]
-// async fn split(game_id: u64) -> Result<ActionResult, String> {
-//     game::split(game_id, ic_cdk::api::msg_caller()).await
-// }
-
-// #[query]
-// fn get_game(game_id: u64) -> Option<RouletteGame> {
-//     game::get_game(game_id)
-// }
-
-// #[query]
-// fn get_stats() -> GameStats {
-//     game::get_stats()
-// }
-
-// // === PROVABLY FAIR ===
-
-// #[query]
-// fn get_current_seed_hash() -> String {
-//     seed::get_current_seed_hash()
-// }
-
-// #[query]
-// fn get_seed_info() -> (String, u64, u64) {
-//     seed::get_seed_info()
-// }
-
-// #[query]
-// fn greet(name: String) -> String {
-//     format!("Welcome to OpenHouse Roulette, {}! Hit or Stand?", name)
-// }
-
-// // === ACCOUNTING ENDPOINTS ===
-
-// #[update]
-// async fn deposit(amount: u64) -> Result<u64, String> {
-//     defi_accounting::accounting::deposit(amount).await
-// }
-
-// #[update]
-// async fn withdraw_all() -> Result<u64, String> {
-//     defi_accounting::accounting::withdraw_all().await
-// }
-
-// #[update]
-// async fn retry_withdrawal() -> Result<u64, String> {
-//     defi_accounting::accounting::retry_withdrawal().await
-// }
-
-// #[update]
-// fn abandon_withdrawal() -> Result<u64, String> {
-//     defi_accounting::accounting::abandon_withdrawal()
-// }
-
-// #[query]
-// fn get_balance(principal: candid::Principal) -> u64 {
-//     defi_accounting::query::get_balance(principal)
-// }
-
-// #[query]
-// fn get_my_balance() -> u64 {
-//     defi_accounting::query::get_my_balance()
-// }
-
-// #[query]
-// fn get_house_balance() -> u64 {
-//     defi_accounting::query::get_house_balance()
-// }
-
-// #[query]
-// fn get_max_allowed_payout() -> u64 {
-//     defi_accounting::query::get_max_allowed_payout()
-// }
-
-// #[update]
-// async fn get_canister_balance() -> u64 {
-//     defi_accounting::accounting::refresh_canister_balance().await
-// }
-
-// #[update]
-// async fn admin_health_check() -> Result<defi_accounting::types::HealthCheck, String> {
-//     defi_accounting::admin_query::admin_health_check().await
-// }
-
-// #[update]
-// async fn refresh_canister_balance() -> u64 {
-//     defi_accounting::accounting::refresh_canister_balance().await
-// }
-
-// // === LIQUIDITY POOL ENDPOINTS ===
-
-// #[update]
-// async fn deposit_liquidity(amount: u64, min_shares_expected: Option<candid::Nat>) -> Result<candid::Nat, String> {
-//     defi_accounting::liquidity_pool::deposit_liquidity(amount, min_shares_expected).await
-// }
-
-// #[update]
-// async fn withdraw_all_liquidity() -> Result<u64, String> {
-//     defi_accounting::liquidity_pool::withdraw_all_liquidity().await
-// }
-
-// #[query]
-// fn calculate_shares_preview(amount: u64) -> Result<candid::Nat, String> {
-//     defi_accounting::liquidity_pool::calculate_shares_preview(amount)
-// }
-
-// #[query]
-// fn get_lp_position(principal: candid::Principal) -> defi_accounting::liquidity_pool::LPPosition {
-//     defi_accounting::query::get_lp_position(principal)
-// }
-
-// #[query]
-// fn get_my_lp_position() -> defi_accounting::liquidity_pool::LPPosition {
-//     defi_accounting::query::get_my_lp_position()
-// }
-
-// #[query]
-// fn get_pool_stats() -> defi_accounting::liquidity_pool::PoolStats {
-//     defi_accounting::query::get_pool_stats()
-// }
-
-// #[query]
-// fn get_house_mode() -> String {
-//     defi_accounting::query::get_house_mode()
-// }
-
-// #[query]
-// fn can_accept_bets() -> bool {
-//     defi_accounting::liquidity_pool::can_accept_bets()
-// }
-
-// // === DAILY STATISTICS ENDPOINTS ===
-
-// #[query]
-// fn get_daily_stats(limit: u32) -> Vec<defi_accounting::DailySnapshot> {
-//     defi_accounting::get_daily_snapshots(limit)
-// }
-
-// #[query]
-// fn get_stats_range(start_ts: u64, end_ts: u64) -> Vec<defi_accounting::DailySnapshot> {
-//     defi_accounting::get_snapshots_range(start_ts, end_ts)
-// }
-
-// #[query]
-// fn get_stats_count() -> u64 {
-//     defi_accounting::get_snapshot_count()
-// }
-
-// #[query]
-// fn get_pool_apy(days: Option<u32>) -> defi_accounting::ApyInfo {
-//     defi_accounting::get_apy_info(days)
-// }
-
-// ic_cdk::export_candid!();
+ic_cdk::export_candid!();
