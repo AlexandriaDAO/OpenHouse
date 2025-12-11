@@ -74,7 +74,7 @@ pub fn is_valid_split(a: u8, b: u8) -> bool {
 /// Check if a number is a valid street start (first number of a row of 3)
 /// Valid starts: 1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34
 pub fn is_valid_street(start: u8) -> bool {
-    start >= 1 && start <= 34 && (start - 1) % 3 == 0
+    (1..=34).contains(&start) && (start - 1).is_multiple_of(3)
 }
 
 /// Check if a number is a valid corner top-left
@@ -104,7 +104,7 @@ pub fn is_valid_corner(top_left: u8) -> bool {
 /// Check if a number is a valid six-line start (first number of two consecutive rows)
 /// Valid starts: 1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31
 pub fn is_valid_six_line(start: u8) -> bool {
-    start >= 1 && start <= 31 && (start - 1) % 3 == 0
+    (1..=31).contains(&start) && (start - 1).is_multiple_of(3)
 }
 
 /// Get the three numbers in a street
@@ -122,28 +122,20 @@ pub fn get_six_line_numbers(start: u8) -> [u8; 6] {
     [start, start + 1, start + 2, start + 3, start + 4, start + 5]
 }
 
-/// Get all 12 numbers in a column
-pub fn get_column_numbers(col: u8) -> [u8; 12] {
-    let mut nums = [0u8; 12];
-    for i in 0..12 {
-        nums[i] = col + (i as u8 * 3);
-    }
-    nums
-}
-
-/// Get all 12 numbers in a dozen
-pub fn get_dozen_numbers(dozen: u8) -> [u8; 12] {
-    let start = (dozen - 1) * 12 + 1;
-    let mut nums = [0u8; 12];
-    for i in 0..12 {
-        nums[i] = start + i as u8;
-    }
-    nums
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Get all 12 numbers in a column (test helper)
+    fn get_column_numbers(col: u8) -> [u8; 12] {
+        std::array::from_fn(|i| col + (i as u8 * 3))
+    }
+
+    /// Get all 12 numbers in a dozen (test helper)
+    fn get_dozen_numbers(dozen: u8) -> [u8; 12] {
+        let start = (dozen - 1) * 12 + 1;
+        std::array::from_fn(|i| start + i as u8)
+    }
 
     #[test]
     fn test_colors() {

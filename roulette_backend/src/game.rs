@@ -135,20 +135,14 @@ fn evaluate_bet(bet: &Bet, winning: u8) -> BetResult {
             let nums = get_six_line_numbers(*start);
             (nums.contains(&winning), 5)
         }
-        BetType::Column(col) => {
-            let nums = get_column_numbers(*col);
-            (nums.contains(&winning), 2)
-        }
-        BetType::Dozen(dozen) => {
-            let nums = get_dozen_numbers(*dozen);
-            (nums.contains(&winning), 2)
-        }
+        BetType::Column(col) => (get_column(winning) == Some(*col), 2),
+        BetType::Dozen(dozen) => (get_dozen(winning) == Some(*dozen), 2),
         BetType::Red => (get_color(winning) == Color::Red, 1),
         BetType::Black => (get_color(winning) == Color::Black, 1),
-        BetType::Even => (winning != 0 && winning % 2 == 0, 1),
-        BetType::Odd => (winning != 0 && winning % 2 == 1, 1),
-        BetType::Low => (winning >= 1 && winning <= 18, 1),
-        BetType::High => (winning >= 19 && winning <= 36, 1),
+        BetType::Even => (winning != 0 && winning.is_multiple_of(2), 1),
+        BetType::Odd => (winning != 0 && !winning.is_multiple_of(2), 1),
+        BetType::Low => ((1..=18).contains(&winning), 1),
+        BetType::High => ((19..=36).contains(&winning), 1),
     };
 
     // Payout includes original bet back (e.g., 35:1 means bet + 35*bet)
