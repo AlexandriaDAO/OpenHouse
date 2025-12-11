@@ -14,27 +14,52 @@ export function mapUIBetToBackend(zoneId: string, amount: bigint): Bet {
   let bet_type: any;
 
   switch (type) {
-    case 'straight':
-      bet_type = { Straight: parseInt(parts[1]) };
+    case 'straight': {
+      const num = parseInt(parts[1]);
+      if (isNaN(num) || num < 0 || num > 36) throw new Error(`Invalid straight number: ${parts[1]}`);
+      bet_type = { Straight: num };
       break;
-    case 'split':
-      bet_type = { Split: [parseInt(parts[1]), parseInt(parts[2])] };
+    }
+    case 'split': {
+      const n1 = parseInt(parts[1]);
+      const n2 = parseInt(parts[2]);
+      if (isNaN(n1) || isNaN(n2)) throw new Error(`Invalid split numbers: ${parts[1]}, ${parts[2]}`);
+      // Validation: Are they adjacent? 
+      // Diff is 1 (horizontal) or 3 (vertical) usually, or specific cases for 0.
+      // This is a basic sanity check.
+      bet_type = { Split: [n1, n2] };
       break;
-    case 'street':
-      bet_type = { Street: parseInt(parts[1]) }; // Start number
+    }
+    case 'street': {
+      const start = parseInt(parts[1]);
+      if (isNaN(start) || start < 1 || start > 34) throw new Error(`Invalid street start: ${parts[1]}`);
+      bet_type = { Street: start }; // Start number
       break;
-    case 'corner':
-      bet_type = { Corner: parseInt(parts[1]) }; // Top-left number
+    }
+    case 'corner': {
+      const top = parseInt(parts[1]);
+      if (isNaN(top) || top < 1 || top > 35) throw new Error(`Invalid corner top-left: ${parts[1]}`);
+      bet_type = { Corner: top }; // Top-left number
       break;
-    case 'sixline':
-      bet_type = { SixLine: parseInt(parts[1]) }; // Start number of first row
+    }
+    case 'sixline': {
+      const start = parseInt(parts[1]);
+      if (isNaN(start) || start < 1 || start > 31) throw new Error(`Invalid sixline start: ${parts[1]}`);
+      bet_type = { SixLine: start }; // Start number of first row
       break;
-    case 'column':
-      bet_type = { Column: parseInt(parts[1]) };
+    }
+    case 'column': {
+      const col = parseInt(parts[1]);
+      if (col < 1 || col > 3) throw new Error(`Invalid column: ${parts[1]}`);
+      bet_type = { Column: col };
       break;
-    case 'dozen':
-      bet_type = { Dozen: parseInt(parts[1]) };
+    }
+    case 'dozen': {
+      const doz = parseInt(parts[1]);
+      if (doz < 1 || doz > 3) throw new Error(`Invalid dozen: ${parts[1]}`);
+      bet_type = { Dozen: doz };
       break;
+    }
     case 'red':
       bet_type = { Red: null };
       break;
@@ -79,6 +104,57 @@ export function getWinningZones(result: SpinResult): string[] {
 
     const dozen = getDozenForNumber(num);
     if (dozen) zones.push(`dozen-${dozen}`);
+    
+    // Complex bets: Split, Street, Corner, SixLine
+    // We reverse engineer which bets would have won with this number.
+    
+    // Splits: Check adjacent numbers
+    // Vertical (diff 3): num-3 and num+3
+    if (num > 3) zones.push(`split-${num-3}-${num}`); // The split above
+    if (num <= 33) zones.push(`split-${num}-${num+3}`); // The split below
+    
+    // Horizontal (diff 1): num-1 and num+1, but respect row boundaries
+    // Row 1: 1,2,3. 1-2, 2-3.
+    // If num is 1: split-1-2.
+    // If num is 2: split-1-2, split-2-3.
+    // Check if num and num-1 are in same row?
+    // Rows are usually defined by ceiling(num/3)? No, rows are vertical columns in physical table, horizontal in numbers.
+    // 1,2,3 is a row (Street). 4,5,6 is a row.
+    // So 1 and 2 are horizontal neighbors.
+    // Check if num-1 is in same row: Math.ceil(num/3) == Math.ceil((num-1)/3)
+    if (num > 1 && Math.ceil(num/3) === Math.ceil((num-1)/3)) zones.push(`split-${num-1}-${num}`);
+    if (num < 36 && Math.ceil(num/3) === Math.ceil((num+1)/3)) zones.push(`split-${num}-${num+1}`);
+    
+    // Streets (Rows of 3): 1,2,3 -> street-1. 4,5,6 -> street-4.
+    // Start of street is: (Math.ceil(num/3) - 1) * 3 + 1
+    const streetStart = (Math.ceil(num/3) - 1) * 3 + 1;
+    zones.push(`street-${streetStart}`);
+    
+    // Corners (Square of 4):
+    // If num is 5. Corners: 1,2,4,5 (corner-1); 2,3,5,6 (corner-2); 4,5,7,8 (corner-4); 5,6,8,9 (corner-5).
+    // Valid corners usually identified by top-left (smallest) number.
+    // Logic: A corner is valid if the other 3 numbers exist and are validly placed.
+    // Potential top-lefts relative to num:
+    // 1. num itself (if num is TL): num, num+1, num+3, num+4. Valid if num % 3 != 0 and num < 34.
+    if (num % 3 !== 0 && num < 34) zones.push(`corner-${num}`);
+    
+    // 2. num-1 (if num is TR): num-1, num, num+2, num+3. Valid if (num-1)%3!=0 -> num%3!=1. And num-1 < 34.
+    if (num % 3 !== 1 && num > 1 && num < 35) zones.push(`corner-${num-1}`);
+    
+    // 3. num-3 (if num is BL): num-3, num-2, num, num+1. Valid if num-3 % 3 != 0 -> num%3!=0. And num > 3.
+    if (num % 3 !== 0 && num > 3) zones.push(`corner-${num-3}`);
+    
+    // 4. num-4 (if num is BR): num-4, num-3, num-1, num. Valid if num-4 % 3 != 0 -> num%3!=1. And num > 4.
+    if (num % 3 !== 1 && num > 4) zones.push(`corner-${num-4}`);
+    
+    // SixLines (2 rows):
+    // Sixline covers street X and street X+3. Identified by start of first street.
+    // If num is in street S. 
+    // It wins if sixline is S or S-3.
+    // Sixline-S covers S and S+3.
+    // Sixline-(S-3) covers S-3 and S.
+    zones.push(`sixline-${streetStart}`); // Covers this street and next
+    if (streetStart > 3) zones.push(`sixline-${streetStart-3}`); // Covers prev street and this
   }
 
   return zones;

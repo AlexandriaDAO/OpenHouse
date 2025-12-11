@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Layout } from '../../components/Layout';
 import { 
@@ -46,8 +46,23 @@ export default function RouletteGame() {
   const [hoveredZone, setHoveredZone] = useState<string | null>(null);
   const [winningZones, setWinningZones] = useState<string[]>([]);
 
-  // Refs
-  const maxBet = useRef(1000n); // TODO: Calculate from house balance
+  // Max payout multiplier (Straight bet)
+  const MAX_PAYOUT_MULTIPLIER = 35;
+  
+  // Calculate max bet dynamically based on house balance
+  // House limit is typically 10-15% of pool for total payout.
+  // We use a safe margin: Max Payout <= 5% of House Balance (conservative) or 10% (backend limit).
+  // Let's stick to a safe default if balance is low or 0.
+  const maxBetAmount = useMemo(() => {
+    if (!balance.house) return 1000; // Default fallback (1000 chips)
+    // Convert e8s to number (approximate for UI limit)
+    const houseBalanceNum = Number(balance.house) / 1e8;
+    // Max payout allowed is ~10% of house balance
+    const maxPayout = houseBalanceNum * 0.10;
+    // Max bet for a straight bet (35x) to stay under maxPayout
+    // bet * 35 <= maxPayout => bet <= maxPayout / 35
+    return Math.floor(maxPayout / MAX_PAYOUT_MULTIPLIER);
+  }, [balance.house]);
 
   // Update total bet amount when bets change
   useEffect(() => {
@@ -72,11 +87,15 @@ export default function RouletteGame() {
         return;
     }
     
-    // Check balance for this specific addition? 
-    // Usually checked at spin, but good UX to check now.
-    // We check against Game Balance.
+    // Check balance for this specific addition
     if (totalBetAmount + betAmountBigInt > balance.game) {
         setGameError('Insufficient game balance');
+        return;
+    }
+    
+    // Check dynamic max bet
+    if (betAmount > maxBetAmount) {
+        setGameError(`Max bet is ${maxBetAmount} chips based on house liquidity`);
         return;
     }
 
@@ -106,7 +125,7 @@ export default function RouletteGame() {
       setWinningZones([]);
       setShowResultPopup(false);
 
-      // Validate balance
+      // Validate balance again
       if (totalBetAmount > balance.game) {
         throw new Error('Insufficient balance');
       }
@@ -130,7 +149,13 @@ export default function RouletteGame() {
       // Wheel animation will complete, then onSpinComplete fires
 
     } catch (error: any) {
-      setGameError(error.message || 'Spin failed');
+      let msg = error.message || 'Spin failed';
+      // Map backend errors to friendly messages
+      if (msg.includes("Insufficient balance")) msg = "Insufficient balance. Please deposit chips.";
+      if (msg.includes("Max bet exceeded")) msg = "House limit exceeded for this bet.";
+      if (msg.includes("Too many bets")) msg = "Maximum 20 bets allowed.";
+      
+      setGameError(msg);
       setIsSpinning(false);
     }
   };
@@ -149,7 +174,7 @@ export default function RouletteGame() {
     // Refresh balance
     gameBalanceContext.fetchBalances();
 
-    // Auto-clear bets after 3 seconds
+    // Auto-clear bets after 4 seconds
     setTimeout(() => {
       setPlacedBets([]);
       setIsSpinning(false);
@@ -225,7 +250,7 @@ export default function RouletteGame() {
       <BettingRail
         betAmount={betAmount}
         onBetChange={setBetAmount}
-        maxBet={Number(maxBet.current) / 1e8}
+        maxBet={maxBetAmount}
         gameBalance={balance.game}
         walletBalance={walletBalance}
         houseBalance={balance.house}
@@ -233,7 +258,7 @@ export default function RouletteGame() {
         gameActor={actor}
         onBalanceRefresh={() => gameBalanceContext.fetchBalances()}
         disabled={isSpinning}
-        multiplier={35} // Max payout (straight bet)
+        multiplier={MAX_PAYOUT_MULTIPLIER}
         canisterId={'wvrcw-3aaaa-aaaah-arm4a-cai'}
         isBalanceLoading={gameBalanceContext.isLoading}
         isBalanceInitialized={gameBalanceContext.isInitialized}

@@ -12,7 +12,16 @@ export function WheelCanvas({ targetNumber, isSpinning, onSpinComplete }: WheelC
   const animationRef = useRef<number | null>(null);
   const startTimeRef = useRef<number>(0);
   const wheelRotationRef = useRef<number>(0);
-  const ballRotationRef = useRef<number>(0);
+  const isMountedRef = useRef<boolean>(false);
+
+  // Mounted check
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+        isMountedRef.current = false;
+        if (animationRef.current) cancelAnimationFrame(animationRef.current);
+    };
+  }, []);
 
   // Animation loop
   useEffect(() => {
@@ -24,35 +33,19 @@ export function WheelCanvas({ targetNumber, isSpinning, onSpinComplete }: WheelC
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Target calculation
-    // We want the target number to end up at the top (usually -90 deg or 270 deg).
-    // The wheel rotates. The ball rotates counter.
-    // To simplify: Ball rotates relative to wheel.
-    // Let's just rotate the wheel and keep ball fixed or simple.
-    // Plan says: Wheel rotates clockwise. Ball rotates counter-clockwise.
-    // If target is 0. 0 is at angle X on wheel.
-    // We want angle X to be at top when stopped.
-    // Wheel angle W. Number angle A relative to wheel 0.
-    // Final position of number: W + A. We want W + A = -PI/2 (top).
-    // So target W = -PI/2 - A.
-    
-    // getAngleForNumber returns angle in degrees where number is on the wheel (0..360).
     const targetPocketAngle = getAngleForNumber(targetNumber); // degrees
     const targetPocketRad = targetPocketAngle * (Math.PI / 180);
     
-    // We want this pocket to be at -PI/2.
     // Final Wheel Rotation = -PI/2 - targetPocketRad.
     // Add extra rotations.
     const finalRotation = -(Math.PI / 2) - targetPocketRad + (TOTAL_ROTATIONS * 2 * Math.PI);
-    
-    // Actually, let's just rotate wheel.
-    // Start from current rotation?
-    // Reset for simplicity.
     
     startTimeRef.current = Date.now();
     const startRotation = wheelRotationRef.current % (2 * Math.PI);
 
     const animate = () => {
+      if (!isMountedRef.current) return;
+
       const elapsed = Date.now() - startTimeRef.current;
       const progress = Math.min(elapsed / SPIN_DURATION, 1);
 
@@ -60,23 +53,9 @@ export function WheelCanvas({ targetNumber, isSpinning, onSpinComplete }: WheelC
       const eased = 1 - Math.pow(1 - progress, 3);
 
       // Wheel rotation
-      // Interpolate from startRotation to finalRotation
       const currentRot = startRotation + (finalRotation - startRotation) * eased;
       wheelRotationRef.current = currentRot;
 
-      // Ball rotation (visual effect only)
-      // Ball spins fast then slows/stops.
-      // Or just keep ball fixed at top and wheel spins underneath?
-      // Real roulette: ball spins opposite.
-      // Let's do: ball spins opposite and lands in slot.
-      // This is complex to sync.
-      // SIMPLIFICATION: Ball fixed at top (12 o'clock), Wheel spins.
-      // When wheel stops, the target number is at top.
-      // This matches the math above: W + A = -PI/2.
-      // Wait, if ball is at top (-PI/2). Number needs to be at top.
-      // Yes.
-      
-      // Render
       drawWheel(ctx, canvas.width, canvas.height, wheelRotationRef.current);
 
       if (progress < 1) {
@@ -96,6 +75,7 @@ export function WheelCanvas({ targetNumber, isSpinning, onSpinComplete }: WheelC
   // Render static wheel when not spinning
   useEffect(() => {
     if (isSpinning) return;
+    if (!isMountedRef.current) return;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
