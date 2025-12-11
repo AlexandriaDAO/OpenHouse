@@ -185,9 +185,9 @@ pub async fn play_crash(bet_amount: u64, target_multiplier: f64, caller: Princip
         return Err("INSUFFICIENT_BALANCE".to_string());
     }
 
-    // 2. Validate minimum bet (0.1 USDT)
+    // 2. Validate minimum bet (0.01 USDT)
     if bet_amount < MIN_BET {
-        return Err("Invalid bet: minimum is 0.1 USDT".to_string());
+        return Err("Invalid bet: minimum is 0.01 USDT".to_string());
     }
 
     // 3. Validate target multiplier
@@ -277,7 +277,7 @@ pub async fn play_crash_multi(bet_per_rocket: u64, target_multiplier: f64, rocke
         return Err(format!("Maximum {} rockets allowed", MAX_ROCKETS));
     }
     if bet_per_rocket < MIN_BET {
-        return Err("Invalid bet: minimum is 0.1 USDT per rocket".to_string());
+        return Err("Invalid bet: minimum is 0.01 USDT per rocket".to_string());
     }
 
     // Validate target multiplier
@@ -396,14 +396,29 @@ pub fn get_max_bet() -> u64 {
     calculate_max_bet()
 }
 
-/// Get the maximum bet per rocket for multi-rocket game
-pub fn get_max_bet_per_rocket(rocket_count: u8) -> Result<u64, String> {
+/// Get the maximum bet per rocket for multi-rocket game based on target multiplier
+///
+/// The max bet is calculated as: max_payout / (rockets * target_multiplier)
+/// This ensures that even if ALL rockets hit the target, the payout is covered.
+pub fn get_max_bet_per_rocket(rocket_count: u8, target_multiplier: f64) -> Result<u64, String> {
     if rocket_count == 0 { return Ok(0); }
+
+    // Validate and clamp target multiplier
+    let target = if !target_multiplier.is_finite() || target_multiplier < 1.01 {
+        1.01 // Default to minimum if invalid
+    } else if target_multiplier > MAX_CRASH {
+        MAX_CRASH
+    } else {
+        target_multiplier
+    };
 
     let max_allowed = accounting::get_max_allowed_payout();
     if max_allowed == 0 { return Ok(0); }
 
-    // Max bet = Max Allowed Payout / (Rockets * Max Multiplier)
+    // Convert target to scaled integer (e.g., 2.5x = 2_500_000)
+    let target_scaled = (target * MULTIPLIER_SCALE as f64) as u128;
+
+    // Max bet = Max Allowed Payout / (Rockets * Target Multiplier)
     // Use u128 for calculation to prevent overflow
     let max_allowed_u128 = max_allowed as u128;
     let rockets_u128 = rocket_count as u128;
@@ -412,7 +427,7 @@ pub fn get_max_bet_per_rocket(rocket_count: u8) -> Result<u64, String> {
     let numerator = max_allowed_u128.checked_mul(scale_u128)
         .ok_or("Overflow in max bet calculation")?;
 
-    let denominator = rockets_u128.checked_mul(MAX_MULTIPLIER_SCALE as u128)
+    let denominator = rockets_u128.checked_mul(target_scaled)
         .ok_or("Overflow in denominator")?;
 
     if denominator == 0 {

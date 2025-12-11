@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import useDiceActor from '../hooks/actors/useDiceActor';
 import usePlinkoActor from '../hooks/actors/usePlinkoActor';
+import useCrashActor from '../hooks/actors/useCrashActor';
 import {
   HealthCheck,
   PendingWithdrawalInfo,
@@ -11,9 +12,18 @@ import {
   AuditEvent
 } from '../declarations/dice_backend/dice_backend.did';
 import { useAuth } from '../providers/AuthProvider';
+import { getAdminGames } from '../config/gameRegistry';
+import { GameType } from '../types/balance';
 
 const ADMIN_PRINCIPAL = 'p7336-jmpo5-pkjsf-7dqkd-ea3zu-g2ror-ctcn2-sxtuo-tjve3-ulrx7-wae';
 const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds
+
+// Color configuration per game (matches registry theme)
+const GAME_COLORS: Record<string, { header: string; bg: string; badge: string }> = {
+  dice: { header: 'text-dfinity-turquoise', bg: 'bg-dfinity-turquoise/10', badge: 'bg-dfinity-turquoise/30 text-dfinity-turquoise' },
+  plinko: { header: 'text-orange-500', bg: 'bg-orange-500/10', badge: 'bg-orange-500/30 text-orange-500' },
+  crash: { header: 'text-purple-500', bg: 'bg-purple-500/10', badge: 'bg-purple-500/30 text-purple-500' },
+};
 
 // Helper functions
 const formatUSDT = (amount: bigint | number): string => {
@@ -54,11 +64,6 @@ interface UnifiedPendingWithdrawal extends PendingWithdrawalInfo {
   game: string;
 }
 
-// Extended audit entry to include game name
-interface UnifiedAuditEntry extends AuditEntry {
-  game: string;
-}
-
 // Audit log state for each game
 interface AuditLogData {
   entries: AuditEntry[];
@@ -67,37 +72,59 @@ interface AuditLogData {
 }
 
 export const Admin: React.FC = () => {
+  // Get admin-enabled games from registry
+  const adminGames = useMemo(() => getAdminGames(), []);
+
+  // All actor hooks (called unconditionally per React rules)
   const { actor: diceActor } = useDiceActor();
   const { actor: plinkoActor } = usePlinkoActor();
+  const { actor: crashActor } = useCrashActor();
   const { principal, isAuthenticated } = useAuth();
+
+  // Map of actors by game ID
+  const actorMap = useMemo(() => ({
+    dice: diceActor,
+    plinko: plinkoActor,
+    crash: crashActor,
+  } as Record<GameType, any>), [diceActor, plinkoActor, crashActor]);
 
   const [loading, setLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
-  // Separate state for each game
-  const [diceData, setDiceData] = useState<GameHealthData>({
-    health: null, pendingWithdrawals: [], orphanedReport: null,
-    userBalances: [], lpPositions: [], error: null
-  });
-
-  const [plinkoData, setPlinkoData] = useState<GameHealthData>({
-    health: null, pendingWithdrawals: [], orphanedReport: null,
-    userBalances: [], lpPositions: [], error: null
+  // Dynamic state for all games - keyed by game ID
+  const [gameData, setGameData] = useState<Record<string, GameHealthData>>(() => {
+    const initial: Record<string, GameHealthData> = {};
+    adminGames.forEach(g => {
+      initial[g.id] = {
+        health: null, pendingWithdrawals: [], orphanedReport: null,
+        userBalances: [], lpPositions: [], error: null
+      };
+    });
+    return initial;
   });
 
   // Audit log state (per-game)
-  const [diceAuditLog, setDiceAuditLog] = useState<AuditLogData>({
-    entries: [], totalCount: 0, error: null
+  const [auditLogs, setAuditLogs] = useState<Record<string, AuditLogData>>(() => {
+    const initial: Record<string, AuditLogData> = {};
+    adminGames.forEach(g => {
+      initial[g.id] = { entries: [], totalCount: 0, error: null };
+    });
+    return initial;
   });
-  const [plinkoAuditLog, setPlinkoAuditLog] = useState<AuditLogData>({
-    entries: [], totalCount: 0, error: null
-  });
-  const [diceAuditOffset, setDiceAuditOffset] = useState(0);
-  const [plinkoAuditOffset, setPlinkoAuditOffset] = useState(0);
-  const [diceAuditFilter, setDiceAuditFilter] = useState<string>('all');
-  const [plinkoAuditFilter, setPlinkoAuditFilter] = useState<string>('all');
-  const AUDIT_LOG_PAGE_SIZE = 25;
 
+  const [auditOffsets, setAuditOffsets] = useState<Record<string, number>>(() => {
+    const initial: Record<string, number> = {};
+    adminGames.forEach(g => { initial[g.id] = 0; });
+    return initial;
+  });
+
+  const [auditFilters, setAuditFilters] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {};
+    adminGames.forEach(g => { initial[g.id] = 'all'; });
+    return initial;
+  });
+
+  const AUDIT_LOG_PAGE_SIZE = 25;
   const isAdmin = principal === ADMIN_PRINCIPAL;
 
   // Fetch data from a specific game backend
@@ -155,68 +182,68 @@ export const Admin: React.FC = () => {
     }
   };
 
-  // Fetch audit logs from a specific game backend
-  const fetchAuditLog = async (
-    actor: any,
-    setData: React.Dispatch<React.SetStateAction<AuditLogData>>,
-    gameName: string,
-    limit: number,
-    offset: number
-  ) => {
-    if (!actor) return;
+  // Generic audit log fetcher for any game
+  const fetchGameAuditLogs = useCallback(async (gameId: string, offset: number = 0) => {
+    const actor = actorMap[gameId as GameType];
+    if (!isAdmin || !isAuthenticated || !actor) return;
 
     try {
       const [logRes, countRes] = await Promise.all([
-        actor.admin_get_audit_log?.(BigInt(limit), BigInt(offset)),
+        actor.admin_get_audit_log?.(BigInt(AUDIT_LOG_PAGE_SIZE), BigInt(offset)),
         actor.admin_get_audit_log_count?.()
       ]);
 
       let entries: AuditEntry[] = [];
       let totalCount = 0;
 
-      if (logRes && 'Ok' in logRes) {
-        entries = logRes.Ok;
-      }
-      if (countRes && 'Ok' in countRes) {
-        totalCount = Number(countRes.Ok);
-      }
+      if (logRes && 'Ok' in logRes) entries = logRes.Ok;
+      if (countRes && 'Ok' in countRes) totalCount = Number(countRes.Ok);
 
-      setData({ entries, totalCount, error: null });
+      setAuditLogs(prev => ({
+        ...prev,
+        [gameId]: { entries, totalCount, error: null }
+      }));
     } catch (e) {
-      console.warn(`${gameName} audit log fetch failed:`, e);
-      setData(prev => ({ ...prev, error: String(e) }));
+      console.warn(`${gameId} audit log fetch failed:`, e);
+      setAuditLogs(prev => ({
+        ...prev,
+        [gameId]: { ...prev[gameId], error: String(e) }
+      }));
     }
-  };
+  }, [actorMap, isAdmin, isAuthenticated]);
 
-  // Fetch audit logs for a specific game (for pagination)
-  const fetchDiceAuditLogs = useCallback(async (offset: number = 0) => {
-    if (!isAdmin || !isAuthenticated || !diceActor) return;
-    await fetchAuditLog(diceActor, setDiceAuditLog, 'Dice', AUDIT_LOG_PAGE_SIZE, offset);
-  }, [diceActor, isAdmin, isAuthenticated]);
-
-  const fetchPlinkoAuditLogs = useCallback(async (offset: number = 0) => {
-    if (!isAdmin || !isAuthenticated || !plinkoActor) return;
-    await fetchAuditLog(plinkoActor, setPlinkoAuditLog, 'Plinko', AUDIT_LOG_PAGE_SIZE, offset);
-  }, [plinkoActor, isAdmin, isAuthenticated]);
-
-  // Fetch all game data in parallel
+  // Fetch all game data in parallel (dynamic based on registry)
   const fetchAllData = useCallback(async () => {
     if (!isAdmin || !isAuthenticated) return;
     setLoading(true);
 
-    await Promise.all([
-      fetchGameData(diceActor, setDiceData, 'Dice'),
-      fetchGameData(plinkoActor, setPlinkoData, 'Plinko'),
-      fetchAuditLog(diceActor, setDiceAuditLog, 'Dice', AUDIT_LOG_PAGE_SIZE, 0),
-      fetchAuditLog(plinkoActor, setPlinkoAuditLog, 'Plinko', AUDIT_LOG_PAGE_SIZE, 0),
-    ]);
+    // Fetch health data for all admin-enabled games
+    const healthPromises = adminGames.map(async (game) => {
+      const actor = actorMap[game.id];
+      if (!actor) return;
 
-    // Reset offsets on full refresh
-    setDiceAuditOffset(0);
-    setPlinkoAuditOffset(0);
+      const setData = (updater: (prev: GameHealthData) => GameHealthData) => {
+        setGameData(prev => ({ ...prev, [game.id]: updater(prev[game.id]) }));
+      };
+
+      await fetchGameData(actor, (data) => setData(() => data as GameHealthData), game.name);
+    });
+
+    // Fetch audit logs for all admin-enabled games
+    const auditPromises = adminGames.map(game => fetchGameAuditLogs(game.id, 0));
+
+    await Promise.all([...healthPromises, ...auditPromises]);
+
+    // Reset all audit offsets on full refresh
+    setAuditOffsets(prev => {
+      const reset: Record<string, number> = {};
+      Object.keys(prev).forEach(k => { reset[k] = 0; });
+      return reset;
+    });
+
     setLastRefresh(new Date());
     setLoading(false);
-  }, [diceActor, plinkoActor, isAdmin, isAuthenticated]);
+  }, [adminGames, actorMap, isAdmin, isAuthenticated, fetchGameAuditLogs]);
 
   // Initial fetch + auto-refresh
   useEffect(() => {
@@ -246,18 +273,23 @@ export const Admin: React.FC = () => {
     );
   }
 
-  // Calculate platform-wide metrics
-  const totalTVL = (diceData.health?.pool_reserve || 0n) +
-                   (plinkoData.health?.pool_reserve || 0n);
-  const activeGames = [diceData.health, plinkoData.health].filter(h => h).length;
-  const overallHealthy = [diceData.health, plinkoData.health]
-    .every(h => !h || h.is_healthy);
+  // Calculate platform-wide metrics dynamically from all admin games
+  const allHealthData = adminGames.map(g => gameData[g.id]?.health).filter(Boolean);
+  const totalTVL = allHealthData.reduce((sum, h) => sum + (h?.pool_reserve || 0n), 0n);
+  const activeGames = allHealthData.filter(h => h).length;
+  const overallHealthy = allHealthData.every(h => !h || h.is_healthy);
+  const allSolvent = allHealthData.every(h => !h || (h as any).is_solvent !== false);
 
   // Combine pending withdrawals from all games
-  const allPendingWithdrawals: UnifiedPendingWithdrawal[] = [
-    ...diceData.pendingWithdrawals.map(w => ({ ...w, game: 'Dice' })),
-    ...plinkoData.pendingWithdrawals.map(w => ({ ...w, game: 'Plinko' })),
-  ].sort((a, b) => Number(b.created_at - a.created_at)); // Most recent first
+  const allPendingWithdrawals: UnifiedPendingWithdrawal[] = adminGames
+    .flatMap(g => (gameData[g.id]?.pendingWithdrawals || []).map(w => ({ ...w, game: g.name })))
+    .sort((a, b) => Number(b.created_at - a.created_at)); // Most recent first
+
+  // Get list of operational game names for display
+  const operationalGames = adminGames
+    .filter(g => gameData[g.id]?.health)
+    .map(g => g.name)
+    .join(', ') || 'None';
 
 
   return (
@@ -288,8 +320,8 @@ export const Admin: React.FC = () => {
           </div>
           <div className="bg-gray-900/50 p-3 rounded">
             <div className="text-gray-400 text-xs mb-1">Active Games</div>
-            <div className="text-2xl font-mono text-white">{activeGames}/4</div>
-            <div className="text-xs text-gray-500 mt-1">Dice, Plinko operational</div>
+            <div className="text-2xl font-mono text-white">{activeGames}/{adminGames.length}</div>
+            <div className="text-xs text-gray-500 mt-1">{operationalGames} operational</div>
           </div>
           <div className="bg-gray-900/50 p-3 rounded">
             <div className="text-gray-400 text-xs mb-1">Platform Status</div>
@@ -297,82 +329,57 @@ export const Admin: React.FC = () => {
               {overallHealthy ? 'HEALTHY ✓' : 'ISSUES ⚠️'}
             </div>
           </div>
-          {/* NEW: Solvency Status */}
+          {/* Solvency Status */}
           <div className="bg-gray-900/50 p-3 rounded">
             <div className="text-gray-400 text-xs mb-1">Solvency Status</div>
-            {(() => {
-              const allSolvent = [diceData.health, plinkoData.health]
-                .every(h => !h || (h as any).is_solvent !== false);
-              return (
-                <div className={`text-2xl font-bold ${allSolvent ? 'text-green-400' : 'text-red-400'}`}>
-                  {allSolvent ? 'SOLVENT ✓' : 'DEFICIT ⚠️'}
-                </div>
-              );
-            })()}
+            <div className={`text-2xl font-bold ${allSolvent ? 'text-green-400' : 'text-red-400'}`}>
+              {allSolvent ? 'SOLVENT ✓' : 'DEFICIT ⚠️'}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* SECTION 2: Game Health Cards (Side by Side) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        {/* Dice Game Card */}
-        <GameHealthCard
-          gameName="Dice"
-          data={diceData}
-          canisterId="whchi-hyaaa-aaaao-a4ruq-cai"
-        />
-
-        {/* Plinko Game Card */}
-        <GameHealthCard
-          gameName="Plinko"
-          data={plinkoData}
-          canisterId="weupr-2qaaa-aaaap-abl3q-cai"
-        />
+      {/* SECTION 2: Game Health Cards (Dynamic) */}
+      <div className={`grid grid-cols-1 ${adminGames.length >= 2 ? 'lg:grid-cols-2' : ''} ${adminGames.length >= 3 ? 'xl:grid-cols-3' : ''} gap-6 mb-6`}>
+        {adminGames.map(game => (
+          <GameHealthCard
+            key={game.id}
+            gameName={game.name}
+            data={gameData[game.id]}
+            canisterId={game.canisterId}
+          />
+        ))}
       </div>
 
-      {/* SECTION 3: System Resources */}
+      {/* SECTION 3: System Resources (Dynamic) */}
       <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6">
         <h2 className="text-lg font-semibold mb-3 text-gray-300">System Resources</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-          <div className="bg-gray-900/50 p-3 rounded">
-            <div className="font-semibold text-blue-400 mb-2">Dice Backend</div>
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-gray-400">Heap Memory:</span>
-                <span className="font-mono">
-                  {diceData.health
-                    ? (Number(diceData.health.heap_memory_bytes) / 1024 / 1024).toFixed(2) + ' MB'
-                    : 'N/A'}
-                </span>
+        <div className={`grid grid-cols-1 ${adminGames.length >= 2 ? 'md:grid-cols-2' : ''} ${adminGames.length >= 3 ? 'lg:grid-cols-3' : ''} gap-4 text-sm`}>
+          {adminGames.map(game => {
+            const data = gameData[game.id];
+            const colors = GAME_COLORS[game.id] || GAME_COLORS.dice;
+            return (
+              <div key={game.id} className="bg-gray-900/50 p-3 rounded">
+                <div className={`font-semibold mb-2 ${colors.header}`}>{game.name} Backend</div>
+                <div className="space-y-1 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Heap Memory:</span>
+                    <span className="font-mono">
+                      {data?.health
+                        ? (Number(data.health.heap_memory_bytes) / 1024 / 1024).toFixed(2) + ' MB'
+                        : 'N/A'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Stable Memory:</span>
+                    <span className="font-mono">
+                      {data?.health?.stable_memory_pages?.toString() || 'N/A'} pages
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Stable Memory:</span>
-                <span className="font-mono">
-                  {diceData.health?.stable_memory_pages?.toString() || 'N/A'} pages
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-gray-900/50 p-3 rounded">
-            <div className="font-semibold text-purple-400 mb-2">Plinko Backend</div>
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-gray-400">Heap Memory:</span>
-                <span className="font-mono">
-                  {plinkoData.health
-                    ? (Number(plinkoData.health.heap_memory_bytes) / 1024 / 1024).toFixed(2) + ' MB'
-                    : 'N/A'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Stable Memory:</span>
-                <span className="font-mono">
-                  {plinkoData.health?.stable_memory_pages?.toString() || 'N/A'} pages
-                </span>
-              </div>
-            </div>
-          </div>
+            );
+          })}
         </div>
       </div>
 
@@ -383,7 +390,7 @@ export const Admin: React.FC = () => {
             Pending Withdrawals ({allPendingWithdrawals.length})
           </h2>
           <div className="text-sm text-gray-400">
-            Dice: {diceData.pendingWithdrawals.length} • Plinko: {plinkoData.pendingWithdrawals.length}
+            {adminGames.map(g => `${g.name}: ${gameData[g.id]?.pendingWithdrawals?.length || 0}`).join(' • ')}
           </div>
         </div>
         {allPendingWithdrawals.length === 0 ? (
@@ -401,87 +408,92 @@ export const Admin: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="text-gray-400">
-                {allPendingWithdrawals.map((w, i) => (
-                  <tr key={i} className="border-b border-gray-700 hover:bg-gray-700/30">
-                    <td className="px-4 py-3 font-mono text-xs" title={w.user.toString()}>
-                      {truncatePrincipal(w.user.toString())}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-1 rounded text-xs font-semibold ${
-                        w.game === 'Dice' ? 'bg-blue-900/30 text-blue-400' : 'bg-purple-900/30 text-purple-400'
-                      }`}>
-                        {w.game}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">{w.withdrawal_type}</td>
-                    <td className="px-4 py-3 text-right font-mono text-white">
-                      {formatUSDT(w.amount)} USDT
-                    </td>
-                    <td className="px-4 py-3 text-right">{formatTimeAgo(w.created_at)}</td>
-                  </tr>
-                ))}
+                {allPendingWithdrawals.map((w, i) => {
+                  const gameConfig = adminGames.find(g => g.name === w.game);
+                  const colors = GAME_COLORS[gameConfig?.id || 'dice'] || GAME_COLORS.dice;
+                  return (
+                    <tr key={i} className="border-b border-gray-700 hover:bg-gray-700/30">
+                      <td className="px-4 py-3 font-mono text-xs" title={w.user.toString()}>
+                        {truncatePrincipal(w.user.toString())}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-1 rounded text-xs font-semibold ${colors.badge}`}>
+                          {w.game}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">{w.withdrawal_type}</td>
+                      <td className="px-4 py-3 text-right font-mono text-white">
+                        {formatUSDT(w.amount)} USDT
+                      </td>
+                      <td className="px-4 py-3 text-right">{formatTimeAgo(w.created_at)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </div>
 
-      {/* SECTION 5: Orphaned Funds Summary */}
+      {/* SECTION 5: Orphaned Funds Summary (Dynamic) */}
       <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6">
         <h2 className="text-lg font-semibold mb-3 text-gray-300">Orphaned Funds</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <OrphanedFundsCard gameName="Dice" report={diceData.orphanedReport} />
-          <OrphanedFundsCard gameName="Plinko" report={plinkoData.orphanedReport} />
+        <div className={`grid grid-cols-1 ${adminGames.length >= 2 ? 'md:grid-cols-2' : ''} ${adminGames.length >= 3 ? 'lg:grid-cols-3' : ''} gap-4`}>
+          {adminGames.map(game => (
+            <OrphanedFundsCard
+              key={game.id}
+              gameName={game.name}
+              report={gameData[game.id]?.orphanedReport || null}
+            />
+          ))}
         </div>
       </div>
 
-      {/* SECTION 6: Per-Game User Balances & LP Positions */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        {/* Dice - User Balances & LP Positions */}
-        <GameBalancesCard
-          gameName="Dice"
-          color="blue"
-          userBalances={diceData.userBalances}
-          lpPositions={diceData.lpPositions}
-        />
-
-        {/* Plinko - User Balances & LP Positions */}
-        <GameBalancesCard
-          gameName="Plinko"
-          color="purple"
-          userBalances={plinkoData.userBalances}
-          lpPositions={plinkoData.lpPositions}
-        />
+      {/* SECTION 6: Per-Game User Balances & LP Positions (Dynamic) */}
+      <div className={`grid grid-cols-1 ${adminGames.length >= 2 ? 'lg:grid-cols-2' : ''} ${adminGames.length >= 3 ? 'xl:grid-cols-3' : ''} gap-6 mb-6`}>
+        {adminGames.map(game => {
+          const colorMap: Record<string, 'blue' | 'purple' | 'green' | 'orange'> = {
+            dice: 'blue',
+            plinko: 'orange',
+            crash: 'purple',
+          };
+          return (
+            <GameBalancesCard
+              key={game.id}
+              gameName={game.name}
+              color={colorMap[game.id] || 'blue'}
+              userBalances={gameData[game.id]?.userBalances || []}
+              lpPositions={gameData[game.id]?.lpPositions || []}
+            />
+          );
+        })}
       </div>
 
-      {/* SECTION 7: Per-Game Audit Logs */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <GameAuditLogCard
-          gameName="Dice"
-          color="blue"
-          auditLog={diceAuditLog}
-          offset={diceAuditOffset}
-          filter={diceAuditFilter}
-          pageSize={AUDIT_LOG_PAGE_SIZE}
-          onOffsetChange={(newOffset) => {
-            setDiceAuditOffset(newOffset);
-            fetchDiceAuditLogs(newOffset);
-          }}
-          onFilterChange={setDiceAuditFilter}
-        />
-        <GameAuditLogCard
-          gameName="Plinko"
-          color="purple"
-          auditLog={plinkoAuditLog}
-          offset={plinkoAuditOffset}
-          filter={plinkoAuditFilter}
-          pageSize={AUDIT_LOG_PAGE_SIZE}
-          onOffsetChange={(newOffset) => {
-            setPlinkoAuditOffset(newOffset);
-            fetchPlinkoAuditLogs(newOffset);
-          }}
-          onFilterChange={setPlinkoAuditFilter}
-        />
+      {/* SECTION 7: Per-Game Audit Logs (Dynamic) */}
+      <div className={`grid grid-cols-1 ${adminGames.length >= 2 ? 'lg:grid-cols-2' : ''} ${adminGames.length >= 3 ? 'xl:grid-cols-3' : ''} gap-6`}>
+        {adminGames.map(game => {
+          const colorMap: Record<string, 'blue' | 'purple'> = {
+            dice: 'blue',
+            plinko: 'purple',
+            crash: 'purple',
+          };
+          return (
+            <GameAuditLogCard
+              key={game.id}
+              gameName={game.name}
+              color={colorMap[game.id] || 'blue'}
+              auditLog={auditLogs[game.id] || { entries: [], totalCount: 0, error: null }}
+              offset={auditOffsets[game.id] || 0}
+              filter={auditFilters[game.id] || 'all'}
+              pageSize={AUDIT_LOG_PAGE_SIZE}
+              onOffsetChange={(newOffset) => {
+                setAuditOffsets(prev => ({ ...prev, [game.id]: newOffset }));
+                fetchGameAuditLogs(game.id, newOffset);
+              }}
+              onFilterChange={(filter) => setAuditFilters(prev => ({ ...prev, [game.id]: filter }))}
+            />
+          );
+        })}
       </div>
     </div>
   );

@@ -1,12 +1,16 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import useCrashActor from '../hooks/actors/useCrashActor';
-import {
-  GameLayout,
-  GameButton,
-} from '../components/game-ui';
+import useLedgerActor from '../hooks/actors/useLedgerActor';
+import { GameLayout } from '../components/game-ui';
+import { BettingRail } from '../components/betting';
 import { CrashCanvas } from '../components/game-specific/crash';
 import { useAuth } from '../providers/AuthProvider';
+import { useGameBalance } from '../providers/GameBalanceProvider';
+import { useBalance } from '../providers/BalanceProvider';
+import { DECIMALS_PER_CKUSDT, formatUSDT } from '../types/balance';
 import type { MultiCrashResult, SingleRocketResult } from '../declarations/crash_backend/crash_backend.did';
+
+const CRASH_BACKEND_CANISTER_ID = 'fws6k-tyaaa-aaaap-qqc7q-cai';
 
 // Per-rocket animation state
 export interface RocketState {
@@ -21,13 +25,28 @@ export interface RocketState {
 
 export const Crash: React.FC = () => {
   const { actor } = useCrashActor();
+  const { actor: ledgerActor } = useLedgerActor();
   const { isAuthenticated } = useAuth();
+
+  // Balance management
+  const { balance: walletBalance, refreshBalance: refreshWalletBalance } = useBalance();
+  const gameBalanceContext = useGameBalance('crash');
+  const balance = gameBalanceContext.balance;
+
+  const handleBalanceRefresh = useCallback(() => {
+    refreshWalletBalance();
+    gameBalanceContext.refresh();
+  }, [refreshWalletBalance, gameBalanceContext]);
 
   // Game state
   const [isPlaying, setIsPlaying] = useState(false);
   const [targetCashout, setTargetCashout] = useState(2.5);
   const [gameError, setGameError] = useState('');
   const [passedTarget, setPassedTarget] = useState(false);
+
+  // Betting state
+  const [betAmount, setBetAmount] = useState(0.01); // Per-rocket bet amount
+  const [maxBet, setMaxBet] = useState(100); // Max bet per rocket
 
   // Multi-rocket state
   const [rocketCount, setRocketCount] = useState(1);
@@ -37,6 +56,81 @@ export const Crash: React.FC = () => {
 
   // Animation frame ref for cleanup
   const animationRef = useRef<number | null>(null);
+
+  // Computed values
+  const totalBet = betAmount * rocketCount;
+  const maxPayout = totalBet * targetCashout;
+
+  // Helper to parse backend errors
+  const parseBackendError = (errorMsg: string): string => {
+    if (errorMsg.startsWith('INSUFFICIENT_BALANCE|')) {
+      const parts = errorMsg.split('|');
+      const userBalance = parts[1] || 'Unknown balance';
+      const betAmountStr = parts[2] || 'Unknown bet';
+      return `INSUFFICIENT CHIPS - BET NOT PLACED\n\n` +
+        `${userBalance}\n` +
+        `${betAmountStr}\n\n` +
+        `${parts[3] || 'This bet was not placed and no funds were deducted.'}\n\n` +
+        `Click "Buy Chips" below to add more USDT.`;
+    }
+    if (errorMsg.includes('exceeds house limit') || errorMsg.includes('house balance')) {
+      return `BET REJECTED - NO MONEY LOST\n\n` +
+        `The house doesn't have enough funds to cover this bet's potential payout. ` +
+        `Try lowering your bet or changing odds.`;
+    }
+    if (errorMsg.includes('Randomness seed initializing')) {
+      return `WARMING UP - PLEASE WAIT\n\n` +
+        `The randomness generator is initializing (happens once after updates). ` +
+        `Please try again in a few seconds. No funds were deducted.`;
+    }
+    if (errorMsg.includes('timed out') || errorMsg.includes('504') || errorMsg.includes('Gateway')) {
+      return `NETWORK TIMEOUT - YOUR FUNDS ARE SAFE\n\n` +
+        `The network was slow to respond. This does NOT affect your money.\n\n` +
+        `• If the bet wasn't processed: your balance is unchanged\n` +
+        `• If the bet was processed: the result is already applied\n\n` +
+        `Refresh the page to see your current balance.`;
+    }
+    return errorMsg;
+  };
+
+  // Fetch max bet when rocket count or target changes
+  useEffect(() => {
+    const fetchMaxBet = async () => {
+      if (!actor) return;
+      try {
+        const result = await actor.get_max_bet_per_rocket(rocketCount, targetCashout);
+        if ('Ok' in result) {
+          // Apply 10% safety margin for UI
+          const maxBetPerRocketUSDT = (Number(result.Ok) / DECIMALS_PER_CKUSDT) * 0.9;
+          const newMaxBet = Math.max(0.01, maxBetPerRocketUSDT);
+          setMaxBet(newMaxBet);
+          // Only adjust bet if it exceeds the new max
+          setBetAmount(prev => prev > newMaxBet ? newMaxBet : prev);
+        }
+      } catch (e) {
+        console.error('Failed to fetch max bet:', e);
+        setMaxBet(100);
+      }
+    };
+    fetchMaxBet();
+  }, [actor, rocketCount, targetCashout]);
+
+  // Balance management - periodic refresh
+  useEffect(() => {
+    if (actor) {
+      const intervalId = setInterval(() => {
+        gameBalanceContext.refresh().catch(console.error);
+      }, 30000);
+      const handleFocus = () => {
+        gameBalanceContext.refresh().catch(console.error);
+      };
+      window.addEventListener('focus', handleFocus);
+      return () => {
+        clearInterval(intervalId);
+        window.removeEventListener('focus', handleFocus);
+      };
+    }
+  }, [actor]);
 
   // Multi-rocket animation function
   const animateMultiRockets = useCallback((initialStates: RocketState[]) => {
@@ -98,6 +192,29 @@ export const Crash: React.FC = () => {
       return;
     }
 
+    // Guard against rapid clicks
+    if (isPlaying) return;
+
+    // Check user has enough balance
+    const totalBetE8s = BigInt(Math.floor(totalBet * DECIMALS_PER_CKUSDT));
+    if (totalBetE8s > balance.game) {
+      setGameError(`Insufficient balance for ${rocketCount} rocket${rocketCount > 1 ? 's' : ''}. Total bet: $${totalBet.toFixed(2)}`);
+      return;
+    }
+
+    if (betAmount < 0.01) {
+      setGameError('Minimum bet is 0.01 USDT per rocket');
+      return;
+    }
+
+    // Frontend limit check - use 15% to match backend
+    const maxPayoutE8s = BigInt(Math.floor(maxPayout * DECIMALS_PER_CKUSDT));
+    const maxAllowedPayout = (balance.house * BigInt(15)) / BigInt(100);
+    if (maxPayoutE8s > maxAllowedPayout) {
+      setGameError('Potential payout exceeds house limit. Reduce bet or rocket count.');
+      return;
+    }
+
     // Cancel any ongoing animation
     if (animationRef.current) {
       cancelAnimationFrame(animationRef.current);
@@ -111,9 +228,19 @@ export const Crash: React.FC = () => {
     setRocketStates([]);
     setPassedTarget(false);
 
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('Game timed out.')), 15000);
+    });
+
     try {
-      // Call multi-rocket endpoint
-      const result = await actor.play_crash_multi(targetCashout, rocketCount);
+      // Convert bet to e8s
+      const betPerRocketE8s = BigInt(Math.floor(betAmount * DECIMALS_PER_CKUSDT));
+
+      // Call multi-rocket endpoint with new signature: (bet_per_rocket, target_multiplier, rocket_count)
+      const result = await Promise.race([
+        actor.play_crash_multi(betPerRocketE8s, targetCashout, rocketCount),
+        timeoutPromise
+      ]);
 
       if ('Ok' in result) {
         const gameData = result.Ok;
@@ -135,25 +262,37 @@ export const Crash: React.FC = () => {
 
         // Start multi-rocket animation
         animateMultiRockets(initialStates);
+
+        // Refresh balance after game
+        gameBalanceContext.refresh().catch(console.error);
       } else {
-        setGameError(result.Err);
+        const userFriendlyError = parseBackendError(result.Err);
+        setGameError(userFriendlyError);
         setIsPlaying(false);
       }
     } catch (err) {
-      setGameError(err instanceof Error ? err.message : 'Failed to start game');
+      const errorMsg = err instanceof Error ? err.message : 'Failed to start game';
+      setGameError(parseBackendError(errorMsg));
       setIsPlaying(false);
+      // On timeout, refresh balance so user can see actual state
+      if (errorMsg.includes('timed out') || errorMsg.includes('504') || errorMsg.includes('Gateway')) {
+        gameBalanceContext.refresh().catch(console.error);
+      }
     }
   };
 
   // Count flying rockets
   const flyingCount = rocketStates.filter(r => !r.isCrashed).length;
 
+  // Calculate multiplier for BettingRail (potential payout multiplier)
+  const effectiveMultiplier = targetCashout;
+
   return (
     <GameLayout hideFooter noScroll>
-      <div className="flex-1 flex flex-col items-center justify-start px-4 overflow-hidden w-full">
+      <div className="flex-1 flex flex-col items-center justify-start px-4 overflow-y-auto w-full pb-36 md:pb-40">
 
         {/* Result Display */}
-        <div className="w-full max-w-lg mx-auto mb-2 min-h-[48px] flex items-center justify-center">
+        <div className="w-full max-w-lg mx-auto mb-2 min-h-[48px] flex items-center justify-center flex-shrink-0">
           {isPlaying ? (
             <div className="text-yellow-400 text-xs font-mono tracking-widest uppercase animate-pulse">
               {flyingCount} rocket{flyingCount !== 1 ? 's' : ''} flying...
@@ -173,21 +312,28 @@ export const Crash: React.FC = () => {
               </div>
               <div className="h-8 w-px bg-gray-800"></div>
               <div className="flex flex-col items-center">
-                <span className="text-[10px] uppercase text-gray-500 font-bold">Total Payout</span>
-                <span className={`text-xl font-bold ${Number(multiResult.total_payout) > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  ${(Number(multiResult.total_payout) / 1_000_000).toFixed(2)}
+                <span className="text-[10px] uppercase text-gray-500 font-bold">Net Profit</span>
+                <span className={`text-xl font-bold ${Number(multiResult.net_profit) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {Number(multiResult.net_profit) >= 0 ? '+' : ''}{formatUSDT(multiResult.net_profit)}
                 </span>
               </div>
             </div>
           ) : (
             <div className="text-gray-600 text-xs font-mono tracking-widest opacity-50 uppercase">
-              Set target & rockets
+              Tap canvas to launch
             </div>
           )}
         </div>
 
-        {/* Main Game Area */}
-        <div className="relative w-full flex-1 min-h-0 mb-4">
+        {/* Main Game Area - clickable to launch */}
+        <div
+          className={`relative w-full max-h-[50vh] aspect-video mb-4 flex-shrink-0 ${!isPlaying && actor && isAuthenticated && balance.game > 0n ? 'cursor-pointer' : ''}`}
+          onClick={() => {
+            if (!isPlaying && actor && isAuthenticated && balance.game > 0n) {
+              startGame();
+            }
+          }}
+        >
           <CrashCanvas
             rocketStates={rocketStates}
             targetMultiplier={targetCashout}
@@ -212,7 +358,7 @@ export const Crash: React.FC = () => {
         </div>
 
         {/* Controls */}
-        <div className="w-full max-w-md mx-auto mt-4 space-y-3">
+        <div className="w-full max-w-md mx-auto space-y-3 flex-shrink-0">
 
           {/* Target Slider */}
           <div className="flex items-center justify-between bg-[#0a0a14] p-3 rounded-lg border border-gray-800/50">
@@ -259,13 +405,13 @@ export const Crash: React.FC = () => {
             </div>
             <div className="h-6 w-px bg-gray-800"></div>
             <div className="flex flex-col items-center flex-1">
-              <span className="text-[10px] text-gray-500 uppercase tracking-wider">Target</span>
-              <span className="text-yellow-400 font-mono font-bold">{targetCashout.toFixed(2)}x</span>
+              <span className="text-[10px] text-gray-500 uppercase tracking-wider">Total Bet</span>
+              <span className="text-yellow-400 font-mono font-bold">${totalBet.toFixed(2)}</span>
             </div>
             <div className="h-6 w-px bg-gray-800"></div>
             <div className="flex flex-col items-center flex-1">
-              <span className="text-[10px] text-gray-500 uppercase tracking-wider">Rockets</span>
-              <span className="text-blue-400 font-mono font-bold">{rocketCount}</span>
+              <span className="text-[10px] text-gray-500 uppercase tracking-wider">Max Payout</span>
+              <span className="text-dfinity-turquoise font-mono font-bold">${maxPayout.toFixed(2)}</span>
             </div>
             <div className="h-6 w-px bg-gray-800"></div>
             <div className="flex flex-col items-center flex-1">
@@ -274,24 +420,33 @@ export const Crash: React.FC = () => {
             </div>
           </div>
 
-          {/* Launch Button */}
-          <GameButton
-            onClick={startGame}
-            disabled={!actor || !isAuthenticated || isPlaying}
-            loading={isPlaying}
-            label={`LAUNCH ${rocketCount} ROCKET${rocketCount > 1 ? 'S' : ''}`}
-            loadingLabel={`${flyingCount} FLYING...`}
-            icon="🚀"
-          />
-
           {gameError && (
-            <div className="text-red-400 text-xs text-center p-2 bg-red-900/10 border border-red-900/30 rounded">
+            <div className="text-red-400 text-xs text-center p-2 bg-red-900/10 border border-red-900/30 rounded whitespace-pre-line">
               {gameError}
             </div>
           )}
         </div>
       </div>
 
+      {/* BettingRail - Stays at bottom */}
+      <div className="flex-shrink-0">
+        <BettingRail
+          betAmount={betAmount}
+          onBetChange={setBetAmount}
+          maxBet={maxBet}
+          gameBalance={balance.game}
+          walletBalance={walletBalance}
+          houseBalance={balance.house}
+          ledgerActor={ledgerActor}
+          gameActor={actor}
+          onBalanceRefresh={handleBalanceRefresh}
+          disabled={isPlaying}
+          multiplier={effectiveMultiplier}
+          canisterId={CRASH_BACKEND_CANISTER_ID}
+          isBalanceLoading={gameBalanceContext.isLoading}
+          isBalanceInitialized={gameBalanceContext.isInitialized}
+        />
+      </div>
     </GameLayout>
   );
 };

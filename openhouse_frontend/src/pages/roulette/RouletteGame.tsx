@@ -3,15 +3,22 @@ import useRouletteActor from '@/hooks/actors/useRouletteActor';
 import useLedgerActor from '@/hooks/actors/useLedgerActor';
 import { GameLayout } from '@/components/game-ui';
 import { BettingRail } from '@/components/betting';
-import { RouletteTable, CardData } from '@/components/game-specific/roulette';
+import {
+  RouletteWheel,
+  BettingBoard,
+  ChipSelector,
+  PreviousNumbers,
+  PlacedBet
+} from '@/components/game-specific/roulette';
 import { useGameBalance } from '@/providers/GameBalanceProvider';
 import { useBalance } from '@/providers/BalanceProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { DECIMALS_PER_CKUSDT, formatUSDT } from '@/types/balance';
+import type { BetType, Bet, SpinResult } from '@/declarations/roulette_backend/roulette_backend.did';
 
 const ROULETTE_BACKEND_CANISTER_ID = 'wvrcw-3aaaa-aaaah-arm4a-cai';
 
-export function Roulette() {
+export function RouletteGame() {
   const { actor } = useRouletteActor();
   const { actor: ledgerActor } = useLedgerActor();
   const { isAuthenticated } = useAuth();
@@ -27,21 +34,16 @@ export function Roulette() {
   }, [refreshWalletBalance, gameBalanceContext]);
 
   // Game State
-  const [gameId, setGameId] = useState<bigint | null>(null);
-  const [dealerHand, setDealerHand] = useState<CardData[]>([]);
-  const [dealerHidden, setDealerHidden] = useState(false);
-  const [playerHands, setPlayerHands] = useState<CardData[][]>([]);
-  const [currentHandIndex, setCurrentHandIndex] = useState(0);
-  const [results, setResults] = useState<(string | null)[]>([]);
-  const [gameActive, setGameActive] = useState(false);
-  const [betAmount, setBetAmount] = useState(1);
-  const [canDouble, setCanDouble] = useState(false);
-  const [canSplit, setCanSplit] = useState(false);
+  const [bets, setBets] = useState<PlacedBet[]>([]);
+  const [chipValue, setChipValue] = useState(1);
+  const [isSpinning, setIsSpinning] = useState(false);
+  const [winningNumber, setWinningNumber] = useState<number | null>(null);
+  const [lastResult, setLastResult] = useState<SpinResult | null>(null);
+  const [previousNumbers, setPreviousNumbers] = useState<{ number: number; color: any }[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [maxBet] = useState(10); // Default max bet
+  const [maxBet] = useState(100); // Could be dynamic based on house balance
 
-  // Update balances periodically - initial refresh is now handled by GameBalanceProvider
+  // Update balances periodically
   useEffect(() => {
     if (actor) {
       const interval = setInterval(() => gameBalanceContext.refresh().catch(console.error), 30000);
@@ -49,230 +51,237 @@ export function Roulette() {
     }
   }, [actor]);
 
-  const mapHand = (hand: any): CardData[] => hand.cards;
+  const totalBetAmount = bets.reduce((sum, bet) => sum + bet.amount, 0);
 
-  const startGame = async () => {
-    if (!actor || !isAuthenticated) return;
-    if (balance.game < BigInt(Math.floor(betAmount * DECIMALS_PER_CKUSDT))) {
-      setError('Insufficient funds');
+  const handlePlaceBet = useCallback((newBet: PlacedBet) => {
+    if (isSpinning) return;
+
+    setBets(prevBets => {
+      // Check if bet already exists for these numbers
+      const existingIndex = prevBets.findIndex(b => {
+        const bNumbers = b.numbers.sort().join(',');
+        const newNumbers = newBet.numbers.sort().join(',');
+        return bNumbers === newNumbers;
+      });
+
+      if (existingIndex >= 0) {
+        // Add to existing bet
+        const updated = [...prevBets];
+        updated[existingIndex] = {
+          ...updated[existingIndex],
+          amount: updated[existingIndex].amount + newBet.amount
+        };
+        return updated;
+      } else {
+        // New bet
+        return [...prevBets, newBet];
+      }
+    });
+  }, [isSpinning]);
+
+  const handleRemoveBet = useCallback((betToRemove: PlacedBet) => {
+    if (isSpinning) return;
+
+    setBets(prevBets => {
+      const existingIndex = prevBets.findIndex(b => {
+        const bNumbers = b.numbers.sort().join(',');
+        const removeNumbers = betToRemove.numbers.sort().join(',');
+        return bNumbers === removeNumbers;
+      });
+
+      if (existingIndex >= 0) {
+        const updated = [...prevBets];
+        const currentAmount = updated[existingIndex].amount;
+
+        if (currentAmount <= chipValue) {
+          // Remove bet entirely
+          updated.splice(existingIndex, 1);
+        } else {
+          // Reduce bet amount
+          updated[existingIndex] = {
+            ...updated[existingIndex],
+            amount: currentAmount - chipValue
+          };
+        }
+        return updated;
+      }
+      return prevBets;
+    });
+  }, [chipValue, isSpinning]);
+
+  const handleClearBets = useCallback(() => {
+    if (!isSpinning) {
+      setBets([]);
+    }
+  }, [isSpinning]);
+
+  const handleSpin = async () => {
+    if (!actor || !isAuthenticated || isSpinning || bets.length === 0) return;
+
+    const totalBet = BigInt(Math.floor(totalBetAmount * DECIMALS_PER_CKUSDT));
+    if (totalBet > balance.game) {
+      setError('Insufficient balance for this bet');
       return;
     }
-    
-    setIsLoading(true);
-    setError(null);
-    setResults([]);
-    setDealerHidden(true);
-    
-    try {
-      const amount = BigInt(Math.floor(betAmount * DECIMALS_PER_CKUSDT));
-      const seed = Math.random().toString(36).substring(7);
-      
-      const res = await actor.start_game(amount, seed);
-      if ('Ok' in res) {
-        const data = res.Ok;
-        setGameId(data.game_id);
-        setPlayerHands([mapHand(data.player_hand)]);
-        setDealerHand([data.dealer_showing]);
-        setDealerHidden(!data.is_roulette); // Reveal if instant roulette
-        setCurrentHandIndex(0);
-        setCanDouble(data.can_double);
-        setCanSplit(data.can_split);
-        setGameActive(!data.is_roulette); // If roulette, game over immediately
-        
-        if (data.is_roulette) {
-             // We need to check result. But start_game returns game_id and initial state.
-             // If is_roulette is true, the game is effectively over on backend, but backend might not return result in GameStartResult.
-             // My backend impl sets is_active=false if roulette.
-             // I should fetch game state or infer result.
-             // If dealer showing Ace/10, they might have roulette too (Push).
-             // Else Player Roulette (Win).
-             // Backend handled payout.
-             // I'll fetch full game state to be sure or display animation.
-             // Let's quickly fetch updated game state.
-             const game = await actor.get_game(data.game_id);
-             if (game && game.length > 0) {
-                  updateGameState(game[0]);
-             }
-        }
-        
-        gameBalanceContext.refresh();
-      } else {
-        setError(res.Err);
-      }
-    } catch (e) {
-      setError('Failed to start game: ' + String(e));
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
-  const updateGameState = (game: any) => {
-    setPlayerHands(game.player_hands.map(mapHand));
-    setDealerHand(mapHand(game.dealer_hand));
-    setDealerHidden(game.is_active && !game.dealer_hidden_card.length); // Logic check: dealer_hidden_card is Opt
-    // If game.dealer_hidden_card is Some, we hide the second card.
-    // But dealer_hand usually contains ALL cards revealed SO FAR.
-    // My backend: dealer_hand has 1 card if hidden, 2 if revealed?
-    // Backend: dealer_hand starts with 1 card. Hidden is separate.
-    // When resolved, hidden is added to dealer_hand.
-    // So if game.dealer_hidden_card is Some, it means we are still playing and hidden card exists.
-    
-    setDealerHidden(game.dealer_hidden_card.length > 0); 
-    
-    setCurrentHandIndex(game.current_hand_index);
-    setGameActive(game.is_active);
-    
-    // Check actions for current hand
-    // Backend doesn't send 'can_double' in get_game. It sends it in ActionResult.
-    // We can infer or just use ActionResult if this was called from action.
-    // But for now assume false until action updates.
-    
-    // Update results
-    const newResults = game.results.map((r: any) => {
-         if (r.length === 0) return null;
-         const res = Object.keys(r[0])[0]; // Variant
-         return res;
-    });
-    setResults(newResults);
-  };
-
-  const handleAction = async (actionFn: () => Promise<any>) => {
-    if (!gameId || !actor) return;
-    setIsLoading(true);
+    setIsSpinning(true);
     setError(null);
+    setLastResult(null);
+
     try {
-      const res = await actionFn();
-      if ('Ok' in res) {
-        const data = res.Ok;
-        setPlayerHands((prev) => {
-             const newHands = [...prev];
-             // If split, we might have more hands now.
-             // The backend returns 'player_hand' (the ACTIVE hand).
-             // It doesn't return all hands in ActionResult.
-             // But my backend impl for split returns just the active hand?
-             // Let's look at backend again.
-             // ActionResult has `player_hand`.
-             // Split modifies game.player_hands.
-             // I should probably just refetch the game state or rely on ActionResult if comprehensive.
-             // ActionResult has `player_hand`.
-             // Split logic in backend: returns first hand of split.
-             // It's better to get full game state to ensure sync, especially for Split.
-             return newHands; 
-        });
-        
-        // For simplicity/reliability, I'll fetch full game state after every action.
-        // It costs an extra query but ensures UI is perfectly synced.
-        const game = await actor.get_game(gameId);
-        if (game && game.length > 0) {
-             updateGameState(game[0]);
-             setCanDouble(data.can_double);
-             setCanSplit(data.can_split);
-        }
-        
-        if (data.game_over) {
-             gameBalanceContext.refresh();
-        }
-      } else {
-        setError(res.Err);
+      // Convert PlacedBet[] to Bet[] for backend
+      const backendBets: Bet[] = bets.map(bet => ({
+        bet_type: bet.betType,
+        amount: BigInt(Math.floor(bet.amount * DECIMALS_PER_CKUSDT))
+      }));
+
+      const result = await actor.spin(backendBets);
+
+      if ('Ok' in result) {
+        const spinResult = result.Ok;
+        setWinningNumber(spinResult.winning_number);
+        setLastResult(spinResult);
+
+        // Add to previous numbers
+        setPreviousNumbers(prev => [
+          ...prev,
+          { number: spinResult.winning_number, color: spinResult.color }
+        ]);
+
+        // Clear bets after spin completes (10 seconds)
+        setTimeout(() => {
+          setBets([]);
+          setIsSpinning(false);
+          gameBalanceContext.refresh();
+        }, 10000);
+
+      } else if ('Err' in result) {
+        setError(result.Err);
+        setIsSpinning(false);
       }
-    } catch (e) {
-      setError('Action failed: ' + String(e));
-    } finally {
-      setIsLoading(false);
+    } catch (err) {
+      setError('Failed to spin: ' + String(err));
+      setIsSpinning(false);
     }
   };
 
   return (
     <GameLayout hideFooter noScroll>
-      <div className="flex-1 flex flex-col items-center w-full max-w-6xl mx-auto px-4 overflow-y-auto">
-        
+      <div className="flex-1 flex flex-col items-center w-full max-w-7xl mx-auto px-2 sm:px-4 overflow-y-auto py-4">
+
         {!isAuthenticated && (
-          <div className="text-center text-gray-400 text-sm py-2">
+          <div className="text-center text-gray-400 text-sm py-2 mb-4">
             Please log in to play
           </div>
         )}
 
-        <RouletteTable
-            dealerHand={dealerHand}
-            dealerHidden={dealerHidden}
-            playerHands={playerHands}
-            currentHandIndex={currentHandIndex}
-            results={results}
-            gameActive={gameActive}
-        />
+        {/* Wheel */}
+        <div className="mb-6">
+          <RouletteWheel winningNumber={winningNumber} isSpinning={isSpinning} />
+        </div>
+
+        {/* Result display */}
+        {lastResult && !isSpinning && (
+          <div className="mb-4 text-center animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="text-2xl font-bold mb-2">
+              {Number(lastResult.net_result) > 0 ? (
+                <span className="text-green-400">WON ${formatUSDT(lastResult.total_payout)}</span>
+              ) : Number(lastResult.net_result) < 0 ? (
+                <span className="text-red-400">LOST ${formatUSDT(lastResult.total_bet)}</span>
+              ) : (
+                <span className="text-gray-400">PUSH</span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Previous numbers */}
+        <div className="w-full max-w-3xl mb-4">
+          <PreviousNumbers numbers={previousNumbers} />
+        </div>
+
+        {/* Chip selector */}
+        <div className="mb-4">
+          <ChipSelector
+            selectedValue={chipValue}
+            onSelect={setChipValue}
+            disabled={isSpinning}
+          />
+        </div>
+
+        {/* Betting board */}
+        <div className="mb-4">
+          <BettingBoard
+            bets={bets}
+            chipValue={chipValue}
+            onPlaceBet={handlePlaceBet}
+            onRemoveBet={handleRemoveBet}
+            disabled={isSpinning}
+          />
+        </div>
 
         {/* Controls */}
-        {gameActive ? (
-             <div className="flex gap-4 mt-8 mb-8">
-                <button
-                    onClick={() => handleAction(() => actor!.hit(gameId!))}
-                    disabled={isLoading}
-                    className="px-8 py-4 bg-gray-800 hover:bg-gray-700 rounded-xl font-bold text-xl shadow-lg transform active:scale-95 transition disabled:opacity-50 disabled:scale-100"
-                >
-                    HIT
-                </button>
-                <button 
-                    onClick={() => handleAction(() => actor!.stand(gameId!))}
-                    disabled={isLoading}
-                    className="px-8 py-4 bg-yellow-600 hover:bg-yellow-500 rounded-xl font-bold text-xl shadow-lg transform active:scale-95 transition disabled:opacity-50 disabled:scale-100"
-                >
-                    STAND
-                </button>
-                {canDouble && (
-                    <button 
-                        onClick={() => handleAction(() => actor!.double_down(gameId!))}
-                        disabled={isLoading}
-                        className="px-8 py-4 bg-purple-600 hover:bg-purple-500 rounded-xl font-bold text-xl shadow-lg transform active:scale-95 transition disabled:opacity-50 disabled:scale-100"
-                    >
-                        DOUBLE
-                    </button>
-                )}
-                {canSplit && (
-                    <button 
-                        onClick={() => handleAction(() => actor!.split(gameId!))}
-                        disabled={isLoading}
-                        className="px-8 py-4 bg-orange-600 hover:bg-orange-500 rounded-xl font-bold text-xl shadow-lg transform active:scale-95 transition disabled:opacity-50 disabled:scale-100"
-                    >
-                        SPLIT
-                    </button>
-                )}
-             </div>
-        ) : (
-             <div className="mt-8 mb-8">
-                <button 
-                    onClick={startGame}
-                    disabled={isLoading || !isAuthenticated}
-                    className="px-12 py-4 bg-green-600 hover:bg-green-500 rounded-xl font-bold text-2xl shadow-lg transform active:scale-95 transition disabled:opacity-50 disabled:scale-100"
-                >
-                    {playerHands.length > 0 ? 'PLAY AGAIN' : 'DEAL'}
-                </button>
-             </div>
-        )}
+        <div className="flex gap-4 mb-4">
+          <button
+            onClick={handleClearBets}
+            disabled={isSpinning || bets.length === 0}
+            className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            CLEAR BETS
+          </button>
+          <button
+            onClick={handleSpin}
+            disabled={isSpinning || !isAuthenticated || bets.length === 0}
+            className="px-12 py-3 bg-green-600 hover:bg-green-500 rounded-lg font-bold text-xl shadow-lg transform active:scale-95 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100"
+          >
+            {isSpinning ? 'SPINNING...' : `SPIN ($${totalBetAmount.toFixed(2)})`}
+          </button>
+        </div>
 
-        {error && (
-            <div className="text-red-400 bg-red-900/20 border border-red-900/50 p-4 rounded-lg mb-4">
-                {error}
+        {/* Current bet summary */}
+        {bets.length > 0 && (
+          <div className="bg-black/30 rounded-lg p-3 mb-4 max-w-md w-full">
+            <div className="text-xs text-gray-400 mb-2">ACTIVE BETS:</div>
+            <div className="space-y-1 max-h-32 overflow-y-auto">
+              {bets.map((bet, idx) => (
+                <div key={idx} className="flex justify-between text-sm">
+                  <span className="text-gray-300">{bet.displayText}</span>
+                  <span className="text-white font-bold">${bet.amount.toFixed(2)}</span>
+                </div>
+              ))}
             </div>
+            <div className="border-t border-gray-700 mt-2 pt-2 flex justify-between font-bold">
+              <span>TOTAL:</span>
+              <span className="text-dfinity-turquoise">${totalBetAmount.toFixed(2)}</span>
+            </div>
+          </div>
         )}
 
+        {/* Error display */}
+        {error && (
+          <div className="text-red-400 bg-red-900/20 border border-red-900/50 p-4 rounded-lg mb-4 max-w-md">
+            {error}
+          </div>
+        )}
       </div>
 
+      {/* Betting Rail */}
       <div className="flex-shrink-0">
         <BettingRail
-            betAmount={betAmount}
-            onBetChange={setBetAmount}
-            maxBet={maxBet}
-            gameBalance={balance.game}
-            walletBalance={walletBalance}
-            houseBalance={balance.house}
-            ledgerActor={ledgerActor}
-            gameActor={actor}
-            onBalanceRefresh={handleBalanceRefresh}
-            disabled={gameActive || isLoading}
-            multiplier={2} // Estimated
-            canisterId={ROULETTE_BACKEND_CANISTER_ID}
-            isBalanceLoading={gameBalanceContext.isLoading}
-            isBalanceInitialized={gameBalanceContext.isInitialized}
+          betAmount={totalBetAmount}
+          onBetChange={() => {}} // Bets managed via chip placement
+          maxBet={maxBet}
+          gameBalance={balance.game}
+          walletBalance={walletBalance}
+          houseBalance={balance.house}
+          ledgerActor={ledgerActor}
+          gameActor={actor}
+          onBalanceRefresh={handleBalanceRefresh}
+          disabled={isSpinning}
+          multiplier={35} // Max straight-up payout
+          canisterId={ROULETTE_BACKEND_CANISTER_ID}
+          isBalanceLoading={gameBalanceContext.isLoading}
+          isBalanceInitialized={gameBalanceContext.isInitialized}
         />
       </div>
     </GameLayout>

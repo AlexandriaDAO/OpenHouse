@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { GameInfo } from '../types';
+import { GameInfo } from '../config/gameRegistry';
 
 interface GameCardProps {
   game: GameInfo;

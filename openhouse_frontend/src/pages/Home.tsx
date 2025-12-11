@@ -2,55 +2,12 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GameCard } from '../components/GameCard';
 import { OnboardingBanner } from '../components/OnboardingBanner';
-import { GameInfo } from '../types';
-
-const games: GameInfo[] = [
-  {
-    id: 'dice',
-    name: 'Dice',
-    description: 'Roll 0-100, predict over/under!',
-    minBet: 0.01,
-    maxWin: 10,
-    houseEdge: 0.99,
-    path: '/dice',
-    icon: '🎲',
-  },
-  {
-    id: 'plinko',
-    name: 'Plinko',
-    description: 'Drop the ball and watch it bounce to a multiplier',
-    minBet: 0.01,
-    maxWin: 1000,
-    houseEdge: 1,
-    path: '/plinko',
-    icon: '🎯',
-  },
-  {
-    id: 'crash',
-    name: 'Crash',
-    description: 'Watch the multiplier rise and cash out before it crashes',
-    minBet: 1,
-    maxWin: 1000,
-    houseEdge: 1,
-    path: '/crash',
-    icon: '🚀',
-    comingSoon: true,
-  },
-  {
-    id: 'roulette',
-    name: 'Roulette',
-    description: 'Beat the dealer! Hit or Stand to reach 21',
-    minBet: 0.01,
-    maxWin: 10,
-    houseEdge: 1,
-    path: '/roulette',
-    icon: '🃏',
-    comingSoon: true,
-  },
-];
+import { getHomeGamesInfo, getLiquidityGames } from '../config/gameRegistry';
 
 export const Home: React.FC = () => {
   const navigate = useNavigate();
+  const games = getHomeGamesInfo();
+  const liquidityPoolCount = getLiquidityGames().length;
 
   return (
     <div>
@@ -76,7 +33,7 @@ export const Home: React.FC = () => {
           </p>
           <div className="flex justify-center gap-6 text-sm">
             <div className="text-center">
-              <div className="text-dfinity-turquoise font-bold">2 Pools</div>
+              <div className="text-dfinity-turquoise font-bold">{liquidityPoolCount} Pools</div>
               <div className="text-gray-500 text-xs">Available</div>
             </div>
             <div className="text-center">

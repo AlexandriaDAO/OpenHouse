@@ -30,12 +30,12 @@ interface CrashCanvasProps {
   height?: number;
 }
 
-// Fixed rocket/explosion size (never changes)
-const ROCKET_SIZE = 120;
-const EXPLOSION_SIZE = 144;
-
-// Padding to keep rockets visible within canvas bounds (half of largest asset)
-const ROCKET_MARGIN = Math.ceil(EXPLOSION_SIZE / 2); // 72px
+// Fixed rocket/explosion display size
+// Images are 2000x1090 (aspect ratio ~1.835:1), so we size proportionally
+const ROCKET_HEIGHT = 60;  // Half of original 120
+const ROCKET_WIDTH = Math.round(ROCKET_HEIGHT * (2000 / 1090)); // ~110px
+const EXPLOSION_HEIGHT = 48;  // 1/3 of original 144
+const EXPLOSION_WIDTH = Math.round(EXPLOSION_HEIGHT * (2000 / 1090)); // ~88px
 
 export const CrashCanvas: React.FC<CrashCanvasProps> = ({
   rocketStates,
@@ -46,7 +46,7 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  
+
   // Use state for dynamic sizing, initialized with props
   const [size, setSize] = useState({ width: initialWidth, height: initialHeight });
 
@@ -56,10 +56,8 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
 
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        // Use contentRect for the content box size
         const { width, height } = entry.contentRect;
-        
-        // Update if dimensions change (using a small threshold to avoid float jitter)
+
         setSize(prevSize => {
             if (Math.abs(width - prevSize.width) > 1 || Math.abs(height - prevSize.height) > 1) {
                 return { width, height };
@@ -110,21 +108,23 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
       drawTargetLine(ctx, targetMultiplier, width, height);
     }
 
-    // Define drawable area with margins for rockets
-    // This ensures rockets never go past edges and never get clipped
-    const drawableArea = {
-      left: ROCKET_MARGIN,
-      right: width - ROCKET_MARGIN,
-      top: ROCKET_MARGIN,
-      bottom: height - ROCKET_MARGIN,
-      width: width - (ROCKET_MARGIN * 2),
-      height: height - (ROCKET_MARGIN * 2),
-    };
-
     // Keep everything in view - scale X to fit all history
+    // Use a minimum "window" size so rockets don't instantly reach the edge
     const maxHistoryLength = Math.max(
       ...rocketStates.map(r => r.history.length),
       100
+    );
+
+    // Define the visible X range for rockets (as percentage of canvas width)
+    // Rockets start at 10% and can go up to 85% (leaving room for rocket sprite)
+    const X_START_PERCENT = 0.10;
+    const X_END_PERCENT = 0.85;
+    const X_RANGE = X_END_PERCENT - X_START_PERCENT;
+
+    // Find the max multiplier among all rockets for relative positioning
+    const globalMaxMultiplier = Math.max(
+      ...rocketStates.map(r => r.currentMultiplier),
+      1.0
     );
 
     // Draw each rocket's trajectory
@@ -141,20 +141,20 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
 
-      let lastX = drawableArea.left;
-      let lastY = drawableArea.bottom;
-      let prevX = drawableArea.left;
-      let prevY = drawableArea.bottom;
+      let lastX = 0;
+      let lastY = height;
+      let prevX = 0;
+      let prevY = height;
 
       rocket.history.forEach((point, i) => {
-        // Map trajectory to drawable area (with margins)
-        const normalizedX = i / maxHistoryLength;
-        const x = drawableArea.left + (normalizedX * drawableArea.width);
+        // Base X position from time progression
+        const timeProgress = i / maxHistoryLength;
+        // Map time progress to our visible range
+        const x = (X_START_PERCENT + timeProgress * X_RANGE) * width;
 
         const logMult = Math.log10(point.multiplier);
         const logMax = Math.log10(100);
-        const normalizedY = Math.min(logMult / logMax, 1);
-        const y = drawableArea.bottom - (normalizedY * drawableArea.height);
+        const y = height - (Math.min(logMult / logMax, 1) * height);
 
         if (i === 0) {
           ctx.moveTo(x, y);
@@ -181,10 +181,29 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
       // Formula: rocketAngle = 90 - trajectoryAngle
       const rocketAngle = 90 - trajectoryAngle;
 
-      // Convert pixel position to percentage for CSS positioning
-      // These are already within safe bounds since trajectory uses drawableArea
+      // For rocket sprite position, use a combination of time and relative multiplier
+      // This creates visual separation between rockets at different multipliers
+      const timeProgress = (rocket.history.length - 1) / maxHistoryLength;
+
+      // Calculate how far ahead this rocket is relative to others
+      // A rocket at global max gets a small bonus, slower rockets lag behind
+      let relativeBonus = 0;
+      if (globalMaxMultiplier > 1 && rocketStates.length > 1) {
+        const relativePosition = rocket.currentMultiplier / globalMaxMultiplier;
+        // Give up to 10% extra X position for being the leader
+        relativeBonus = (relativePosition - 0.5) * 0.2; // ranges from -0.1 to +0.1
+      }
+
+      // Final X position: base + time progress + relative bonus (clamped to range)
+      const finalXProgress = Math.min(
+        Math.max(timeProgress + relativeBonus, 0),
+        1.0
+      );
+      const rocketXPercent = (X_START_PERCENT + finalXProgress * X_RANGE) * 100;
+
+      // Store rocket position as percentages
       newPositions.set(rocket.index, {
-        xPercent: (lastX / width) * 100,
+        xPercent: rocketXPercent,
         yPercent: (lastY / height) * 100,
         angle: rocketAngle
       });
@@ -208,12 +227,12 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
   const isProfit = netReturn >= 1.0;
 
   return (
-    <div 
+    <div
       ref={containerRef}
-      className="relative w-full h-full bg-gradient-to-b from-pure-black to-dfinity-navy rounded-lg overflow-hidden border border-pure-white/20 shadow-2xl"
+      className="relative w-full h-full bg-gradient-to-b from-pure-black to-dfinity-navy rounded-lg border border-pure-white/20 shadow-2xl"
     >
       {/* Stars Background */}
-      <div className="absolute inset-0 opacity-50">
+      <div className="absolute inset-0 opacity-50 overflow-hidden">
         {stars.map(star => (
           <div
             key={star.id}
@@ -236,7 +255,7 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
         className="relative z-10 w-full h-full"
       />
 
-      {/* Rocket Elements - one for each rocket */}
+      {/* Rocket Elements - rendered WITHOUT overflow clipping so they don't shrink at edges */}
       {rocketStates.map((rocket) => {
         const pos = rocketPositions.get(rocket.index);
         if (!pos) return null;
@@ -258,17 +277,29 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
               <img
                 src={getExplosionImage(variant)}
                 alt="Explosion"
-                width={EXPLOSION_SIZE}
-                height={EXPLOSION_SIZE}
-                style={{ filter: 'drop-shadow(0 0 12px rgba(255, 100, 0, 0.8))' }}
+                style={{
+                  width: `${EXPLOSION_WIDTH}px`,
+                  height: `${EXPLOSION_HEIGHT}px`,
+                  minWidth: `${EXPLOSION_WIDTH}px`,
+                  minHeight: `${EXPLOSION_HEIGHT}px`,
+                  maxWidth: `${EXPLOSION_WIDTH}px`,
+                  maxHeight: `${EXPLOSION_HEIGHT}px`,
+                  filter: 'drop-shadow(0 0 12px rgba(255, 100, 0, 0.8))'
+                }}
               />
             ) : (
               <img
                 src={getRocketImage(variant)}
                 alt="Rocket"
-                width={ROCKET_SIZE}
-                height={ROCKET_SIZE}
-                style={{ filter: 'drop-shadow(0 0 10px rgba(255, 200, 100, 0.6))' }}
+                style={{
+                  width: `${ROCKET_WIDTH}px`,
+                  height: `${ROCKET_HEIGHT}px`,
+                  minWidth: `${ROCKET_WIDTH}px`,
+                  minHeight: `${ROCKET_HEIGHT}px`,
+                  maxWidth: `${ROCKET_WIDTH}px`,
+                  maxHeight: `${ROCKET_HEIGHT}px`,
+                  filter: 'drop-shadow(0 0 10px rgba(255, 200, 100, 0.6))'
+                }}
               />
             )}
           </div>
@@ -328,14 +359,11 @@ function drawGrid(ctx: CanvasRenderingContext2D, width: number, height: number) 
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
   ctx.lineWidth = 1;
 
-  // Draw grid lines within the drawable area
-  const drawableHeight = height - (ROCKET_MARGIN * 2);
-
   for (let i = 0; i <= 4; i++) {
-    const y = ROCKET_MARGIN + drawableHeight - (i * drawableHeight / 4);
+    const y = height - (i * height / 4);
     ctx.beginPath();
-    ctx.moveTo(ROCKET_MARGIN, y);
-    ctx.lineTo(width - ROCKET_MARGIN, y);
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
     ctx.stroke();
   }
 }
@@ -346,26 +374,24 @@ function drawTargetLine(
   width: number,
   height: number
 ) {
-  const drawableHeight = height - (ROCKET_MARGIN * 2);
   const logMult = Math.log10(targetMultiplier);
   const logMax = Math.log10(100);
-  const normalizedY = Math.min(logMult / logMax, 1);
-  const y = ROCKET_MARGIN + drawableHeight - (normalizedY * drawableHeight);
+  const y = height - (Math.min(logMult / logMax, 1) * height);
 
   // Green dashed line at target
   ctx.strokeStyle = '#22C55E';
   ctx.lineWidth = 2;
   ctx.setLineDash([10, 5]);
   ctx.beginPath();
-  ctx.moveTo(ROCKET_MARGIN, y);
-  ctx.lineTo(width - ROCKET_MARGIN, y);
+  ctx.moveTo(0, y);
+  ctx.lineTo(width, y);
   ctx.stroke();
   ctx.setLineDash([]);
 
   // Label
   ctx.fillStyle = '#22C55E';
   ctx.font = 'bold 12px monospace';
-  ctx.fillText(`TARGET ${targetMultiplier.toFixed(2)}x`, width - ROCKET_MARGIN - 110, y - 5);
+  ctx.fillText(`TARGET ${targetMultiplier.toFixed(2)}x`, width - 120, y - 5);
 }
 
 function generateStars(count: number) {

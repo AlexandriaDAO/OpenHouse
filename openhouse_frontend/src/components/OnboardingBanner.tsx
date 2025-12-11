@@ -25,12 +25,11 @@ export const OnboardingBanner: React.FC<OnboardingBannerProps> = ({
   const [visible, setVisible] = useState(true);
   const [showProviderSelector, setShowProviderSelector] = useState(false);
 
-  // Check if user has any chips across all games
+  // Check if user has any chips across all games (only include games in GameType)
   const totalGameChips =
     gameBalanceContext.balances.dice.game +
     gameBalanceContext.balances.plinko.game +
-    gameBalanceContext.balances.crash.game +
-    gameBalanceContext.balances.roulette.game;
+    gameBalanceContext.balances.crash.game;
 
   // Check if user has dismissed the "get ckUSDT" banner before
   useEffect(() => {

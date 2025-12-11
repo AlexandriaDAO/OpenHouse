@@ -147,8 +147,8 @@ fn get_max_bet() -> u64 {
 }
 
 #[query]
-fn get_max_bet_per_rocket(rocket_count: u8) -> Result<u64, String> {
-    game::get_max_bet_per_rocket(rocket_count)
+fn get_max_bet_per_rocket(rocket_count: u8, target_multiplier: f64) -> Result<u64, String> {
+    game::get_max_bet_per_rocket(rocket_count, target_multiplier)
 }
 
 // =============================================================================

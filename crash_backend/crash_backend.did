@@ -154,7 +154,7 @@ service : {
 
   // Max bet queries
   get_max_bet: () -> (nat64) query;
-  get_max_bet_per_rocket: (nat8) -> (variant { Ok: nat64; Err: text }) query;
+  get_max_bet_per_rocket: (nat8, float64) -> (variant { Ok: nat64; Err: text }) query;
 
   // ============================================================================
   // USER ACCOUNTING

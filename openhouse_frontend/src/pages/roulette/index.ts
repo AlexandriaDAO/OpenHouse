@@ -1,1 +1,1 @@
-export { Roulette as RouletteGame } from './RouletteGame';
+export { RouletteGame } from './RouletteGame';

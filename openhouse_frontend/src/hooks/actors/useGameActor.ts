@@ -2,7 +2,7 @@ import { GameType } from '../../types/balance';
 import { LiquidityActorInterface } from '../../types/liquidity';
 import useDice from './useDiceActor';
 import usePlinko from './usePlinkoActor';
-import useRoulette from './useRouletteActor';
+import useCrash from './useCrashActor';
 
 interface UseGameActorResult {
   actor: LiquidityActorInterface | null;
@@ -22,14 +22,14 @@ export function useGameActor(gameId: GameType): UseGameActorResult {
   // Call all game actor hooks (they're singletons, so this is efficient)
   const dice = useDice();
   const plinko = usePlinko();
-  const roulette = useRoulette();
+  const crash = useCrash();
 
   // Map game ID to corresponding actor result
   // ic-use-actor returns { actor, isSuccess, ... } but we normalize to { actor, isReady }
   const actorMap: Record<GameType, UseGameActorResult> = {
     dice: { actor: dice.actor as LiquidityActorInterface | null, isReady: dice.isSuccess },
     plinko: { actor: plinko.actor as LiquidityActorInterface | null, isReady: plinko.isSuccess },
-    roulette: { actor: roulette.actor as LiquidityActorInterface | null, isReady: roulette.isSuccess },
+    crash: { actor: crash.actor as LiquidityActorInterface | null, isReady: crash.isSuccess },
   };
 
   return actorMap[gameId];

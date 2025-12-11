@@ -27,7 +27,7 @@ export function GameLiquidity({ gameId }: Props) {
   const { isAuthenticated } = useAuth();
   const { balance: walletBalance } = useBalance();
 
-  if (!config || !config.liquidity.enabled) {
+  if (!config || !config.pages.liquidity) {
     return <div className="text-center text-gray-400 py-12">Liquidity not available for this game</div>;
   }
 

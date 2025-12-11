@@ -29,6 +29,13 @@ const themeColors: Record<string, { border: string; bg: string; text: string; se
     selectedBg: 'bg-green-500/20',
     badge: 'bg-green-500/20 text-green-500',
   },
+  'purple-500': {
+    border: 'border-purple-500',
+    bg: 'bg-purple-500/10',
+    text: 'text-purple-500',
+    selectedBg: 'bg-purple-500/20',
+    badge: 'bg-purple-500/20 text-purple-500',
+  },
 };
 
 // Mini card component for game selection
@@ -91,28 +98,54 @@ function GamePoolCard({
   );
 }
 
-// Aggregated stats across all pools
-function AggregatedStats() {
+// Individual pool stats component for dynamic aggregation
+function useAllPoolStats() {
   const liquidityGames = getLiquidityGames();
 
-  // Fetch stats for all games
+  // Use hooks for each registered liquidity game
+  // Note: React hooks must be called unconditionally, so we call for known games
   const diceStats = usePoolStats('dice');
   const plinkoStats = usePoolStats('plinko');
-  const rouletteStats = usePoolStats('roulette');
+  const crashStats = usePoolStats('crash');
 
   const diceApy = useApyData('dice');
   const plinkoApy = useApyData('plinko');
-  const rouletteApy = useApyData('roulette');
+  const crashApy = useApyData('crash');
 
-  // Calculate totals
-  const totalPoolSize = [diceStats, plinkoStats, rouletteStats]
+  // Map stats by game ID for filtering
+  const statsMap: Record<string, { poolStats: typeof diceStats.poolStats }> = {
+    dice: diceStats,
+    plinko: plinkoStats,
+    crash: crashStats,
+  };
+
+  const apyMap: Record<string, { apy7: typeof diceApy.apy7 }> = {
+    dice: diceApy,
+    plinko: plinkoApy,
+    crash: crashApy,
+  };
+
+  // Only include games that are enabled in the registry
+  const enabledGameIds = liquidityGames.map(g => g.id);
+  const allStats = enabledGameIds.map(id => statsMap[id]).filter(Boolean);
+  const allApy = enabledGameIds.map(id => apyMap[id]).filter(Boolean);
+
+  return { allStats, allApy, liquidityGames };
+}
+
+// Aggregated stats across all pools
+function AggregatedStats() {
+  const { allStats, allApy, liquidityGames } = useAllPoolStats();
+
+  // Calculate totals (only include games with liquidity enabled)
+  const totalPoolSize = allStats
     .reduce((sum, s) => sum + (s.poolStats ? Number(s.poolStats.pool_reserve) : 0), 0);
 
-  const totalProviders = [diceStats, plinkoStats, rouletteStats]
+  const totalProviders = allStats
     .reduce((sum, s) => sum + (s.poolStats ? Number(s.poolStats.total_liquidity_providers) : 0), 0);
 
   // Average APY (only include games with data)
-  const apyValues = [diceApy, plinkoApy, rouletteApy]
+  const apyValues = allApy
     .filter(a => a.apy7)
     .map(a => a.apy7!.actual_apy_percent);
   const avgApy = apyValues.length > 0
