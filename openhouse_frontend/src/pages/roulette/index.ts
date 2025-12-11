@@ -1,1 +1,1 @@
-export { Roulette as RouletteGame } from './RouletteGame';
+export { default as RouletteGame } from './RouletteGame';
