@@ -6,10 +6,9 @@ Verify that deployed canisters match this open-source code.
 
 | Game | Canister ID | Module Hash |
 |------|-------------|-------------|
-| Plinko | `weupr-2qaaa-aaaap-abl3q-cai` | `9a55f67401ca119308a02fc0fd8ce0e26e005ccb99f4cea420fc9d00326a66b0` |
-| Crash | `fws6k-tyaaa-aaaap-qqc7q-cai` | `1c6b9aceeafeaaa3038d3c66e6d956861a2d1649620665bafcacd0f0a1d5773b` |
-| Roulette | `wvrcw-3aaaa-aaaah-arm4a-cai` | `11829c7099b7a29e255179fcb37faded45d4e7318252c8d948a9d1f665f8d6b5` |
-| Dice | `whchi-hyaaa-aaaao-a4ruq-cai` | `25c41b51cd48b98c73972138b34bfc3ac8a3699db734d6c4143eca5a06730721` |
+| Plinko | `weupr-2qaaa-aaaap-abl3q-cai` | `13eb35efbaf651fe553a95091e5a6f85d951927b22cf6d114c5fb287b2e7a177` |
+| Crash | `fws6k-tyaaa-aaaap-qqc7q-cai` | `0846c5ce0ec0b28d05f1c79009a71bd2e7f0cd4cde59ee36973c93a3d3a2cae3` |
+| Dice | `whchi-hyaaa-aaaao-a4ruq-cai` | `4e7a34739a575ed5032bae6c0eb8e1689f244a48f025b1f3a0ebbaf3fa45cc5f` |
 
 ## How to Verify
 
