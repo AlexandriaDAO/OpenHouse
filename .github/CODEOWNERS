@@ -5,4 +5,5 @@
 # Changes require approval from @ghost (impossible), effectively locking these folders.
 # See VERIFICATION.md for deployed hashes.
 /plinko_backend/ @ghost
+/crash_backend/ @ghost
 /dice_backend/ @ghost

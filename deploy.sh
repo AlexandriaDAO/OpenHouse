@@ -280,16 +280,16 @@ main() {
 
     case $DEPLOY_TARGET in
         crash)
-            deploy_crash
+            # deploy_crash
             ;;
         plinko)
-            deploy_plinko
+            # deploy_plinko
             ;;
         roulette)
             deploy_roulette
             ;;
         dice)
-            deploy_dice
+            # deploy_dice
             ;;
         frontend)
             deploy_frontend
