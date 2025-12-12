@@ -14,6 +14,7 @@ import { useGameBalance } from '@/providers/GameBalanceProvider';
 import { useBalance } from '@/providers/BalanceProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { DECIMALS_PER_CKUSDT, formatUSDT } from '@/types/balance';
+import { useBalanceRefresh } from '@/hooks/games';
 import type { BetType, Bet, SpinResult } from '@/declarations/roulette_backend/roulette_backend.did';
 
 const ROULETTE_BACKEND_CANISTER_ID = 'wvrcw-3aaaa-aaaah-arm4a-cai';
@@ -43,13 +44,11 @@ export function RouletteGame() {
   const [error, setError] = useState<string | null>(null);
   const [maxBet] = useState(100); // Could be dynamic based on house balance
 
-  // Update balances periodically
-  useEffect(() => {
-    if (actor) {
-      const interval = setInterval(() => gameBalanceContext.refresh().catch(console.error), 30000);
-      return () => clearInterval(interval);
-    }
-  }, [actor]);
+  // Balance management - periodic refresh and focus handler
+  useBalanceRefresh({
+    actor,
+    refresh: gameBalanceContext.refresh,
+  });
 
   const totalBetAmount = bets.reduce((sum, bet) => sum + bet.amount, 0);
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { decomposeIntoChips, ChipDenomination } from './chipConfig';
+import { decomposeIntoChips, ChipDenomination } from '../../betting/chipConfig';
 
 interface ChipStackProps {
   amount: number;

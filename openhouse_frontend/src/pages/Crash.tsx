@@ -8,6 +8,8 @@ import { useAuth } from '../providers/AuthProvider';
 import { useGameBalance } from '../providers/GameBalanceProvider';
 import { useBalance } from '../providers/BalanceProvider';
 import { DECIMALS_PER_CKUSDT, formatUSDT } from '../types/balance';
+import { parseBackendError } from '../utils/parseBackendError';
+import { useBalanceRefresh } from '../hooks/games';
 import type { MultiCrashResult, SingleRocketResult } from '../declarations/crash_backend/crash_backend.did';
 
 const CRASH_BACKEND_CANISTER_ID = 'fws6k-tyaaa-aaaap-qqc7q-cai';
@@ -61,38 +63,6 @@ export const Crash: React.FC = () => {
   const totalBet = betAmount * rocketCount;
   const maxPayout = totalBet * targetCashout;
 
-  // Helper to parse backend errors
-  const parseBackendError = (errorMsg: string): string => {
-    if (errorMsg.startsWith('INSUFFICIENT_BALANCE|')) {
-      const parts = errorMsg.split('|');
-      const userBalance = parts[1] || 'Unknown balance';
-      const betAmountStr = parts[2] || 'Unknown bet';
-      return `INSUFFICIENT CHIPS - BET NOT PLACED\n\n` +
-        `${userBalance}\n` +
-        `${betAmountStr}\n\n` +
-        `${parts[3] || 'This bet was not placed and no funds were deducted.'}\n\n` +
-        `Click "Buy Chips" below to add more USDT.`;
-    }
-    if (errorMsg.includes('exceeds house limit') || errorMsg.includes('house balance')) {
-      return `BET REJECTED - NO MONEY LOST\n\n` +
-        `The house doesn't have enough funds to cover this bet's potential payout. ` +
-        `Try lowering your bet or changing odds.`;
-    }
-    if (errorMsg.includes('Randomness seed initializing')) {
-      return `WARMING UP - PLEASE WAIT\n\n` +
-        `The randomness generator is initializing (happens once after updates). ` +
-        `Please try again in a few seconds. No funds were deducted.`;
-    }
-    if (errorMsg.includes('timed out') || errorMsg.includes('504') || errorMsg.includes('Gateway')) {
-      return `NETWORK TIMEOUT - YOUR FUNDS ARE SAFE\n\n` +
-        `The network was slow to respond. This does NOT affect your money.\n\n` +
-        `• If the bet wasn't processed: your balance is unchanged\n` +
-        `• If the bet was processed: the result is already applied\n\n` +
-        `Refresh the page to see your current balance.`;
-    }
-    return errorMsg;
-  };
-
   // Fetch max bet when rocket count or target changes
   useEffect(() => {
     const fetchMaxBet = async () => {
@@ -115,22 +85,11 @@ export const Crash: React.FC = () => {
     fetchMaxBet();
   }, [actor, rocketCount, targetCashout]);
 
-  // Balance management - periodic refresh
-  useEffect(() => {
-    if (actor) {
-      const intervalId = setInterval(() => {
-        gameBalanceContext.refresh().catch(console.error);
-      }, 30000);
-      const handleFocus = () => {
-        gameBalanceContext.refresh().catch(console.error);
-      };
-      window.addEventListener('focus', handleFocus);
-      return () => {
-        clearInterval(intervalId);
-        window.removeEventListener('focus', handleFocus);
-      };
-    }
-  }, [actor]);
+  // Balance management - periodic refresh and focus handler
+  useBalanceRefresh({
+    actor,
+    refresh: gameBalanceContext.refresh,
+  });
 
   // Multi-rocket animation function
   const animateMultiRockets = useCallback((initialStates: RocketState[]) => {

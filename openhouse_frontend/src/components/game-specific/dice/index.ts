@@ -6,6 +6,6 @@ export { DiceCountSelector } from './DiceCountSelector';
 // export { PendingWithdrawalRecovery } from './PendingWithdrawalRecovery'; // DEPRECATED
 
 // export { DiceStatistics } from './statistics/DiceStatistics'; // DEPRECATED
-export * from './chipConfig';
+// chipConfig moved to ../../betting/chipConfig (removed duplicate)
 export * from './ChipStack';
 export * from './ChipBetting';
