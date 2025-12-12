@@ -1,5 +1,5 @@
 import { useMemo, useCallback } from 'react';
-import { decomposeIntoChips, ChipDenomination } from '../game-specific/dice/chipConfig';
+import { decomposeIntoChips, ChipDenomination } from './chipConfig';
 import { ChipStackProps } from './types';
 
 // Base chip stack dimensions (desktop)

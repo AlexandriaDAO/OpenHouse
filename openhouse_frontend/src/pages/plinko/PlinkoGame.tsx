@@ -10,6 +10,8 @@ import { useGameBalance } from '../../providers/GameBalanceProvider';
 import { useBalance } from '../../providers/BalanceProvider';
 import { useAuth } from '../../providers/AuthProvider';
 import { DECIMALS_PER_CKUSDT } from '../../types/balance';
+import { parseBackendError } from '../../utils/parseBackendError';
+import { useBalanceRefresh } from '../../hooks/games';
 import type { PlinkoGameResult as BackendPlinkoResult } from '../../declarations/plinko_backend/plinko_backend.did';
 
 // Constants
@@ -145,6 +147,12 @@ export const Plinko: React.FC = () => {
     };
     updateMaxBet();
   }, [actor, ballCount, betAmount]);
+
+  // Balance management - periodic refresh and focus handler
+  useBalanceRefresh({
+    actor,
+    refresh: gameBalanceContext.refresh,
+  });
 
   // Try to release balls when both backend and filling are ready
   const tryReleaseBalls = useCallback(() => {
@@ -282,7 +290,7 @@ export const Plinko: React.FC = () => {
           await gameBalanceContext.refresh();
         }, 1000);
 
-        setGameError(errorMsg);
+        setGameError(parseBackendError(errorMsg));
         setIsWaiting(false);
         setIsFilling(false);
         setBucketOpen(false);

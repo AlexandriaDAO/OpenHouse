@@ -4,7 +4,7 @@ import {
   ChipDenomination,
   decomposeIntoChips,
   getNextHigherChip,
-} from './chipConfig';
+} from '../../betting/chipConfig';
 import { ChipStack } from './ChipStack';
 import { DECIMALS_PER_CKUSDT } from '../../../types/balance';
 

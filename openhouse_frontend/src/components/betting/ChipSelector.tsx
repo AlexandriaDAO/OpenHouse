@@ -1,4 +1,4 @@
-import { CHIP_DENOMINATIONS, ChipDenomination } from '../game-specific/dice/chipConfig';
+import { CHIP_DENOMINATIONS, ChipDenomination } from './chipConfig';
 
 interface ChipSelectorProps {
   onAddChip: (chip: ChipDenomination) => void;
