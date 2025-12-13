@@ -72,3 +72,15 @@
   0%, 100% { opacity: 0.3; }
   50% { opacity: 1; }
 }
+
+/* Pre-launch slide in animation */
+@keyframes slideInFromLeft {
+  from {
+    transform: translate(-150%, -50%) rotate(90deg);
+    opacity: 0;
+  }
+  to {
+    transform: translate(-50%, -50%) rotate(90deg);
+    opacity: 1;
+  }
+}

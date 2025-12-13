@@ -23,6 +23,8 @@ export interface RocketState {
   isCrashed: boolean;
   history: Array<{ multiplier: number; timestamp: number }>;
   startTime: number;
+  virtualElapsed: number;   // Accumulated virtual time (with slowdown applied)
+  lastFrameTime: number;    // For calculating delta between frames
 }
 
 export const Crash: React.FC = () => {
@@ -42,7 +44,8 @@ export const Crash: React.FC = () => {
 
   // Game state
   const [isPlaying, setIsPlaying] = useState(false);
-  const [targetCashout, setTargetCashout] = useState(2.5);
+  const [isWaitingForBackend, setIsWaitingForBackend] = useState(false);
+  const [targetCashout, setTargetCashout] = useState(10);
   const [gameError, setGameError] = useState('');
   const [passedTarget, setPassedTarget] = useState(false);
 
@@ -51,7 +54,7 @@ export const Crash: React.FC = () => {
   const [maxBet, setMaxBet] = useState(100); // Max bet per rocket
 
   // Multi-rocket state
-  const [rocketCount, setRocketCount] = useState(1);
+  const [rocketCount, setRocketCount] = useState(5);
   const [multiResult, setMultiResult] = useState<MultiCrashResult | null>(null);
   const [rocketStates, setRocketStates] = useState<RocketState[]>([]);
   const [allCrashed, setAllCrashed] = useState(false);
@@ -92,7 +95,7 @@ export const Crash: React.FC = () => {
   });
 
   // Multi-rocket animation function
-  const animateMultiRockets = useCallback((initialStates: RocketState[]) => {
+  const animateMultiRockets = useCallback((initialStates: RocketState[], target: number) => {
     const crashedSet = new Set<number>();
 
     const animate = () => {
@@ -104,13 +107,34 @@ export const Crash: React.FC = () => {
           if (rocket.isCrashed) return rocket;
 
           // Check if this rocket has started yet (staggered start)
-          const elapsed = now - rocket.startTime;
-          if (elapsed < 0) return rocket;
+          if (now < rocket.startTime) return rocket;
 
-          // Calculate multiplier using exponential curve
+          // Calculate real delta time since last frame
+          const realDelta = rocket.lastFrameTime > 0
+            ? now - rocket.lastFrameTime
+            : now - rocket.startTime; // First frame after start
+
+          // Calculate speed factor based on current state
+          // Slow down when above 20x AND below target (the exciting approach zone)
+          let speedFactor = 1.0;
+          const currentMult = rocket.currentMultiplier;
+
+          if (currentMult > 20 && currentMult < target) {
+            // Progressive slowdown as we approach target
+            // At 20x: speedFactor = 1.0
+            // At target: speedFactor = 0.25 (4x slower)
+            const progressToTarget = (currentMult - 20) / Math.max(target - 20, 1);
+            speedFactor = 1.0 - (progressToTarget * 0.75);
+          }
+          // Once past target, back to normal speed (speedFactor stays 1.0)
+
+          // Accumulate virtual time with slowdown applied
+          const newVirtualElapsed = rocket.virtualElapsed + (realDelta * speedFactor);
+
+          // Calculate multiplier from virtual elapsed time
           const duration = Math.min(rocket.crashPoint * 1000, 10000);
           const k = Math.log(rocket.crashPoint) / duration;
-          const mult = Math.min(Math.exp(k * elapsed), rocket.crashPoint);
+          const mult = Math.min(Math.exp(k * newVirtualElapsed), rocket.crashPoint);
 
           // Check if crashed
           const isCrashed = mult >= rocket.crashPoint;
@@ -122,7 +146,9 @@ export const Crash: React.FC = () => {
             ...rocket,
             currentMultiplier: mult,
             isCrashed,
-            history: [...rocket.history, { multiplier: mult, timestamp: elapsed }],
+            history: [...rocket.history, { multiplier: mult, timestamp: newVirtualElapsed }],
+            virtualElapsed: newVirtualElapsed,
+            lastFrameTime: now,
           };
         });
 
@@ -181,6 +207,7 @@ export const Crash: React.FC = () => {
 
     // Reset state
     setIsPlaying(true);
+    setIsWaitingForBackend(true);
     setAllCrashed(false);
     setGameError('');
     setMultiResult(null);
@@ -204,6 +231,7 @@ export const Crash: React.FC = () => {
       if ('Ok' in result) {
         const gameData = result.Ok;
         setMultiResult(gameData);
+        setIsWaitingForBackend(false);
 
         // Initialize rocket states with staggered start times
         const now = Date.now();
@@ -215,12 +243,14 @@ export const Crash: React.FC = () => {
           isCrashed: false,
           history: [],
           startTime: now + (i * 200), // 200ms stagger
+          virtualElapsed: 0,
+          lastFrameTime: 0,
         }));
 
         setRocketStates(initialStates);
 
-        // Start multi-rocket animation
-        animateMultiRockets(initialStates);
+        // Start multi-rocket animation with target for slowdown calculation
+        animateMultiRockets(initialStates, targetCashout);
 
         // Refresh balance after game
         gameBalanceContext.refresh().catch(console.error);
@@ -228,11 +258,13 @@ export const Crash: React.FC = () => {
         const userFriendlyError = parseBackendError(result.Err);
         setGameError(userFriendlyError);
         setIsPlaying(false);
+        setIsWaitingForBackend(false);
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to start game';
       setGameError(parseBackendError(errorMsg));
       setIsPlaying(false);
+      setIsWaitingForBackend(false);
       // On timeout, refresh balance so user can see actual state
       if (errorMsg.includes('timed out') || errorMsg.includes('504') || errorMsg.includes('Gateway')) {
         gameBalanceContext.refresh().catch(console.error);
@@ -252,7 +284,11 @@ export const Crash: React.FC = () => {
 
         {/* Result Display */}
         <div className="w-full max-w-lg mx-auto mb-2 min-h-[48px] flex items-center justify-center flex-shrink-0">
-          {isPlaying ? (
+          {isPlaying && isWaitingForBackend ? (
+            <div className="text-yellow-400 text-xs font-mono tracking-widest uppercase animate-pulse">
+              LAUNCH SEQUENCE INITIATED...
+            </div>
+          ) : isPlaying ? (
             <div className="text-yellow-400 text-xs font-mono tracking-widest uppercase animate-pulse">
               {flyingCount} rocket{flyingCount !== 1 ? 's' : ''} flying...
             </div>
@@ -299,6 +335,8 @@ export const Crash: React.FC = () => {
             rocketsSucceeded={multiResult?.rockets_succeeded ?? 0}
             width={1600}
             height={900}
+            isWaitingForBackend={isWaitingForBackend}
+            rocketCount={rocketCount}
           />
 
           {/* Milestone overlay when any rocket passes target */}

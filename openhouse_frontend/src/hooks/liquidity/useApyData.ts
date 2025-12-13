@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { GameType } from '../../types/balance';
-import { ApyInfo } from '../../types/liquidity';
+import { ApyInfo, DailySnapshot } from '../../types/liquidity';
 import { useGameActor } from '../actors/useGameActor';
+import { processChartData, calculateAccurateApy } from '../../utils/liquidityStats';
 
 export function useApyData(gameId: GameType) {
-  const [apy7, setApy7] = useState<ApyInfo | null>(null);
+  const [apy7Backend, setApy7Backend] = useState<ApyInfo | null>(null);
+  const [snapshots, setSnapshots] = useState<DailySnapshot[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { actor, isReady } = useGameActor(gameId);
@@ -16,8 +18,13 @@ export function useApyData(gameId: GameType) {
       setIsLoading(true);
       setError(null);
       try {
-        const result = await actor.get_pool_apy([7]);
-        setApy7(result);
+        // Fetch both backend APY (for expected) and snapshots (for accurate APY)
+        const [apyResult, snapshotsResult] = await Promise.all([
+          actor.get_pool_apy([7]),
+          actor.get_daily_stats(7),
+        ]);
+        setApy7Backend(apyResult);
+        setSnapshots(snapshotsResult);
       } catch (err) {
         console.error(`APY fetch error for ${gameId}:`, err);
         setError(err instanceof Error ? err.message : 'Failed to load APY');
@@ -29,5 +36,17 @@ export function useApyData(gameId: GameType) {
     fetchApy();
   }, [actor, isReady, gameId]);
 
-  return { apy7, isLoading, error };
+  // Calculate accurate APY from share price (filters zero share price days)
+  const accurateApy7 = useMemo(() => {
+    const chartData = processChartData(snapshots);
+    return calculateAccurateApy(chartData, 7);
+  }, [snapshots]);
+
+  // Return both: accurateApy7 for display, apy7Backend for expected APY info
+  return {
+    apy7: accurateApy7,           // The correct APY to display
+    apy7Backend,                   // Backend data (for expected APY, volume info)
+    isLoading,
+    error
+  };
 }

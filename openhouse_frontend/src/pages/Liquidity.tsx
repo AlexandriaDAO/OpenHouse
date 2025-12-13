@@ -88,9 +88,9 @@ function GamePoolCard({
         <div>
           <div className="text-gray-500 text-xs">7-Day APY</div>
           <div className={`font-mono ${
-            apy7 && apy7.actual_apy_percent >= 0 ? 'text-green-400' : 'text-red-400'
+            apy7 >= 0 ? 'text-green-400' : 'text-red-400'
           }`}>
-            {apy7 ? `${apy7.actual_apy_percent >= 0 ? '+' : ''}${apy7.actual_apy_percent.toFixed(2)}%` : '---'}
+            {`${apy7 >= 0 ? '+' : ''}${apy7.toFixed(2)}%`}
           </div>
         </div>
       </div>
@@ -150,8 +150,8 @@ function AggregatedStats() {
 
   // Average APY (only include games with data)
   const apyValues = allApy
-    .filter(a => a.apy7)
-    .map(a => a.apy7!.actual_apy_percent);
+    .filter(a => a.apy7 !== null)
+    .map(a => a.apy7);
   const avgApy = apyValues.length > 0
     ? apyValues.reduce((sum, v) => sum + v, 0) / apyValues.length
     : null;

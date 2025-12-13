@@ -92,16 +92,54 @@ describe('Liquidity Stats Utils', () => {
       // Day 0: Reserve 1000, Price 1.0 -> Shares 1000
       // Day 1: Price 1.1 (+10%). House Profit = 100.
       // Reserve is now 2000. (Profit 100 + Deposit 900?).
-      
+
       const snapshots = [
         createSnapshot(0, 1.0, 1000),
         createSnapshot(1, 1.1, 2000)
       ];
-      
+
       const chartData = processChartData(snapshots);
-      
+
       expect(chartData[1].houseProfit).toBeCloseTo(100);
       expect(chartData[1].poolReserve).toBe(2000);
+    });
+
+    it('should filter out pre-initialization days with zero share price', () => {
+      // Day 0: share_price = 0 (pre-initialization, should be filtered)
+      // Day 1: share_price = 1.0 (first valid day, should be baseline with 0% change)
+      // Day 2: share_price = 1.1 (normal day with 10% gain)
+
+      const snapshots = [
+        createSnapshot(0, 0, 0),      // Pre-init: should be filtered out
+        createSnapshot(1, 1.0, 1000), // First valid day
+        createSnapshot(2, 1.1, 1100)  // Normal gain
+      ];
+
+      const chartData = processChartData(snapshots);
+
+      // Should only have 2 data points (filtered out day 0)
+      expect(chartData.length).toBe(2);
+
+      // First valid day should be baseline (0% change)
+      expect(chartData[0].sharePrice).toBeCloseTo(1.0);
+      expect(chartData[0].sharePriceChangePercent).toBe(0);
+      expect(chartData[0].houseProfit).toBe(0);
+
+      // Second day should show normal 10% gain
+      expect(chartData[1].sharePrice).toBeCloseTo(1.1);
+      expect(chartData[1].sharePriceChangePercent).toBeCloseTo(10);
+      expect(chartData[1].houseProfit).toBeCloseTo(100);
+    });
+
+    it('should return empty array if all days have zero share price', () => {
+      const snapshots = [
+        createSnapshot(0, 0, 0),
+        createSnapshot(1, 0, 0)
+      ];
+
+      const chartData = processChartData(snapshots);
+
+      expect(chartData.length).toBe(0);
     });
   });
 });

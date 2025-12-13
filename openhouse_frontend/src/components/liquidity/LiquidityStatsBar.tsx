@@ -5,13 +5,14 @@ import { DECIMALS_PER_CKUSDT } from '../../types/balance';
 
 interface Props {
   poolStats: PoolStats | null;
-  apy7: ApyInfo | null;
+  apy7: number;                    // Accurate APY from share price
+  apy7Backend?: ApyInfo | null;    // Backend data (for expected APY)
   apyLoading: boolean;
   apyError: string | null;
   theme: GameTheme;
 }
 
-export function LiquidityStatsBar({ poolStats, apy7, apyLoading, apyError, theme }: Props) {
+export function LiquidityStatsBar({ poolStats, apy7, apy7Backend, apyLoading, apyError, theme }: Props) {
   const formatValue = (val: bigint) => (Number(val) / DECIMALS_PER_CKUSDT).toFixed(2);
 
   return (
@@ -39,16 +40,15 @@ export function LiquidityStatsBar({ poolStats, apy7, apyLoading, apyError, theme
         <div className={`text-xl md:text-2xl font-mono font-bold ${
           apyLoading ? 'text-gray-600' :
           apyError ? 'text-red-500' :
-          apy7 && apy7.actual_apy_percent >= 0 ? 'text-green-400' : 'text-red-400'
+          apy7 >= 0 ? 'text-green-400' : 'text-red-400'
         }`}>
           {apyLoading ? '...' :
            apyError ? '⚠️' :
-           apy7 ? `${apy7.actual_apy_percent >= 0 ? '+' : ''}${apy7.actual_apy_percent.toFixed(2)}%` :
-           'N/A'}
+           `${apy7 >= 0 ? '+' : ''}${apy7.toFixed(2)}%`}
         </div>
-        {apy7 && (
+        {apy7Backend && (
           <div className="text-[10px] text-gray-600 mt-0.5 hidden md:block">
-            Expected: {apy7.expected_apy_percent.toFixed(2)}%
+            Expected: {apy7Backend.expected_apy_percent.toFixed(2)}%
           </div>
         )}
       </div>

@@ -36,7 +36,7 @@ export function GameLiquidity({ gameId }: Props) {
 
   // Hooks
   const { poolStats, myPosition, refresh: refreshStats } = usePoolStats(gameId);
-  const { apy7, isLoading: apyLoading, error: apyError } = useApyData(gameId);
+  const { apy7, apy7Backend, isLoading: apyLoading, error: apyError } = useApyData(gameId);
 
   const handleRefresh = useCallback(async () => {
     await refreshStats();
@@ -63,6 +63,7 @@ export function GameLiquidity({ gameId }: Props) {
         <LiquidityStatsBar
           poolStats={poolStats}
           apy7={apy7}
+          apy7Backend={apy7Backend}
           apyLoading={apyLoading}
           apyError={apyError}
           theme={theme}

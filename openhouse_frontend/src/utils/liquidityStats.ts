@@ -21,7 +21,14 @@ export const safeDiv = (numerator: number, denominator: number): number => {
 export const processChartData = (snapshots: DailySnapshot[]): ChartDataPoint[] => {
   if (!snapshots || !Array.isArray(snapshots) || snapshots.length === 0) return [];
 
-  return snapshots.map((s, index) => {
+  // Filter out pre-initialization days (share_price = 0)
+  // Share price legitimately starts at 0 before first deposit, but those days
+  // aren't meaningful for performance tracking
+  const validSnapshots = snapshots.filter(s => Number(s.share_price) > 0);
+
+  if (validSnapshots.length === 0) return [];
+
+  return validSnapshots.map((s, index) => {
     try {
       // Defensive timestamp conversion
       const dateMs = Number(s.day_timestamp / 1_000_000n);
@@ -41,7 +48,7 @@ export const processChartData = (snapshots: DailySnapshot[]): ChartDataPoint[] =
       let prevPoolReserve = poolReserve;
       
       if (index > 0) {
-        const prevS = snapshots[index - 1];
+        const prevS = validSnapshots[index - 1];
         let prevSharePriceRaw = Number(prevS.share_price);
         if (prevSharePriceRaw > 0 && prevSharePriceRaw < MIN_SHARE_PRICE_THRESHOLD) {
           prevSharePriceRaw = prevSharePriceRaw * 100;

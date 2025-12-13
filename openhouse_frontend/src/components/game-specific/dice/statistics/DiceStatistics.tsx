@@ -10,8 +10,9 @@ export const DiceStatistics: React.FC = () => {
     isLoading,
     error,
     chartData,
-    apy7,
-    apy30,
+    apy7: apy7Backend,
+    apy30: apy30Backend,
+    accurateApy,
     hasData
   } = useStatsData(true);
 
@@ -80,10 +81,10 @@ export const DiceStatistics: React.FC = () => {
           {!isLoading && !error && hasData && (
             <>
               {/* APY Cards */}
-              {apy7 && apy30 && (
+              {accurateApy && (
                 <div className="grid grid-cols-2 gap-4">
-                  <ApyCard label="7-Day APY" info={apy7} />
-                  <ApyCard label="30-Day APY" info={apy30} />
+                  <ApyCard label="7-Day APY" accurateApy={accurateApy.apy7} backendApy={apy7Backend} />
+                  <ApyCard label="30-Day APY" accurateApy={accurateApy.apy30} backendApy={apy30Backend} />
                 </div>
               )}
 
@@ -111,17 +112,19 @@ export const DiceStatistics: React.FC = () => {
 };
 
 // Helper Component for APY Display
-const ApyCard: React.FC<{ label: string; info: any }> = ({ label, info }) => {
-  const isPositive = info.actual_apy_percent >= 0;
+const ApyCard: React.FC<{ label: string; accurateApy: number; backendApy: any }> = ({ label, accurateApy, backendApy }) => {
+  const isPositive = accurateApy >= 0;
   return (
     <div className="bg-black/20 border border-white/5 rounded-lg p-4 flex flex-col items-center hover:border-white/10 transition-colors">
       <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">{label}</div>
       <div className={`text-2xl font-mono font-bold ${isPositive ? 'text-dfinity-green' : 'text-dfinity-red'}`}>
-        {isPositive ? '+' : ''}{info.actual_apy_percent.toFixed(2)}%
+        {isPositive ? '+' : ''}{accurateApy.toFixed(2)}%
       </div>
-      <div className="text-[10px] text-gray-600 mt-1">
-        Expected: {info.expected_apy_percent.toFixed(2)}%
-      </div>
+      {backendApy && (
+        <div className="text-[10px] text-gray-600 mt-1">
+          Expected: {backendApy.expected_apy_percent.toFixed(2)}%
+        </div>
+      )}
     </div>
   );
 };
