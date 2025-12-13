@@ -1,16 +1,17 @@
 import React, { useRef, useEffect, useState, useMemo } from 'react';
 import type { RocketState } from '../../../pages/Crash';
 
-// Number of rocket/explosion image variants available
-const ROCKET_VARIANTS = 3;
+// Total number of unique rocket designs available (1-10)
+const TOTAL_ROCKET_DESIGNS = 10;
 
-// Get rocket image paths for a given variant (1-indexed)
-const getRocketImage = (variant: number) => `/rockets/rocket${variant}.png`;
-const getExplosionImage = (variant: number) => `/rockets/exploded${variant}.png`;
+// Get image paths for rockets and explosions
+// Format: 1a.png (flying), 1b.png (crashed) through 10a.png, 10b.png
+const getRocketImage = (variant: number) => `/rockets/${variant}a.png`;
+const getCrashedImage = (variant: number) => `/rockets/${variant}b.png`;
 
 // 10 distinct colors for trajectory lines
 export const ROCKET_COLORS = [
-  '#39FF14', // Lime green (original)
+  '#39FF14', // Lime green
   '#FF6B6B', // Coral red
   '#4ECDC4', // Teal
   '#FFE66D', // Yellow
@@ -30,12 +31,19 @@ interface CrashCanvasProps {
   height?: number;
 }
 
-// Fixed rocket/explosion display size
-// Images are 2000x1090 (aspect ratio ~1.835:1), so we size proportionally
-const ROCKET_HEIGHT = 60;  // Half of original 120
-const ROCKET_WIDTH = Math.round(ROCKET_HEIGHT * (2000 / 1090)); // ~110px
-const EXPLOSION_HEIGHT = 48;  // 1/3 of original 144
-const EXPLOSION_WIDTH = Math.round(EXPLOSION_HEIGHT * (2000 / 1090)); // ~88px
+// Fisher-Yates shuffle algorithm
+function shuffleArray<T>(array: T[]): T[] {
+  const shuffled = [...array];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
+// Rocket size as percentage of canvas height (scales with screen size)
+// ~85px on a 400px tall canvas, scales proportionally
+const ROCKET_SIZE_PERCENT = 0.21; // 21% of canvas height
 
 export const CrashCanvas: React.FC<CrashCanvasProps> = ({
   rocketStates,
@@ -59,10 +67,10 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
         const { width, height } = entry.contentRect;
 
         setSize(prevSize => {
-            if (Math.abs(width - prevSize.width) > 1 || Math.abs(height - prevSize.height) > 1) {
-                return { width, height };
-            }
-            return prevSize;
+          if (Math.abs(width - prevSize.width) > 1 || Math.abs(height - prevSize.height) > 1) {
+            return { width, height };
+          }
+          return prevSize;
         });
       }
     });
@@ -74,15 +82,23 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
   // Store positions as percentages (0-100) and angle in degrees
   const [rocketPositions, setRocketPositions] = useState<Map<number, { xPercent: number; yPercent: number; angle: number }>>(new Map());
 
-  // Assign each rocket a random image variant (persists for the rocket's lifetime)
-  const rocketVariants = useMemo(() => {
-    const variants = new Map<number, number>();
-    rocketStates.forEach((rocket) => {
-      if (!variants.has(rocket.index)) {
-        variants.set(rocket.index, Math.floor(Math.random() * ROCKET_VARIANTS) + 1);
+  // Assign each rocket a unique design (no duplicates)
+  // Shuffle all available designs and assign them to rockets by index
+  const rocketDesigns = useMemo(() => {
+    // Create array of all design numbers [1, 2, 3, ..., 10]
+    const allDesigns = Array.from({ length: TOTAL_ROCKET_DESIGNS }, (_, i) => i + 1);
+    // Shuffle to randomize assignment
+    const shuffled = shuffleArray(allDesigns);
+
+    // Map rocket index to design number
+    const designs = new Map<number, number>();
+    rocketStates.forEach((rocket, i) => {
+      if (!designs.has(rocket.index)) {
+        // Use modulo in case we ever have more rockets than designs
+        designs.set(rocket.index, shuffled[i % shuffled.length]);
       }
     });
-    return variants;
+    return designs;
   }, [rocketStates.map(r => r.index).join(',')]);
 
   // Generate stars once
@@ -120,12 +136,6 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
     const X_START_PERCENT = 0.10;
     const X_END_PERCENT = 0.85;
     const X_RANGE = X_END_PERCENT - X_START_PERCENT;
-
-    // Find the max multiplier among all rockets for relative positioning
-    const globalMaxMultiplier = Math.max(
-      ...rocketStates.map(r => r.currentMultiplier),
-      1.0
-    );
 
     // Draw each rocket's trajectory
     const newPositions = new Map<number, { xPercent: number; yPercent: number; angle: number }>();
@@ -181,29 +191,10 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
       // Formula: rocketAngle = 90 - trajectoryAngle
       const rocketAngle = 90 - trajectoryAngle;
 
-      // For rocket sprite position, use a combination of time and relative multiplier
-      // This creates visual separation between rockets at different multipliers
-      const timeProgress = (rocket.history.length - 1) / maxHistoryLength;
-
-      // Calculate how far ahead this rocket is relative to others
-      // A rocket at global max gets a small bonus, slower rockets lag behind
-      let relativeBonus = 0;
-      if (globalMaxMultiplier > 1 && rocketStates.length > 1) {
-        const relativePosition = rocket.currentMultiplier / globalMaxMultiplier;
-        // Give up to 10% extra X position for being the leader
-        relativeBonus = (relativePosition - 0.5) * 0.2; // ranges from -0.1 to +0.1
-      }
-
-      // Final X position: base + time progress + relative bonus (clamped to range)
-      const finalXProgress = Math.min(
-        Math.max(timeProgress + relativeBonus, 0),
-        1.0
-      );
-      const rocketXPercent = (X_START_PERCENT + finalXProgress * X_RANGE) * 100;
-
-      // Store rocket position as percentages
+      // Use the exact line endpoint coordinates for the rocket position
+      // This ensures the rocket is always precisely at the end of its trajectory line
       newPositions.set(rocket.index, {
-        xPercent: rocketXPercent,
+        xPercent: (lastX / width) * 100,
         yPercent: (lastY / height) * 100,
         angle: rocketAngle
       });
@@ -260,7 +251,11 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
         const pos = rocketPositions.get(rocket.index);
         if (!pos) return null;
 
-        const variant = rocketVariants.get(rocket.index) || 1;
+        // Get the unique design number for this rocket (1-10)
+        const designNum = rocketDesigns.get(rocket.index) || 1;
+
+        // Calculate rocket size based on canvas height (responsive)
+        const rocketSize = Math.round(size.height * ROCKET_SIZE_PERCENT);
 
         return (
           <div
@@ -273,35 +268,17 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
               zIndex: rocket.isCrashed ? 25 : 20,
             }}
           >
-            {rocket.isCrashed ? (
-              <img
-                src={getExplosionImage(variant)}
-                alt="Explosion"
-                style={{
-                  width: `${EXPLOSION_WIDTH}px`,
-                  height: `${EXPLOSION_HEIGHT}px`,
-                  minWidth: `${EXPLOSION_WIDTH}px`,
-                  minHeight: `${EXPLOSION_HEIGHT}px`,
-                  maxWidth: `${EXPLOSION_WIDTH}px`,
-                  maxHeight: `${EXPLOSION_HEIGHT}px`,
-                  filter: 'drop-shadow(0 0 12px rgba(255, 100, 0, 0.8))'
-                }}
-              />
-            ) : (
-              <img
-                src={getRocketImage(variant)}
-                alt="Rocket"
-                style={{
-                  width: `${ROCKET_WIDTH}px`,
-                  height: `${ROCKET_HEIGHT}px`,
-                  minWidth: `${ROCKET_WIDTH}px`,
-                  minHeight: `${ROCKET_HEIGHT}px`,
-                  maxWidth: `${ROCKET_WIDTH}px`,
-                  maxHeight: `${ROCKET_HEIGHT}px`,
-                  filter: 'drop-shadow(0 0 10px rgba(255, 200, 100, 0.6))'
-                }}
-              />
-            )}
+            <img
+              src={rocket.isCrashed ? getCrashedImage(designNum) : getRocketImage(designNum)}
+              alt={rocket.isCrashed ? "Crashed Rocket" : "Rocket"}
+              style={{
+                height: `${rocketSize}px`,
+                width: 'auto', // Preserve aspect ratio
+                filter: rocket.isCrashed
+                  ? 'drop-shadow(0 0 12px rgba(255, 100, 0, 0.8))'
+                  : 'drop-shadow(0 0 10px rgba(255, 200, 100, 0.7))'
+              }}
+            />
           </div>
         );
       })}

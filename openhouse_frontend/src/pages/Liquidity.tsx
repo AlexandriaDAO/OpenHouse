@@ -107,22 +107,26 @@ function useAllPoolStats() {
   const diceStats = usePoolStats('dice');
   const plinkoStats = usePoolStats('plinko');
   const crashStats = usePoolStats('crash');
+  const rouletteStats = usePoolStats('roulette');
 
   const diceApy = useApyData('dice');
   const plinkoApy = useApyData('plinko');
   const crashApy = useApyData('crash');
+  const rouletteApy = useApyData('roulette');
 
   // Map stats by game ID for filtering
   const statsMap: Record<string, { poolStats: typeof diceStats.poolStats }> = {
     dice: diceStats,
     plinko: plinkoStats,
     crash: crashStats,
+    roulette: rouletteStats,
   };
 
   const apyMap: Record<string, { apy7: typeof diceApy.apy7 }> = {
     dice: diceApy,
     plinko: plinkoApy,
     crash: crashApy,
+    roulette: rouletteApy,
   };
 
   // Only include games that are enabled in the registry
