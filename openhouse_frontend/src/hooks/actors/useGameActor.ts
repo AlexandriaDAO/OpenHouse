@@ -3,6 +3,7 @@ import { LiquidityActorInterface } from '../../types/liquidity';
 import useDice from './useDiceActor';
 import usePlinko from './usePlinkoActor';
 import useCrash from './useCrashActor';
+import useRoulette from './useRouletteActor';
 
 interface UseGameActorResult {
   actor: LiquidityActorInterface | null;
@@ -23,6 +24,7 @@ export function useGameActor(gameId: GameType): UseGameActorResult {
   const dice = useDice();
   const plinko = usePlinko();
   const crash = useCrash();
+  const roulette = useRoulette();
 
   // Map game ID to corresponding actor result
   // ic-use-actor returns { actor, isSuccess, ... } but we normalize to { actor, isReady }
@@ -30,6 +32,7 @@ export function useGameActor(gameId: GameType): UseGameActorResult {
     dice: { actor: dice.actor as LiquidityActorInterface | null, isReady: dice.isSuccess },
     plinko: { actor: plinko.actor as LiquidityActorInterface | null, isReady: plinko.isSuccess },
     crash: { actor: crash.actor as LiquidityActorInterface | null, isReady: crash.isSuccess },
+    roulette: { actor: roulette.actor as LiquidityActorInterface | null, isReady: roulette.isSuccess },
   };
 
   return actorMap[gameId];
