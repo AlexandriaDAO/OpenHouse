@@ -428,23 +428,29 @@ export const Life: React.FC = () => {
     }
   }, [gridSize.rows, gridSize.cols]);
 
-  // Handle canvas sizing with devicePixelRatio for crisp rendering
-  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+  // Canvas sizing ref to avoid state dependencies in draw
+  const canvasSizeRef = useRef({ width: 0, height: 0 });
+  const [, forceRender] = useState(0);
 
+  // Handle canvas sizing with devicePixelRatio for crisp rendering
   useEffect(() => {
+    // Only set up canvas sizing when in game mode
+    if (mode !== 'game') return;
+
     const container = containerRef.current;
-    if (!container) return;
+    const canvas = canvasRef.current;
+    if (!container || !canvas) return;
 
     const updateCanvasSize = () => {
-      const canvas = canvasRef.current;
-      if (!canvas || !container) return;
-
       const dpr = window.devicePixelRatio || 1;
       const rect = container.getBoundingClientRect();
-      const width = rect.width;
-      const height = rect.height;
+      const width = Math.floor(rect.width);
+      const height = Math.floor(rect.height);
 
-      if (width === 0 || height === 0) return; // Skip if container not sized yet
+      if (width === 0 || height === 0) return;
+
+      // Only update if size changed
+      if (canvasSizeRef.current.width === width && canvasSizeRef.current.height === height) return;
 
       // Set actual canvas size in memory (scaled for crisp rendering)
       canvas.width = width * dpr;
@@ -454,19 +460,27 @@ export const Life: React.FC = () => {
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
 
-      setCanvasSize({ width, height });
+      canvasSizeRef.current = { width, height };
+      forceRender(n => n + 1); // Trigger redraw
     };
 
     // Use ResizeObserver for reliable sizing
-    const resizeObserver = new ResizeObserver(() => {
-      updateCanvasSize();
-    });
-
+    const resizeObserver = new ResizeObserver(updateCanvasSize);
     resizeObserver.observe(container);
+
+    // Initial sizing
     updateCanvasSize();
 
-    return () => resizeObserver.disconnect();
-  }, []);
+    // Retry sizing after layout settles
+    const timeoutId = setTimeout(updateCanvasSize, 50);
+    const timeoutId2 = setTimeout(updateCanvasSize, 200);
+
+    return () => {
+      resizeObserver.disconnect();
+      clearTimeout(timeoutId);
+      clearTimeout(timeoutId2);
+    };
+  }, [mode]);
 
   // Auth initialization
   useEffect(() => {
@@ -498,7 +512,7 @@ export const Life: React.FC = () => {
 
   const setupActor = (client: AuthClient) => {
     const identity = client.getIdentity();
-    const agent = new HttpAgent({ identity, host: 'https://icp0.io' });
+    const agent = new HttpAgent({ identity, host: 'https://icp-api.io' });
     const newActor = Actor.createActor<_SERVICE>(idlFactory, {
       agent,
       canisterId: LIFE1_CANISTER_ID
@@ -532,10 +546,22 @@ export const Life: React.FC = () => {
 
   const handleCreateGame = async () => {
     if (!actor || !newGameName.trim()) return;
+
+    // Validate game name
+    const trimmedName = newGameName.trim();
+    if (trimmedName.length > 50) {
+      setError('Game name must be 50 characters or less');
+      return;
+    }
+    if (!/^[a-zA-Z0-9\s\-_]+$/.test(trimmedName)) {
+      setError('Game name can only contain letters, numbers, spaces, hyphens, and underscores');
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
     try {
-      const result = await actor.create_game(newGameName, {
+      const result = await actor.create_game(trimmedName, {
         width: 200,
         height: 150,
         max_players: 4,
@@ -731,14 +757,13 @@ export const Life: React.FC = () => {
   // Draw the grid with territory colors (with zoom and pan)
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas || canvasSize.width === 0 || canvasSize.height === 0) return;
+    const { width: displayWidth, height: displayHeight } = canvasSizeRef.current;
+    if (!canvas || displayWidth === 0 || displayHeight === 0) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
-    const displayWidth = canvasSize.width;
-    const displayHeight = canvasSize.height;
 
     // Reset transform and clear
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -816,7 +841,7 @@ export const Life: React.FC = () => {
     ctx.strokeRect(0, 0, gridSize.cols * cellSize, gridSize.rows * cellSize);
 
     ctx.restore();
-  }, [grid, territory, gridSize, zoom, panOffset, canvasSize]);
+  }, [grid, territory, gridSize, zoom, panOffset]);
 
   useEffect(() => {
     draw();
@@ -1123,6 +1148,7 @@ export const Life: React.FC = () => {
               value={newGameName}
               onChange={(e) => setNewGameName(e.target.value)}
               placeholder="Enter game name..."
+              maxLength={50}
               className="flex-1 px-4 py-2 rounded-lg bg-black border border-white/20 text-white placeholder-gray-500 focus:border-dfinity-turquoise/50 focus:outline-none"
             />
             <button
