@@ -37,6 +37,7 @@ function App() {
                   <Route path="/predict" element={<Predict />} />
                   <Route path="/life" element={<Life />} />
                   <Route path="/admin" element={<Admin />} />
+                  <Route path="/life" element={<Life />} />
                 </Routes>
               </Layout>
             </GameBalanceProvider>

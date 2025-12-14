@@ -8,9 +8,6 @@ const CELL_SIZE = 10;
 const GRID_COLOR = 'rgba(255, 255, 255, 0.08)';
 const DEAD_COLOR = '#000000';
 
-// Backend canister ID
-const LIFE1_CANISTER_ID = 'pijnb-7yaaa-aaaae-qgcuq-cai';
-
 // Player colors
 const PLAYER_COLORS: Record<number, string> = {
   1: '#39FF14', // Green - Player 1
@@ -362,27 +359,6 @@ const CATEGORY_INFO: Record<PatternCategory, { label: string; color: string; ico
   oscillator: { label: 'Oscillators', color: 'text-purple-400 border-purple-500/50 bg-purple-500/10', icon: 'o' },
 };
 
-// Backend actor type
-type Life1Actor = {
-  greet: (name: string) => Promise<string>;
-  create_game: (name: string, config: { width: number; height: number; max_players: number; generations_limit: [] | [bigint] }) => Promise<{ Ok: bigint } | { Err: string }>;
-  join_game: (gameId: bigint) => Promise<{ Ok: null } | { Err: string }>;
-  start_game: (gameId: bigint) => Promise<{ Ok: null } | { Err: string }>;
-  place_pattern: (gameId: bigint, patternName: string, x: number, y: number, generation: bigint) => Promise<{ Ok: bigint } | { Err: string }>;
-  get_placements_since: (gameId: bigint, sinceIndex: bigint) => Promise<{ Ok: Array<{ player: Principal; pattern_name: string; x: number; y: number; generation: bigint; timestamp: bigint }> } | { Err: string }>;
-  list_games: () => Promise<Array<[bigint, string, { Waiting: null } | { Active: null } | { Finished: null }, number]>>;
-  get_game: (gameId: bigint) => Promise<{ Ok: { id: bigint; name: string; width: number; height: number; players: Principal[] } } | { Err: string }>;
-};
-
-// Get backend actor
-async function getLife1Actor(): Promise<Life1Actor> {
-  const agent = new HttpAgent({ host: 'https://icp0.io' });
-  return Actor.createActor(idlFactory, {
-    agent,
-    canisterId: LIFE1_CANISTER_ID,
-  }) as Life1Actor;
-}
-
 export const Life: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -399,15 +375,6 @@ export const Life: React.FC = () => {
   const animationRef = useRef<number | null>(null);
   const lastUpdateRef = useRef<number>(0);
   const [parsedPattern, setParsedPattern] = useState<number[][]>([]);
-
-  // Multiplayer state
-  const [isMultiplayer, setIsMultiplayer] = useState(false);
-  const [gameId, setGameId] = useState<bigint | null>(null);
-  const [lastPlacementIndex, setLastPlacementIndex] = useState<bigint>(0n);
-  const [games, setGames] = useState<Array<[bigint, string, { Waiting: null } | { Active: null } | { Finished: null }, number]>>([]);
-  const [showGameList, setShowGameList] = useState(false);
-  const [newGameName, setNewGameName] = useState('');
-  const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
 
   // Parse pattern when selection changes
   useEffect(() => {
@@ -449,126 +416,6 @@ export const Life: React.FC = () => {
       .fill(null)
       .map(() => Array(cols).fill(0));
   };
-
-  // Fetch games list
-  const fetchGames = useCallback(async () => {
-    try {
-      const actor = await getLife1Actor();
-      const gamesList = await actor.list_games();
-      setGames(gamesList);
-    } catch (error) {
-      console.error('Failed to fetch games:', error);
-    }
-  }, []);
-
-  // Poll for placements (when in multiplayer mode)
-  useEffect(() => {
-    if (!isMultiplayer || !gameId) return;
-
-    const pollInterval = setInterval(async () => {
-      try {
-        const actor = await getLife1Actor();
-        const result = await actor.get_placements_since(gameId, lastPlacementIndex);
-
-        if ('Ok' in result && result.Ok.length > 0) {
-          // Apply new placements to local grid
-          result.Ok.forEach(placement => {
-            const coords = parseRLE(PATTERNS.find(p => p.name === placement.pattern_name)?.rle || '');
-            setGrid((currentGrid) => {
-              const newGrid = currentGrid.map((r) => [...r]);
-              coords.forEach(([dx, dy]) => {
-                const newRow = (placement.y + dy + gridSize.rows) % gridSize.rows;
-                const newCol = (placement.x + dx + gridSize.cols) % gridSize.cols;
-                if (newGrid[newRow]) {
-                  // Use player index based on placement order (simplified)
-                  newGrid[newRow][newCol] = 1;
-                }
-              });
-              return newGrid;
-            });
-          });
-          setLastPlacementIndex(lastPlacementIndex + BigInt(result.Ok.length));
-        }
-      } catch (error) {
-        console.error('Failed to poll placements:', error);
-      }
-    }, 1500); // Poll every 1.5 seconds
-
-    return () => clearInterval(pollInterval);
-  }, [isMultiplayer, gameId, lastPlacementIndex, gridSize]);
-
-  // Send placement to backend
-  const sendPlacement = useCallback(async (patternName: string, x: number, y: number) => {
-    if (!isMultiplayer || !gameId) return;
-
-    try {
-      const actor = await getLife1Actor();
-      await actor.place_pattern(gameId, patternName, x, y, BigInt(generation));
-    } catch (error) {
-      console.error('Failed to send placement:', error);
-    }
-  }, [isMultiplayer, gameId, generation]);
-
-  // Create new multiplayer game
-  const createMultiplayerGame = useCallback(async () => {
-    if (!newGameName.trim()) return;
-
-    setConnectionStatus('connecting');
-    try {
-      const actor = await getLife1Actor();
-      const result = await actor.create_game(newGameName, {
-        width: gridSize.cols,
-        height: gridSize.rows,
-        max_players: 4,
-        generations_limit: [],
-      });
-
-      if ('Ok' in result) {
-        setGameId(result.Ok);
-        setIsMultiplayer(true);
-        setConnectionStatus('connected');
-        setShowGameList(false);
-        // Start the game immediately
-        await actor.start_game(result.Ok);
-      } else {
-        console.error('Failed to create game:', result.Err);
-        setConnectionStatus('disconnected');
-      }
-    } catch (error) {
-      console.error('Failed to create game:', error);
-      setConnectionStatus('disconnected');
-    }
-  }, [newGameName, gridSize]);
-
-  // Join existing game
-  const joinGame = useCallback(async (id: bigint) => {
-    setConnectionStatus('connecting');
-    try {
-      const actor = await getLife1Actor();
-      const result = await actor.join_game(id);
-
-      if ('Ok' in result) {
-        setGameId(id);
-        setIsMultiplayer(true);
-        setConnectionStatus('connected');
-        setShowGameList(false);
-      } else {
-        console.error('Failed to join game:', result.Err);
-        setConnectionStatus('disconnected');
-      }
-    } catch (error) {
-      console.error('Failed to join game:', error);
-      setConnectionStatus('disconnected');
-    }
-  }, []);
-
-  // Leave multiplayer game
-  const leaveGame = useCallback(() => {
-    setGameId(null);
-    setIsMultiplayer(false);
-    setLastPlacementIndex(0n);
-    setConnectionStatus('disconnected');
-  }, []);
 
   // Draw the grid with territory colors
   const draw = useCallback(() => {
@@ -768,11 +615,6 @@ export const Life: React.FC = () => {
       });
       return newTerritory;
     });
-
-    // Send to backend if multiplayer
-    if (isMultiplayer && gameId) {
-      sendPlacement(selectedPattern.name, col, row);
-    }
   };
 
   const handleClear = () => {
@@ -813,34 +655,16 @@ export const Life: React.FC = () => {
     ? PATTERNS
     : PATTERNS.filter(p => p.category === selectedCategory);
 
-  const getStatusText = (status: { Waiting: null } | { Active: null } | { Finished: null }): string => {
-    if ('Waiting' in status) return 'Waiting';
-    if ('Active' in status) return 'Active';
-    return 'Finished';
-  };
-
   return (
     <div className="flex flex-col h-[calc(100vh-120px)]">
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div>
           <h1 className="text-xl font-bold text-white">Conway's Game of Life</h1>
-          <p className="text-gray-500 text-xs">
-            {isMultiplayer ? `Multiplayer Game #${gameId?.toString()}` : 'Territory mode - cells spread your color'}
-          </p>
+          <p className="text-gray-500 text-xs">Territory mode - cells spread your color</p>
         </div>
 
         <div className="flex items-center gap-4 text-sm font-mono">
-          {/* Connection status */}
-          {isMultiplayer && (
-            <div className={`px-2 py-1 rounded text-xs ${
-              connectionStatus === 'connected' ? 'bg-green-500/20 text-green-400' :
-              connectionStatus === 'connecting' ? 'bg-yellow-500/20 text-yellow-400' :
-              'bg-red-500/20 text-red-400'
-            }`}>
-              {connectionStatus}
-            </div>
-          )}
           <div className="text-gray-400">
             Gen: <span className="text-dfinity-turquoise">{generation}</span>
           </div>
@@ -932,97 +756,7 @@ export const Life: React.FC = () => {
             />
           ))}
         </div>
-
-        {/* Multiplayer controls */}
-        <div className="flex items-center gap-2 ml-4 pl-4 border-l border-white/10">
-          {!isMultiplayer ? (
-            <button
-              onClick={() => { setShowGameList(true); fetchGames(); }}
-              className="px-3 py-1.5 rounded font-mono text-sm bg-dfinity-turquoise/20 text-dfinity-turquoise border border-dfinity-turquoise/50 hover:bg-dfinity-turquoise/30 transition-all"
-            >
-              MULTIPLAYER
-            </button>
-          ) : (
-            <button
-              onClick={leaveGame}
-              className="px-3 py-1.5 rounded font-mono text-sm bg-red-500/20 text-red-400 border border-red-500/50 hover:bg-red-500/30 transition-all"
-            >
-              LEAVE GAME
-            </button>
-          )}
-        </div>
       </div>
-
-      {/* Game List Modal */}
-      {showGameList && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-          <div className="bg-gray-900 rounded-lg p-6 max-w-md w-full mx-4 border border-white/20">
-            <h2 className="text-xl font-bold text-white mb-4">Multiplayer Games</h2>
-
-            {/* Create new game */}
-            <div className="mb-4 p-3 bg-white/5 rounded">
-              <label className="text-gray-400 text-sm block mb-2">Create New Game</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={newGameName}
-                  onChange={(e) => setNewGameName(e.target.value)}
-                  placeholder="Game name..."
-                  className="flex-1 px-3 py-2 bg-black/50 border border-white/20 rounded text-white text-sm"
-                />
-                <button
-                  onClick={createMultiplayerGame}
-                  disabled={!newGameName.trim() || connectionStatus === 'connecting'}
-                  className="px-4 py-2 bg-dfinity-turquoise/20 text-dfinity-turquoise border border-dfinity-turquoise/50 rounded text-sm hover:bg-dfinity-turquoise/30 disabled:opacity-30"
-                >
-                  CREATE
-                </button>
-              </div>
-            </div>
-
-            {/* Game list */}
-            <div className="mb-4">
-              <label className="text-gray-400 text-sm block mb-2">Join Existing Game</label>
-              <div className="space-y-2 max-h-48 overflow-y-auto">
-                {games.length === 0 ? (
-                  <p className="text-gray-500 text-sm text-center py-4">No games available</p>
-                ) : (
-                  games.map(([id, name, status, playerCount]) => (
-                    <button
-                      key={id.toString()}
-                      onClick={() => joinGame(id)}
-                      disabled={connectionStatus === 'connecting'}
-                      className="w-full p-3 bg-white/5 hover:bg-white/10 rounded flex items-center justify-between text-left transition-all"
-                    >
-                      <div>
-                        <div className="text-white font-mono">{name}</div>
-                        <div className="text-gray-500 text-xs">Game #{id.toString()}</div>
-                      </div>
-                      <div className="text-right">
-                        <div className={`text-xs ${
-                          'Active' in status ? 'text-green-400' :
-                          'Waiting' in status ? 'text-yellow-400' :
-                          'text-gray-400'
-                        }`}>
-                          {getStatusText(status)}
-                        </div>
-                        <div className="text-gray-500 text-xs">{playerCount} players</div>
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-
-            <button
-              onClick={() => setShowGameList(false)}
-              className="w-full py-2 bg-white/10 text-gray-400 rounded hover:bg-white/20 transition-all"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Pattern Selector */}
       <div className="mb-3 p-3 bg-white/5 rounded-lg">
