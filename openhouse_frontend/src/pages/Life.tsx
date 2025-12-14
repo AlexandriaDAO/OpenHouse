@@ -1,4 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { Actor, HttpAgent } from '@dfinity/agent';
+import { idlFactory } from '../declarations/life1_backend';
+import { Principal } from '@dfinity/principal';
 
 // Cell size in pixels
 const CELL_SIZE = 10;

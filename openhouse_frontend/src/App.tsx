@@ -35,6 +35,7 @@ function App() {
                   <Route path="/wallet" element={<Wallet />} />
                   <Route path="/liquidity" element={<Liquidity />} />
                   <Route path="/predict" element={<Predict />} />
+                  <Route path="/life" element={<Life />} />
                   <Route path="/admin" element={<Admin />} />
                   <Route path="/life" element={<Life />} />
                 </Routes>
