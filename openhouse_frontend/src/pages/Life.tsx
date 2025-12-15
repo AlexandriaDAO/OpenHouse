@@ -171,6 +171,20 @@ export const Life: React.FC = () => {
   const [myPlayerNum, setMyPlayerNum] = useState<number | null>(null);
   const [, forceRender] = useState(0);
 
+  // Sidebar collapsed state with localStorage persistence
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    const saved = localStorage.getItem('life-sidebar-collapsed');
+    return saved === 'true';
+  });
+
+  // Mobile bottom bar expanded state
+  const [mobileExpanded, setMobileExpanded] = useState(false);
+
+  // Persist sidebar state
+  useEffect(() => {
+    localStorage.setItem('life-sidebar-collapsed', String(sidebarCollapsed));
+  }, [sidebarCollapsed]);
+
   // Parse pattern on selection change
   useEffect(() => {
     setParsedPattern(parseRLE(selectedPattern.rle));
@@ -436,10 +450,249 @@ export const Life: React.FC = () => {
   const filteredPatterns = selectedCategory === 'all'
     ? PATTERNS : PATTERNS.filter(p => p.category === selectedCategory);
 
+  // Desktop Sidebar component
+  const Sidebar = () => (
+    <div className={`
+      hidden lg:flex flex-col
+      ${sidebarCollapsed ? 'w-12' : 'w-72'}
+      transition-all duration-300 ease-in-out
+      bg-black border-r border-white/20
+      overflow-hidden flex-shrink-0
+    `}>
+      {/* Toggle button */}
+      <button
+        onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+        className="p-3 hover:bg-white/10 flex items-center justify-center border-b border-white/20"
+      >
+        <span className="text-gray-400 text-lg">{sidebarCollapsed ? '»' : '«'}</span>
+      </button>
+
+      {/* Content - hidden when collapsed */}
+      <div className={`${sidebarCollapsed ? 'hidden' : 'flex flex-col'} flex-1 overflow-y-auto p-3`}>
+        {/* Info Section */}
+        <div className="mb-4">
+          <h1 className="text-lg font-bold text-white">Game of Life</h1>
+          <p className="text-gray-500 text-xs">
+            {myPlayerNum ? (
+              <>You are Player {myPlayerNum} <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[myPlayerNum] }}></span></>
+            ) : (
+              'Place cells to join'
+            )}
+          </p>
+          <div className="mt-2 text-sm font-mono space-y-1">
+            <div className="text-gray-400">
+              Gen: <span className="text-dfinity-turquoise">{gameState?.generation.toString() || 0}</span>
+            </div>
+            <div className="text-gray-400">Players: {gameState?.players.length || 0}/10</div>
+          </div>
+          {/* Territory and cell counts */}
+          <div className="mt-3 space-y-2">
+            <div className="text-xs text-gray-500">Territory:</div>
+            <div className="space-y-1">
+              {Object.entries(territoryCounts).map(([player, count]) => (
+                <div key={player} className="flex items-center gap-2 text-xs">
+                  <div className="w-3 h-3 rounded-sm opacity-50" style={{ backgroundColor: PLAYER_COLORS[parseInt(player)] }} />
+                  <span className="text-gray-400">P{player}:</span>
+                  <span style={{ color: PLAYER_COLORS[parseInt(player)] }}>{count}</span>
+                </div>
+              ))}
+            </div>
+            <div className="text-xs text-gray-500 mt-2">Cells:</div>
+            <div className="space-y-1">
+              {Object.entries(cellCounts).map(([player, count]) => (
+                <div key={`cell-${player}`} className="flex items-center gap-2 text-xs">
+                  <div className="w-2 h-2 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[parseInt(player)] }} />
+                  <span className="text-gray-400">P{player}:</span>
+                  <span style={{ color: PLAYER_COLORS[parseInt(player)] }}>{count}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Pattern Section */}
+        <div className="flex-1">
+          <div className="text-xs text-gray-400 mb-2">Patterns</div>
+          {/* Category filter buttons - vertical stack */}
+          <div className="flex flex-col gap-1 mb-3">
+            <button
+              onClick={() => setSelectedCategory('all')}
+              className={`px-3 py-1.5 rounded text-xs font-mono transition-all text-left ${
+                selectedCategory === 'all'
+                  ? 'bg-white/20 text-white border border-white/30'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              All Patterns
+            </button>
+            {(Object.keys(CATEGORY_INFO) as PatternCategory[]).map((cat) => {
+              const info = CATEGORY_INFO[cat];
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`px-3 py-1.5 rounded text-xs font-mono transition-all border text-left ${
+                    selectedCategory === cat ? info.color : 'text-gray-400 border-transparent hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  {info.icon} {info.label}
+                </button>
+              );
+            })}
+          </div>
+          {/* Pattern buttons - grid layout */}
+          <div className="grid grid-cols-2 gap-1">
+            {filteredPatterns.map((pattern) => {
+              const catInfo = CATEGORY_INFO[pattern.category];
+              const isSelected = selectedPattern.name === pattern.name;
+              return (
+                <button
+                  key={pattern.name}
+                  onClick={() => setSelectedPattern(pattern)}
+                  className={`px-2 py-1.5 rounded text-xs font-mono transition-all border ${
+                    isSelected
+                      ? catInfo.color + ' ring-1 ring-white/30'
+                      : 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10'
+                  }`}
+                  title={pattern.description}
+                >
+                  {pattern.name}
+                </button>
+              );
+            })}
+          </div>
+          {/* Selected pattern info */}
+          <div className="mt-3 pt-3 border-t border-white/10 text-xs">
+            <div className={`font-mono ${CATEGORY_INFO[selectedPattern.category].color.split(' ')[0]}`}>
+              {selectedPattern.name} ({parsedPattern.length} cells)
+            </div>
+            <div className="text-gray-500 mt-1">{selectedPattern.description}</div>
+            <div className="text-gray-400 mt-2">Click grid to place</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Collapsed indicators - shown when collapsed */}
+      <div className={`${sidebarCollapsed ? 'flex flex-col items-center py-4 gap-2' : 'hidden'}`}>
+        <div className="text-xs text-gray-400">G</div>
+        <div className="text-dfinity-turquoise text-xs font-mono">{gameState?.generation.toString() || 0}</div>
+        <div className="text-xs text-gray-400 mt-2">P</div>
+        <div className="text-white text-xs font-mono">{gameState?.players.length || 0}</div>
+        {myPlayerNum && (
+          <>
+            <div className="text-xs text-gray-400 mt-2">You</div>
+            <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[myPlayerNum] }} />
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  // Mobile Bottom Bar component
+  const MobileBottomBar = () => (
+    <div className="lg:hidden bg-black border-t border-white/20">
+      {/* Collapsed view */}
+      <div className="flex items-center justify-between p-2">
+        <div className="flex items-center gap-4 text-xs font-mono">
+          <span className="text-gray-400">Gen: <span className="text-dfinity-turquoise">{gameState?.generation.toString() || 0}</span></span>
+          <span className="text-gray-400">{gameState?.players.length || 0}/10 players</span>
+          {myPlayerNum && (
+            <span className="flex items-center gap-1">
+              <span className="text-gray-400">You:</span>
+              <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[myPlayerNum] }} />
+            </span>
+          )}
+        </div>
+        <button
+          onClick={() => setMobileExpanded(!mobileExpanded)}
+          className="p-2 text-gray-400 hover:text-white"
+        >
+          {mobileExpanded ? '▼' : '▲'}
+        </button>
+      </div>
+
+      {/* Expanded view */}
+      {mobileExpanded && (
+        <div className="p-3 border-t border-white/10 max-h-64 overflow-y-auto">
+          {/* Territory/cell stats in row */}
+          <div className="flex gap-4 mb-3 text-xs overflow-x-auto">
+            <div className="flex items-center gap-2">
+              <span className="text-gray-500">Territory:</span>
+              {Object.entries(territoryCounts).slice(0, 4).map(([player, count]) => (
+                <div key={player} className="flex items-center gap-1">
+                  <div className="w-2 h-2 rounded-sm opacity-50" style={{ backgroundColor: PLAYER_COLORS[parseInt(player)] }} />
+                  <span style={{ color: PLAYER_COLORS[parseInt(player)] }}>{count}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-gray-500">Cells:</span>
+              {Object.entries(cellCounts).slice(0, 4).map(([player, count]) => (
+                <div key={`cell-${player}`} className="flex items-center gap-1">
+                  <div className="w-2 h-2 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[parseInt(player)] }} />
+                  <span style={{ color: PLAYER_COLORS[parseInt(player)] }}>{count}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* Category filters */}
+          <div className="flex gap-2 mb-2 overflow-x-auto pb-1">
+            <button
+              onClick={() => setSelectedCategory('all')}
+              className={`px-2 py-1 rounded text-xs font-mono whitespace-nowrap ${
+                selectedCategory === 'all' ? 'bg-white/20 text-white' : 'text-gray-400'
+              }`}
+            >
+              All
+            </button>
+            {(Object.keys(CATEGORY_INFO) as PatternCategory[]).map((cat) => {
+              const info = CATEGORY_INFO[cat];
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`px-2 py-1 rounded text-xs font-mono whitespace-nowrap border ${
+                    selectedCategory === cat ? info.color : 'text-gray-400 border-transparent'
+                  }`}
+                >
+                  {info.icon} {info.label}
+                </button>
+              );
+            })}
+          </div>
+          {/* Horizontal scrolling pattern selector */}
+          <div className="flex gap-2 overflow-x-auto pb-2">
+            {filteredPatterns.map((pattern) => {
+              const catInfo = CATEGORY_INFO[pattern.category];
+              const isSelected = selectedPattern.name === pattern.name;
+              return (
+                <button
+                  key={pattern.name}
+                  onClick={() => setSelectedPattern(pattern)}
+                  className={`px-3 py-1.5 rounded text-xs font-mono whitespace-nowrap border ${
+                    isSelected
+                      ? catInfo.color + ' ring-1 ring-white/30'
+                      : 'bg-white/5 text-gray-300 border-white/10'
+                  }`}
+                >
+                  {pattern.name}
+                </button>
+              );
+            })}
+          </div>
+          {/* Selected pattern info */}
+          <div className="text-xs text-gray-400 mt-2">
+            Selected: <span className={CATEGORY_INFO[selectedPattern.category].color.split(' ')[0]}>{selectedPattern.name}</span> ({parsedPattern.length} cells) - {selectedPattern.description}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   // Login screen
   if (!isAuthenticated) {
     return (
-      <div className="flex flex-col items-center justify-center h-[calc(100vh-120px)] gap-6">
+      <div className="flex flex-col items-center justify-center h-[calc(100vh-80px)] gap-6">
         <div className="text-center">
           <h1 className="text-3xl font-bold text-white mb-2">Conway's Game of Life</h1>
           <p className="text-gray-400">1000x1000 Persistent World</p>
@@ -457,149 +710,59 @@ export const Life: React.FC = () => {
     );
   }
 
-  // Game view (no lobby, no controls - always running)
+  // Game view - fullscreen with collapsible sidebar
   return (
-    <div className="flex flex-col h-[calc(100vh-120px)]">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-4">
-          <div>
-            <h1 className="text-xl font-bold text-white">Game of Life</h1>
-            <p className="text-gray-500 text-xs">
-              {myPlayerNum ? (
-                <>You are Player {myPlayerNum} <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[myPlayerNum] }}></span></>
-              ) : (
-                'Place cells to join'
-              )}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-4 text-sm font-mono">
-          <div className="text-gray-400">
-            Gen: <span className="text-dfinity-turquoise">{gameState?.generation.toString() || 0}</span>
-          </div>
-          <div className="text-gray-600">|</div>
-          <div className="text-gray-400 text-xs">Players: {gameState?.players.length || 0}/10</div>
-          <div className="text-gray-600">|</div>
-          <div className="text-gray-400 text-xs">Territory:</div>
-          {Object.entries(territoryCounts).slice(0, 5).map(([player, count]) => (
-            <div key={player} className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded-sm opacity-50" style={{ backgroundColor: PLAYER_COLORS[parseInt(player)] }} />
-              <span style={{ color: PLAYER_COLORS[parseInt(player)] }}>{count}</span>
-            </div>
-          ))}
-          <div className="text-gray-600">|</div>
-          <div className="text-gray-400 text-xs">Cells:</div>
-          {Object.entries(cellCounts).slice(0, 5).map(([player, count]) => (
-            <div key={`cell-${player}`} className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[parseInt(player)] }} />
-              <span className="text-xs" style={{ color: PLAYER_COLORS[parseInt(player)] }}>{count}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Error display */}
+    <div className="flex flex-col h-[calc(100vh-80px)]">
+      {/* Error display - keep at top */}
       {error && (
-        <div className="mb-3 p-2 bg-red-500/20 border border-red-500/50 rounded text-red-400 text-sm">
+        <div className="p-2 bg-red-500/20 border border-red-500/50 text-red-400 text-sm">
           {error}
         </div>
       )}
 
-      {/* Pattern Selector */}
-      <div className="mb-3 p-3 bg-white/5 rounded-lg">
-        <div className="flex gap-2 mb-3">
-          <button
-            onClick={() => setSelectedCategory('all')}
-            className={`px-3 py-1 rounded text-xs font-mono transition-all ${
-              selectedCategory === 'all'
-                ? 'bg-white/20 text-white border border-white/30'
-                : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            All
-          </button>
-          {(Object.keys(CATEGORY_INFO) as PatternCategory[]).map((cat) => {
-            const info = CATEGORY_INFO[cat];
-            return (
-              <button
-                key={cat}
-                onClick={() => setSelectedCategory(cat)}
-                className={`px-3 py-1 rounded text-xs font-mono transition-all border ${
-                  selectedCategory === cat ? info.color : 'text-gray-400 border-transparent hover:text-white'
-                }`}
-              >
-                {info.icon} {info.label}
-              </button>
-            );
-          })}
-        </div>
+      {/* Main content area */}
+      <div className="flex flex-1 min-h-0">
+        {/* Desktop Sidebar */}
+        <Sidebar />
 
-        <div className="flex flex-wrap gap-2">
-          {filteredPatterns.map((pattern) => {
-            const catInfo = CATEGORY_INFO[pattern.category];
-            const isSelected = selectedPattern.name === pattern.name;
-            return (
-              <button
-                key={pattern.name}
-                onClick={() => setSelectedPattern(pattern)}
-                className={`px-3 py-1.5 rounded text-xs font-mono transition-all border ${
-                  isSelected
-                    ? catInfo.color + ' ring-1 ring-white/30'
-                    : 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10'
-                }`}
-                title={pattern.description}
-              >
-                {pattern.name}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="mt-3 pt-3 border-t border-white/10 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-gray-400 text-xs">Selected: </span>
-            <span className={`font-mono text-sm ${CATEGORY_INFO[selectedPattern.category].color.split(' ')[0]}`}>
-              {selectedPattern.name}
-            </span>
-            <span className="text-gray-500 text-xs">({parsedPattern.length} cells)</span>
+        {/* Canvas Container */}
+        <div className="flex-1 flex flex-col relative bg-black">
+          {/* Zoom controls - top right overlay */}
+          <div className="absolute top-2 right-2 z-10 flex items-center gap-2 bg-black/70 rounded-lg p-2">
+            <button onClick={handleZoomOut} disabled={zoom <= MIN_ZOOM}
+              className="w-8 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 font-bold">-</button>
+            <span className="text-white text-xs font-mono w-12 text-center">{Math.round(zoom * 100)}%</span>
+            <button onClick={handleZoomIn} disabled={zoom >= MAX_ZOOM}
+              className="w-8 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 font-bold">+</button>
+            <button onClick={handleResetView}
+              className="px-2 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 text-xs font-mono">Reset</button>
           </div>
-          <p className="text-gray-500 text-xs">{selectedPattern.description} | Click to place</p>
+
+          {/* Help text overlay - bottom left */}
+          <div className="absolute bottom-2 left-2 z-10 bg-black/70 rounded px-2 py-1 text-xs text-gray-400 font-mono">
+            {GRID_WIDTH}x{GRID_HEIGHT} | Shift+drag to pan | Scroll to zoom
+          </div>
+
+          {/* Canvas */}
+          <div ref={containerRef} className="flex-1 w-full h-full min-h-0">
+            <canvas
+              ref={canvasRef}
+              onClick={handleCanvasClick}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseLeave}
+              onWheel={handleWheel}
+              onContextMenu={(e) => e.preventDefault()}
+              className={`w-full h-full ${isPanning ? 'cursor-grabbing' : 'cursor-crosshair'}`}
+              style={{ display: 'block' }}
+            />
+          </div>
         </div>
       </div>
 
-      {/* Canvas */}
-      <div className="flex-1 flex flex-col border border-white/20 rounded-lg overflow-hidden bg-black relative">
-        <div className="absolute top-2 right-2 z-10 flex items-center gap-2 bg-black/70 rounded-lg p-2">
-          <button onClick={handleZoomOut} disabled={zoom <= MIN_ZOOM}
-            className="w-8 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 font-bold">-</button>
-          <span className="text-white text-xs font-mono w-12 text-center">{Math.round(zoom * 100)}%</span>
-          <button onClick={handleZoomIn} disabled={zoom >= MAX_ZOOM}
-            className="w-8 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 font-bold">+</button>
-          <button onClick={handleResetView}
-            className="px-2 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 text-xs font-mono">Reset</button>
-        </div>
-
-        <div className="absolute bottom-2 left-2 z-10 bg-black/70 rounded px-2 py-1 text-xs text-gray-400 font-mono">
-          {GRID_WIDTH}x{GRID_HEIGHT} | Shift+drag to pan | Scroll to zoom
-        </div>
-
-        <div ref={containerRef} className="flex-1 w-full h-full min-h-0">
-          <canvas
-            ref={canvasRef}
-            onClick={handleCanvasClick}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseLeave}
-            onWheel={handleWheel}
-            onContextMenu={(e) => e.preventDefault()}
-            className={`w-full h-full ${isPanning ? 'cursor-grabbing' : 'cursor-crosshair'}`}
-            style={{ display: 'block' }}
-          />
-        </div>
-      </div>
+      {/* Mobile Bottom Bar */}
+      <MobileBottomBar />
     </div>
   );
 };
