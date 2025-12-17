@@ -1,20 +1,20 @@
-import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { AuthClient } from '@dfinity/auth-client';
 import { Actor, HttpAgent, ActorSubclass } from '@dfinity/agent';
 import { Principal } from '@dfinity/principal';
-import { idlFactory } from '../declarations/life1_backend';
-import type { _SERVICE, GameState, Cell } from '../declarations/life1_backend/life1_backend.did.d';
+import { idlFactory } from '../declarations/life2_backend';
+import type { _SERVICE, GameState, SparseCell } from '../declarations/life2_backend/life2_backend.did.d';
 
 // Import constants and types from separate file
 import {
-  LIFE1_CANISTER_ID,
+  LIFE2_CANISTER_ID,
   GRID_SIZE,
   QUADRANT_SIZE,
   QUADRANTS_PER_ROW,
   TOTAL_QUADRANTS,
+  TOTAL_CELLS,
   GRID_WIDTH,
   GRID_HEIGHT,
-  QUADRANT_CELLS,
   LOCAL_TICK_MS,
   BACKEND_SYNC_MS,
   GRID_COLOR,
@@ -30,77 +30,91 @@ import {
   type PatternCategory,
   type PatternInfo,
   type PendingPlacement,
-} from './lifeConstants';
+} from './life2Constants';
 
 // Import utility functions from separate file
-import { parseRLE, rotatePattern } from './lifeUtils';
+import { parseRLE } from './life2Utils';
 
-// Small preview canvas for patterns
-const PatternPreview: React.FC<{ pattern: [number, number][]; color: string }> = ({ pattern, color }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const size = 40; // 40x40 preview canvas
+// Local cell type for dense grid simulation
+interface Cell {
+  owner: number;
+  coins: number;
+  alive: boolean;
+}
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || pattern.length === 0) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+// Local Game of Life simulation - mirrors backend rules exactly
+const stepLocalGeneration = (cells: Cell[]): Cell[] => {
+  const newCells: Cell[] = new Array(GRID_WIDTH * GRID_HEIGHT);
 
-    // Calculate bounding box
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const [x, y] of pattern) {
-      minX = Math.min(minX, x);
-      maxX = Math.max(maxX, x);
-      minY = Math.min(minY, y);
-      maxY = Math.max(maxY, y);
+  for (let row = 0; row < GRID_HEIGHT; row++) {
+    for (let col = 0; col < GRID_WIDTH; col++) {
+      const idx = row * GRID_WIDTH + col;
+      const current = cells[idx];
+
+      // Count neighbors and track owner counts
+      let neighborCount = 0;
+      const ownerCounts: number[] = new Array(11).fill(0); // 0-10 players
+
+      for (let di = -1; di <= 1; di++) {
+        for (let dj = -1; dj <= 1; dj++) {
+          if (di === 0 && dj === 0) continue;
+
+          // Toroidal wrap
+          const nRow = (row + di + GRID_HEIGHT) % GRID_HEIGHT;
+          const nCol = (col + dj + GRID_WIDTH) % GRID_WIDTH;
+          const neighbor = cells[nRow * GRID_WIDTH + nCol];
+
+          if (neighbor.alive) {
+            neighborCount++;
+            if (neighbor.owner > 0 && neighbor.owner <= 10) {
+              ownerCounts[neighbor.owner]++;
+            }
+          }
+        }
+      }
+
+      // Apply Conway's rules
+      let newAlive = false;
+      let newOwner = current.owner;
+
+      if (current.alive) {
+        // Living cell survives with 2-3 neighbors
+        newAlive = neighborCount === 2 || neighborCount === 3;
+      } else {
+        // Dead cell born with exactly 3 neighbors
+        if (neighborCount === 3) {
+          newAlive = true;
+          // New owner = majority owner among parents
+          let maxCount = 0;
+          let majorityOwner = 1;
+          for (let o = 1; o <= 10; o++) {
+            if (ownerCounts[o] > maxCount) {
+              maxCount = ownerCounts[o];
+              majorityOwner = o;
+            }
+          }
+          newOwner = majorityOwner;
+        }
+      }
+
+      // Preserve owner (territory) and coins - they persist even when cells die
+      newCells[idx] = {
+        owner: newOwner,
+        coins: current.coins,  // Coins stay in cell
+        alive: newAlive,
+      };
     }
-    const patternWidth = maxX - minX + 1;
-    const patternHeight = maxY - minY + 1;
+  }
 
-    // Calculate cell size to fit pattern in canvas with padding
-    const padding = 2;
-    const availableSize = size - padding * 2;
-    const cellSize = Math.min(availableSize / patternWidth, availableSize / patternHeight, 6);
-
-    // Center the pattern
-    const offsetX = (size - patternWidth * cellSize) / 2;
-    const offsetY = (size - patternHeight * cellSize) / 2;
-
-    // Clear canvas
-    ctx.fillStyle = '#1a1a2e';
-    ctx.fillRect(0, 0, size, size);
-
-    // Draw cells
-    ctx.fillStyle = color;
-    const gap = cellSize > 3 ? 1 : 0;
-    for (const [x, y] of pattern) {
-      const px = offsetX + (x - minX) * cellSize;
-      const py = offsetY + (y - minY) * cellSize;
-      ctx.fillRect(px, py, cellSize - gap, cellSize - gap);
-    }
-
-    // Draw border
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(0.5, 0.5, size - 1, size - 1);
-  }, [pattern, color]);
-
-  return (
-    <canvas
-      ref={canvasRef}
-      width={size}
-      height={size}
-      className="rounded"
-      style={{ width: size, height: size }}
-    />
-  );
+  return newCells;
 };
 
-export const Life: React.FC = () => {
+export const Life2: React.FC = () => {
   // Canvas refs
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasSizeRef = useRef({ width: 0, height: 0 });
+  const minimapRef = useRef<HTMLCanvasElement>(null);
 
   // Pattern state
   const [selectedPattern, setSelectedPattern] = useState<PatternInfo>(PATTERNS[0]);
@@ -126,17 +140,12 @@ export const Life: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Game state from backend - now uses unified GameState with Cell array
+  // Game state from backend - sparse format
   const [gameState, setGameState] = useState<GameState | null>(null);
-  // Local cells - now comes from WebSocket (Fly.io simulation server)
+  // Local cells for optimistic simulation (dense grid, runs independently, synced from backend periodically)
   const [localCells, setLocalCells] = useState<Cell[]>([]);
   const [myPlayerNum, setMyPlayerNum] = useState<number | null>(null);
   const [myBalance, setMyBalance] = useState(1000);
-
-  // WebSocket connection to Fly.io simulation server (Hybrid Architecture)
-  const [wsConnected, setWsConnected] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
-  const wsReconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [placementError, setPlacementError] = useState<string | null>(null);
 
   // Pending placements - accumulate patterns before confirming
@@ -145,22 +154,13 @@ export const Life: React.FC = () => {
   const [isConfirmingPlacement, setIsConfirmingPlacement] = useState(false);
   const [previewPulse, setPreviewPulse] = useState(0); // For animation
 
-  // Pattern rotation: 0=0°, 1=90°, 2=180°, 3=270° clockwise
-  const [rotation, setRotation] = useState(0);
-
-  // Game management state
-  const [currentGameId, setCurrentGameId] = useState<bigint | null>(BigInt(0));
-  const [mode, setMode] = useState<'lobby' | 'game'>('game');
-  const [games, setGames] = useState<any[]>([]);
-  const [newGameName, setNewGameName] = useState('');
-
   // Simulation control - always running
   const [isRunning, setIsRunning] = useState(true);
   const [, forceRender] = useState(0);
 
   // Sidebar collapsed state with localStorage persistence
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    const saved = localStorage.getItem('life-sidebar-collapsed');
+    const saved = localStorage.getItem('life2-sidebar-collapsed');
     return saved === 'true';
   });
 
@@ -169,25 +169,13 @@ export const Life: React.FC = () => {
 
   // Persist sidebar state
   useEffect(() => {
-    localStorage.setItem('life-sidebar-collapsed', String(sidebarCollapsed));
+    localStorage.setItem('life2-sidebar-collapsed', String(sidebarCollapsed));
   }, [sidebarCollapsed]);
 
-  // Parse pattern on selection change (reset rotation too)
+  // Parse pattern on selection change
   useEffect(() => {
     setParsedPattern(parseRLE(selectedPattern.rle));
-    setRotation(0);
   }, [selectedPattern]);
-
-  // Get rotated pattern (rotatePattern imported from lifeUtils)
-  const rotatedPattern = useMemo(() =>
-    rotatePattern(parsedPattern, rotation),
-    [parsedPattern, rotation]
-  );
-
-  // Cycle rotation
-  const cycleRotation = useCallback(() => {
-    setRotation(r => (r + 1) % 4);
-  }, []);
 
   // Pulse animation for pending placements
   useEffect(() => {
@@ -286,103 +274,35 @@ export const Life: React.FC = () => {
   const setupActor = (client: AuthClient) => {
     const identity = client.getIdentity();
     const agent = new HttpAgent({ identity, host: 'https://icp-api.io' });
-    const newActor = Actor.createActor<_SERVICE>(idlFactory, { agent, canisterId: LIFE1_CANISTER_ID });
+    const newActor = Actor.createActor<_SERVICE>(idlFactory, { agent, canisterId: LIFE2_CANISTER_ID });
     setActor(newActor);
     setMyPrincipal(identity.getPrincipal());
     setIsAuthenticated(true);
     setIsLoading(false);
   };
 
-  // Fetch games for lobby
-  const fetchGames = useCallback(async () => {
-    if (!actor) return;
-    setIsLoading(true);
-    try {
-      const gamesList = await actor.list_games();
-      setGames(gamesList);
-      setError(null);
-    } catch (err) {
-      setError(`Failed to fetch games: ${err}`);
-    }
-    setIsLoading(false);
-  }, [actor]);
+  // Convert sparse cells from backend to dense grid
+  const sparseToDense = useCallback((sparse: GameState): Cell[] => {
+    const dense: Cell[] = new Array(TOTAL_CELLS).fill(null).map(() => ({ owner: 0, coins: 0, alive: false }));
 
-  useEffect(() => {
-    if (isAuthenticated && actor) fetchGames();
-  }, [isAuthenticated, actor, fetchGames]);
-
-  // Simulation runs locally - backend handles its own tick rate
-
-  // Create game
-  const handleCreateGame = async () => {
-    if (!actor || !newGameName.trim()) return;
-    const trimmedName = newGameName.trim();
-    if (trimmedName.length > 50 || !/^[a-zA-Z0-9\s\-_]+$/.test(trimmedName)) {
-      setError('Invalid game name');
-      return;
-    }
-
-    setIsLoading(true);
-    setError(null);
-    try {
-      const result = await actor.create_game(trimmedName, {
-        width: GRID_WIDTH, height: GRID_HEIGHT, max_players: 10, generations_limit: []
-      });
-      if ('Ok' in result) {
-        const gameId = result.Ok;
-        await actor.start_game(gameId);
-        setCurrentGameId(gameId);
-        setMyPlayerNum(1);
-        setMode('game');
-        setNewGameName('');
-      } else {
-        setError(`Failed: ${result.Err}`);
+    // Apply alive cells
+    for (const cell of sparse.alive_cells) {
+      const idx = cell.y * GRID_SIZE + cell.x;
+      if (idx >= 0 && idx < TOTAL_CELLS) {
+        dense[idx] = { owner: cell.owner, coins: cell.coins, alive: true };
       }
-    } catch (err) {
-      setError(`Failed: ${err}`);
     }
-    setIsLoading(false);
-  };
 
-  // Join game
-  const handleJoinGame = async (gameId: bigint) => {
-    if (!actor) return;
-    setIsLoading(true);
-    setError(null);
-    try {
-      const result = await actor.join_game(gameId);
-      if ('Ok' in result) {
-        setCurrentGameId(gameId);
-        setMyPlayerNum(result.Ok);
-        // Fetch initial state
-        const stateResult = await actor.get_state(gameId);
-        if ('Ok' in stateResult) {
-          setGameState(stateResult.Ok);
-          // Update my balance
-          const myIdx = stateResult.Ok.players.findIndex(
-            p => p.toText() === myPrincipal?.toText()
-          );
-          if (myIdx >= 0) {
-            setMyBalance(Number(stateResult.Ok.balances[myIdx]));
-          }
-        }
-        setMode('game');
-      } else {
-        setError(`Failed: ${result.Err}`);
+    // Apply territory (dead cells with owner/coins)
+    for (const cell of sparse.territory) {
+      const idx = cell.y * GRID_SIZE + cell.x;
+      if (idx >= 0 && idx < TOTAL_CELLS && !dense[idx].alive) {
+        dense[idx] = { owner: cell.owner, coins: cell.coins, alive: false };
       }
-    } catch (err) {
-      setError(`Failed: ${err}`);
     }
-    setIsLoading(false);
-  };
 
-  const handleLeaveGame = () => {
-    setMode('lobby');
-    setCurrentGameId(null);
-    setGameState(null);
-    setIsRunning(false);
-    fetchGames();
-  };
+    return dense;
+  }, []);
 
   // Canvas sizing
   useEffect(() => {
@@ -420,164 +340,60 @@ export const Life: React.FC = () => {
     };
   }, [isAuthenticated]);
 
-  // Backend sync - balances and player info only (Hybrid Architecture)
-  // Grid state comes from WebSocket to Fly.io, balances come from IC canister
+  // Backend sync - fetch authoritative state every 5 seconds
   useEffect(() => {
     if (!actor || !isAuthenticated) return;
 
     let cancelled = false;
 
-    const syncBalances = async () => {
+    const syncFromBackend = async () => {
       if (cancelled) return;
-
       try {
-        // Use lightweight metadata for balance and player info
-        const metaResult = await actor.get_metadata(currentGameId);
+        const state = await actor.get_state();
+        if (!cancelled) {
+          setGameState(state);
+          // Convert sparse to dense for local simulation
+          setLocalCells(sparseToDense(state));
 
-        if ('Ok' in metaResult && !cancelled) {
-          const meta = metaResult.Ok;
+          // Update player number and balance
+          if (state.player_num && state.player_num.length > 0) {
+            setMyPlayerNum(state.player_num[0]);
+          }
 
-          // Update player info
-          const myIdx = meta.players.findIndex(
+          const myIdx = state.players.findIndex(
             p => p.toText() === myPrincipal?.toText()
           );
           if (myIdx >= 0) {
-            setMyPlayerNum(myIdx + 1);
-            setMyBalance(Number(meta.balances[myIdx]));
+            setMyBalance(Number(state.balances[myIdx]));
           }
-
-          // Update game metadata (but NOT cells - those come from WebSocket)
-          setGameState(prev => prev ? {
-            ...prev,
-            players: meta.players,
-            balances: Array.from(meta.balances),
-            is_running: meta.is_running,
-          } : prev);
         }
       } catch (err) {
-        console.error('Balance sync error:', err);
+        console.error('Backend sync error:', err);
       }
     };
 
     // Initial sync
-    syncBalances();
+    syncFromBackend();
 
     // Periodic sync every 5 seconds
-    const syncInterval = setInterval(syncBalances, BACKEND_SYNC_MS);
+    const syncInterval = setInterval(syncFromBackend, BACKEND_SYNC_MS);
 
     return () => {
       cancelled = true;
       clearInterval(syncInterval);
     };
-  }, [actor, currentGameId, myPrincipal, isAuthenticated]);
+  }, [actor, myPrincipal, isAuthenticated, sparseToDense]);
 
-  // Track if we have cells (stable reference to avoid unnecessary effect reruns)
-  const hasCells = localCells.length > 0;
-
-  // WebSocket connection to Fly.io simulation server
-  // Receives real-time grid state updates (Hybrid Architecture)
+  // Local simulation - runs every 100ms for smooth visuals
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!isRunning || localCells.length === 0) return;
 
-    // Fly.io WebSocket URL - will be configured for production
-    const WS_URL = process.env.REACT_APP_LIFE_WS_URL || 'wss://openhouse-life.fly.dev/ws';
+    const localTick = setInterval(() => {
+      setLocalCells(cells => stepLocalGeneration(cells));
+    }, LOCAL_TICK_MS);
 
-    const connectWebSocket = () => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) return;
-
-      console.log('Connecting to simulation server:', WS_URL);
-      const ws = new WebSocket(WS_URL);
-
-      ws.onopen = () => {
-        setWsConnected(true);
-        ws.send(JSON.stringify({ type: 'Subscribe' }));
-        console.log('Connected to simulation server');
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-
-          if (msg.type === 'FullState') {
-            // Initial state on connect - cells are packed u16 values
-            const cells: Cell[] = msg.cells.map((packed: number) => ({
-              owner: packed & 0x0F,
-              points: (packed >> 4) & 0x7F,
-              alive: (packed & (1 << 11)) !== 0,
-            }));
-            setLocalCells(cells);
-            setGameState(prev => prev ? {
-              ...prev,
-              generation: BigInt(msg.generation),
-            } : {
-              cells: cells,
-              width: msg.width,
-              height: msg.height,
-              generation: BigInt(msg.generation),
-              players: [],
-              balances: [],
-              is_running: true,
-              checkpoint_timestamp_ns: BigInt(0),
-            });
-            console.log(`Received full state: gen=${msg.generation}, cells=${cells.length}`);
-          } else if (msg.type === 'Delta') {
-            // Incremental updates - apply changed cells
-            setLocalCells(cells => {
-              const newCells = [...cells];
-              for (const [idx, packed] of msg.changed_cells) {
-                if (idx < newCells.length) {
-                  newCells[idx] = {
-                    owner: packed & 0x0F,
-                    points: (packed >> 4) & 0x7F,
-                    alive: (packed & (1 << 11)) !== 0,
-                  };
-                }
-              }
-              return newCells;
-            });
-            setGameState(prev => prev ? {
-              ...prev,
-              generation: BigInt(msg.generation),
-            } : prev);
-          }
-        } catch (err) {
-          console.error('WebSocket message parse error:', err);
-        }
-      };
-
-      ws.onerror = (err) => {
-        console.error('WebSocket error:', err);
-      };
-
-      ws.onclose = () => {
-        setWsConnected(false);
-        console.log('Disconnected from simulation server');
-
-        // Auto-reconnect after 2 seconds
-        if (wsReconnectTimeoutRef.current) {
-          clearTimeout(wsReconnectTimeoutRef.current);
-        }
-        wsReconnectTimeoutRef.current = setTimeout(connectWebSocket, 2000);
-      };
-
-      wsRef.current = ws;
-    };
-
-    connectWebSocket();
-
-    return () => {
-      if (wsReconnectTimeoutRef.current) {
-        clearTimeout(wsReconnectTimeoutRef.current);
-      }
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-    };
-  }, [isAuthenticated]);
-
-  // NOTE: Local simulation removed - Fly.io handles all simulation
-  // Grid state comes from WebSocket connection above
+    return () => clearInterval(localTick);
+  }, [isRunning, localCells.length > 0]);
 
   // Helper to draw cells within a region
   const drawCells = useCallback((
@@ -626,7 +442,7 @@ export const Life: React.FC = () => {
       }
     }
 
-    // Draw gold borders for cells with points (only in quadrant view where cells are large enough)
+    // Draw gold borders for cells with coins (only in quadrant view where cells are large enough)
     if (cellSize > 3) {
       for (let row = 0; row < height; row++) {
         for (let col = 0; col < width; col++) {
@@ -635,13 +451,13 @@ export const Life: React.FC = () => {
           const idx = gridRow * GRID_SIZE + gridCol;
           const cell = cells[idx];
 
-          if (cell && cell.points > 0) {
+          if (cell && cell.coins > 0) {
             const opacity = Math.min(
               GOLD_BORDER_MAX_OPACITY,
-              GOLD_BORDER_MIN_OPACITY + (cell.points / 10) * 0.1
+              GOLD_BORDER_MIN_OPACITY + (cell.coins / 7) * 0.7  // Scale to max 7 coins
             );
             ctx.strokeStyle = `rgba(255, 215, 0, ${opacity})`;
-            ctx.lineWidth = Math.min(3, 1 + Math.floor(cell.points / 5));
+            ctx.lineWidth = Math.min(3, 1 + Math.floor(cell.coins / 2));
             ctx.strokeRect(
               col * cellSize + 1,
               row * cellSize + 1,
@@ -697,7 +513,7 @@ export const Life: React.FC = () => {
     }
   }, []);
 
-  // Draw preview cells with pulsing animation (handles both single mode and batch mode)
+  // Draw preview cells with pulsing animation (handles batched placements)
   const drawPreviewCells = useCallback((
     ctx: CanvasRenderingContext2D,
     startX: number,
@@ -764,7 +580,6 @@ export const Life: React.FC = () => {
     }
   }, [localCells, myPlayerNum, pendingPlacements]);
 
-
   // Main draw function - simplified for quadrant-based navigation
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -785,7 +600,7 @@ export const Life: React.FC = () => {
     const canvasSize = Math.min(displayWidth, displayHeight);
 
     if (viewMode === 'overview') {
-      // Overview: show all 512×512, each cell is tiny
+      // Overview: show all 512x512, each cell is tiny
       const cellSize = canvasSize / GRID_SIZE;
 
       // Center the grid if canvas is not square
@@ -816,7 +631,7 @@ export const Life: React.FC = () => {
 
       ctx.restore();
     } else {
-      // Quadrant: show 128×128, cells are larger
+      // Quadrant: show 128x128, cells are larger
       const cellSize = canvasSize / QUADRANT_SIZE;
 
       // Center the grid if canvas is not square
@@ -841,6 +656,91 @@ export const Life: React.FC = () => {
   }, [viewMode, viewX, viewY, localCells, drawCells, drawQuadrantGrid, drawGridLines, drawPreviewCells, previewPulse]);
 
   useEffect(() => { draw(); }, [draw]);
+
+  // Calculate quadrant density for minimap heatmap
+  const calculateQuadrantDensity = useCallback((quadrant: number): number => {
+    if (localCells.length === 0) return 0;
+    const qRow = Math.floor(quadrant / QUADRANTS_PER_ROW);
+    const qCol = quadrant % QUADRANTS_PER_ROW;
+    const startY = qRow * QUADRANT_SIZE;
+    const startX = qCol * QUADRANT_SIZE;
+
+    let livingCells = 0;
+    for (let row = startY; row < startY + QUADRANT_SIZE; row++) {
+      for (let col = startX; col < startX + QUADRANT_SIZE; col++) {
+        const cell = localCells[row * GRID_SIZE + col];
+        if (cell && cell.alive && cell.owner > 0) livingCells++;
+      }
+    }
+
+    return livingCells / (QUADRANT_SIZE * QUADRANT_SIZE);
+  }, [localCells]);
+
+  // Minimap drawing effect
+  useEffect(() => {
+    const canvas = minimapRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const size = canvas.width;
+    const quadSize = size / QUADRANTS_PER_ROW;
+
+    // Clear
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, size, size);
+
+    // Draw cell density per quadrant (heatmap)
+    for (let q = 0; q < TOTAL_QUADRANTS; q++) {
+      const qRow = Math.floor(q / QUADRANTS_PER_ROW);
+      const qCol = q % QUADRANTS_PER_ROW;
+      const density = calculateQuadrantDensity(q);
+
+      // Color based on density
+      const alpha = Math.min(0.8, density * 2);
+      ctx.fillStyle = `rgba(57, 255, 20, ${alpha})`;
+      ctx.fillRect(qCol * quadSize + 1, qRow * quadSize + 1, quadSize - 2, quadSize - 2);
+    }
+
+    // Highlight current quadrant
+    ctx.strokeStyle = '#FFD700';
+    ctx.lineWidth = 3;
+    const curRow = Math.floor(currentQuadrant / QUADRANTS_PER_ROW);
+    const curCol = currentQuadrant % QUADRANTS_PER_ROW;
+    ctx.strokeRect(curCol * quadSize, curRow * quadSize, quadSize, quadSize);
+
+    // Draw grid
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= QUADRANTS_PER_ROW; i++) {
+      const pos = i * quadSize;
+      ctx.beginPath();
+      ctx.moveTo(pos, 0);
+      ctx.lineTo(pos, size);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, pos);
+      ctx.lineTo(size, pos);
+      ctx.stroke();
+    }
+  }, [localCells, currentQuadrant, calculateQuadrantDensity]);
+
+  // Minimap click handler
+  const handleMinimapClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = minimapRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const quadSize = canvas.width / QUADRANTS_PER_ROW;
+
+    const qCol = Math.floor(x / quadSize);
+    const qRow = Math.floor(y / quadSize);
+    const quadrant = qRow * QUADRANTS_PER_ROW + qCol;
+
+    jumpToQuadrant(quadrant);
+  }, [jumpToQuadrant]);
 
   // Click handler for quadrant-based navigation and preview placement
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -871,7 +771,7 @@ export const Life: React.FC = () => {
                      + Math.floor(gridCol / QUADRANT_SIZE);
       jumpToQuadrant(quadrant);
     } else {
-      // Click in quadrant = set preview or add to batch
+      // Click in quadrant = add to pending placements (batch mode)
       const cellSize = canvasSize / QUADRANT_SIZE;
       const localCol = Math.floor(x / cellSize);
       const localRow = Math.floor(y / cellSize);
@@ -881,8 +781,8 @@ export const Life: React.FC = () => {
       // Validate coordinates
       if (gridCol < 0 || gridCol >= GRID_SIZE || gridRow < 0 || gridRow >= GRID_SIZE) return;
 
-      // Convert rotated pattern to absolute coordinates with toroidal wrapping
-      const cellsToPlace: [number, number][] = rotatedPattern.map(([dx, dy]) => [
+      // Convert pattern to absolute coordinates with toroidal wrapping
+      const cellsToPlace: [number, number][] = parsedPattern.map(([dx, dy]) => [
         (gridCol + dx + GRID_SIZE) % GRID_SIZE,
         (gridRow + dy + GRID_SIZE) % GRID_SIZE
       ]);
@@ -899,9 +799,7 @@ export const Life: React.FC = () => {
     }
   };
 
-  // Confirm placement - send all pending placements to IC canister (Hybrid Architecture)
-  // IC records the event, Fly.io polls for events and applies them, WebSocket pushes updates
-  // Cells will appear via WebSocket in ~1-2 seconds after IC confirms the event
+  // Confirm placement - send all pending placements to backend in one batch
   const confirmPlacement = useCallback(async () => {
     const cellsToPlace: [number, number][] = pendingPlacements.flatMap(p => p.cells);
 
@@ -909,13 +807,13 @@ export const Life: React.FC = () => {
 
     const cost = cellsToPlace.length;
 
-    // Check if player has enough points
+    // Check if player has enough coins
     if (myBalance < cost) {
-      setPlacementError(`Not enough points. Need ${cost}, have ${myBalance}`);
+      setPlacementError(`Not enough coins. Need ${cost}, have ${myBalance}`);
       return;
     }
 
-    // Check for conflicts with current local state (from WebSocket)
+    // Check for conflicts with current local state
     const conflicts = cellsToPlace.filter(([col, row]) => {
       const idx = row * GRID_SIZE + col;
       return localCells[idx]?.alive;
@@ -945,48 +843,14 @@ export const Life: React.FC = () => {
     setPlacementError(null);
 
     try {
-      // In hybrid architecture, place_cells just records an event - no simulation
-      // The expected_generation is used for optimistic concurrency control
-      const currentGen = gameState?.generation ? BigInt(gameState.generation) : BigInt(0);
-      const result = await actor.place_cells(currentGameId, cellsToPlace, currentGen);
-
+      const result = await actor.place_cells(cellsToPlace);
       if ('Err' in result) {
-        let errorMsg = result.Err;
-        if (errorMsg.includes('alive cells')) {
-          errorMsg = 'Placement failed: Another player placed cells there. Try a different position.';
-        } else if (errorMsg.includes('Insufficient')) {
-          errorMsg = 'Not enough points. Your balance may have changed.';
-        }
-        setPlacementError(errorMsg);
+        setPlacementError(result.Err);
       } else {
-        const { placed_count, new_balance } = result.Ok;
-
-        // Update balance from IC response (authoritative source)
-        setMyBalance(Number(new_balance));
-
-        // If this is our first placement, fetch metadata to get player number
-        if (myPlayerNum === null) {
-          try {
-            const metaResult = await actor.get_metadata(currentGameId);
-            if ('Ok' in metaResult) {
-              const myIdx = metaResult.Ok.players.findIndex(
-                p => p.toText() === myPrincipal?.toText()
-              );
-              if (myIdx >= 0) {
-                setMyPlayerNum(myIdx + 1);
-              }
-            }
-          } catch (err) {
-            console.error('Failed to fetch player number:', err);
-          }
-        }
-
-        // Clear pending placements - cells will appear via WebSocket from Fly.io
-        // Fly.io polls IC events, applies them, and broadcasts via WebSocket
+        const placeResult = result.Ok;
+        setMyBalance(Number(placeResult.new_balance));
         setPendingPlacements([]);
         setPlacementError(null);
-
-        console.log(`Placed ${placed_count} cells - waiting for WebSocket update from Fly.io`);
       }
     } catch (err) {
       console.error('Place error:', err);
@@ -994,7 +858,7 @@ export const Life: React.FC = () => {
     } finally {
       setIsConfirmingPlacement(false);
     }
-  }, [actor, pendingPlacements, isConfirmingPlacement, myBalance, localCells, currentGameId, myPlayerNum, myPrincipal, gameState]);
+  }, [actor, pendingPlacements, isConfirmingPlacement, myBalance, localCells]);
 
   // Clear all pending placements
   const cancelPreview = useCallback(() => {
@@ -1002,14 +866,8 @@ export const Life: React.FC = () => {
     setPlacementError(null);
   }, []);
 
-  // Remove a specific placement from batch (by ID)
-  const removePlacement = useCallback((placementId: string) => {
-    setPendingPlacements(prev => prev.filter(p => p.id !== placementId));
-  }, []);
-
   // Keyboard navigation and preview shortcuts
-  // NOTE: This useEffect must come AFTER confirmPlacement and cancelPreview are defined
-  // to avoid temporal dead zone issues in the minified bundle
+  // This useEffect must come AFTER confirmPlacement and cancelPreview are defined
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't capture if typing in input
@@ -1061,39 +919,34 @@ export const Life: React.FC = () => {
             cancelPreview();
           }
           break;
-        case 'r':
-        case 'R':
-          // Rotate pattern 90° clockwise
-          if (viewMode === 'quadrant') {
-            e.preventDefault();
-            cycleRotation();
-          }
-          break;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [viewMode, navigateQuadrant, toggleViewMode, pendingPlacements.length, isConfirmingPlacement, confirmPlacement, cancelPreview, cycleRotation]);
+  }, [viewMode, navigateQuadrant, toggleViewMode, pendingPlacements.length, isConfirmingPlacement, confirmPlacement, cancelPreview]);
 
-  // Controls - simulation now runs on Fly.io server (Hybrid Architecture)
-  // These controls are kept for UI consistency but don't affect server-side simulation
+  // Remove a specific placement from batch (by ID)
+  const removePlacement = useCallback((placementId: string) => {
+    setPendingPlacements(prev => prev.filter(p => p.id !== placementId));
+  }, []);
+
+  // Controls - local simulation only
   const handlePlayPause = () => {
-    // In hybrid architecture, simulation always runs on Fly.io at 10 gen/sec
-    // This toggle only affects local UI state (if we add client-side pause later)
     setIsRunning(!isRunning);
   };
 
   const handleStep = () => {
-    // In hybrid architecture, stepping is not supported
-    // Simulation runs continuously on Fly.io at 10 gen/sec
-    console.log('Step not available - simulation runs on Fly.io server');
+    // Manually advance local simulation by one generation
+    if (localCells.length > 0) {
+      setLocalCells(cells => stepLocalGeneration(cells));
+    }
   };
 
   const handleClear = () => {
-    // In hybrid architecture, clearing is not supported from frontend
-    // The grid state is managed by Fly.io server
-    console.log('Clear not available - grid managed by Fly.io server');
+    // Clear local cells only (backend state persists)
+    setIsRunning(false);
+    setLocalCells(cells => cells.map(() => ({ owner: 0, coins: 0, alive: false })));
   };
 
   // Cell counts - uses localCells for live updates
@@ -1107,112 +960,29 @@ export const Life: React.FC = () => {
     return acc;
   }, {} as Record<number, number>);
 
-  // Points stored in territory (sum of cell.points per player)
-  const pointsInTerritory = localCells.reduce((acc, cell) => {
-    if (cell.owner > 0 && cell.points > 0) acc[cell.owner] = (acc[cell.owner] || 0) + cell.points;
+  // Coins stored in territory (sum of cell.coins per player)
+  const coinsInTerritory = localCells.reduce((acc, cell) => {
+    if (cell.owner > 0 && cell.coins > 0) acc[cell.owner] = (acc[cell.owner] || 0) + cell.coins;
     return acc;
   }, {} as Record<number, number>);
 
-  // Total points in game (for conservation check)
-  const totalPointsInCells = Object.values(pointsInTerritory).reduce((a, b) => a + b, 0);
-  // Convert BigUint64Array/bigint[] to regular number array for safe iteration
+  // Total coins in game (for conservation check)
+  const totalCoinsInCells = Object.values(coinsInTerritory).reduce((a, b) => a + b, 0);
   const balancesArray = gameState?.balances ? Array.from(gameState.balances).map(b => Number(b)) : [];
-  const totalPointsInWallets = balancesArray.reduce((a, b) => a + b, 0);
-  const totalPoints = totalPointsInCells + totalPointsInWallets;
+  const totalCoinsInWallets = balancesArray.reduce((a, b) => a + b, 0);
+  const totalCoins = totalCoinsInCells + totalCoinsInWallets;
 
   const filteredPatterns = selectedCategory === 'all'
     ? PATTERNS : PATTERNS.filter(p => p.category === selectedCategory);
-
-  // Memoized Minimap - renders quadrant heatmap
-  const minimapRef = useRef<HTMLCanvasElement>(null);
-
-  // Draw minimap when localCells or currentQuadrant change
-  useEffect(() => {
-    const canvas = minimapRef.current;
-    if (!canvas || localCells.length === 0) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const size = canvas.width;
-    const quadSize = size / QUADRANTS_PER_ROW;
-
-    // Clear
-    ctx.fillStyle = '#1a1a2e';
-    ctx.fillRect(0, 0, size, size);
-
-    // Draw each quadrant with cell density heatmap
-    for (let q = 0; q < TOTAL_QUADRANTS; q++) {
-      const qRow = Math.floor(q / QUADRANTS_PER_ROW);
-      const qCol = q % QUADRANTS_PER_ROW;
-
-      const x = qCol * quadSize + 1;
-      const y = qRow * quadSize + 1;
-      const w = quadSize - 2;
-      const h = quadSize - 2;
-
-      // Show cell density heatmap
-      const startY = qRow * QUADRANT_SIZE;
-      const startX = qCol * QUADRANT_SIZE;
-      let livingCells = 0;
-      for (let row = startY; row < startY + QUADRANT_SIZE; row++) {
-        for (let col = startX; col < startX + QUADRANT_SIZE; col++) {
-          const cell = localCells[row * GRID_SIZE + col];
-          if (cell && cell.alive && cell.owner > 0) livingCells++;
-        }
-      }
-      const density = livingCells / QUADRANT_CELLS;
-      const alpha = Math.min(0.8, density * 2);
-      ctx.fillStyle = `rgba(57, 255, 20, ${alpha})`;
-      ctx.fillRect(x, y, w, h);
-    }
-
-    // Highlight current quadrant
-    ctx.strokeStyle = '#FFD700';
-    ctx.lineWidth = 3;
-    const curRow = Math.floor(currentQuadrant / QUADRANTS_PER_ROW);
-    const curCol = currentQuadrant % QUADRANTS_PER_ROW;
-    ctx.strokeRect(curCol * quadSize, curRow * quadSize, quadSize, quadSize);
-
-    // Draw grid
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= QUADRANTS_PER_ROW; i++) {
-      const pos = i * quadSize;
-      ctx.beginPath();
-      ctx.moveTo(pos, 0);
-      ctx.lineTo(pos, size);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(0, pos);
-      ctx.lineTo(size, pos);
-      ctx.stroke();
-    }
-  }, [localCells, currentQuadrant]);
-
-  const handleMinimapClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = minimapRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const quadSize = canvas.width / QUADRANTS_PER_ROW;
-
-    const qCol = Math.floor(x / quadSize);
-    const qRow = Math.floor(y / quadSize);
-    const quadrant = qRow * QUADRANTS_PER_ROW + qCol;
-
-    jumpToQuadrant(quadrant);
-  }, [jumpToQuadrant]);
 
   // Login screen
   if (!isAuthenticated) {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-80px)] gap-6">
         <div className="text-center">
-          <h1 className="text-3xl font-bold text-white mb-2">Conway's Game of Life</h1>
+          <h1 className="text-3xl font-bold text-white mb-2">Life 2 (Sparse)</h1>
           <p className="text-gray-400">{GRID_WIDTH}x{GRID_HEIGHT} Persistent World</p>
-          <p className="text-gray-500 text-sm mt-2">10 players max - your cells, your territory</p>
+          <p className="text-gray-500 text-sm mt-2">Up to 9 players - your cells, your territory</p>
         </div>
         <button
           onClick={handleLogin}
@@ -1226,10 +996,10 @@ export const Life: React.FC = () => {
     );
   }
 
-  // Game view - fullscreen with collapsible sidebar
+  // Game view - all JSX inlined to prevent component remounting
   return (
     <div className="flex flex-col h-[calc(100vh-80px)]">
-      {/* Error display - keep at top */}
+      {/* Error display */}
       {error && (
         <div className="p-2 bg-red-500/20 border border-red-500/50 text-red-400 text-sm">
           {error}
@@ -1238,11 +1008,11 @@ export const Life: React.FC = () => {
 
       {/* Main content area */}
       <div className="flex flex-1 min-h-0">
-        {/* Desktop Sidebar - inline to prevent remounting */}
+        {/* Desktop Sidebar - INLINED */}
         <div className={`
           hidden lg:flex flex-col
           ${sidebarCollapsed ? 'w-12' : 'w-72'}
-          transition-all duration-300 ease-in-out
+          transition-[width] duration-300 ease-in-out
           bg-black border-r border-white/20
           overflow-hidden flex-shrink-0
         `}>
@@ -1251,14 +1021,14 @@ export const Life: React.FC = () => {
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
             className="p-3 hover:bg-white/10 flex items-center justify-center border-b border-white/20"
           >
-            <span className="text-gray-400 text-lg">{sidebarCollapsed ? '»' : '«'}</span>
+            <span className="text-gray-400 text-lg">{sidebarCollapsed ? '>>' : '<<'}</span>
           </button>
 
           {/* Content - hidden when collapsed */}
-          <div className={`${sidebarCollapsed ? 'hidden' : 'flex flex-col'} flex-1 overflow-y-auto p-3`}>
+          <div className={`${sidebarCollapsed ? 'hidden' : 'flex flex-col'} flex-1 overflow-y-auto p-3`} style={{ overscrollBehavior: 'contain' }}>
             {/* Info Section */}
             <div className="mb-4">
-              <h1 className="text-lg font-bold text-white">Game of Life</h1>
+              <h1 className="text-lg font-bold text-white">Life 2 (Sparse)</h1>
               <p className="text-gray-500 text-xs">
                 {myPlayerNum ? (
                   <>You are Player {myPlayerNum} <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[myPlayerNum] }}></span></>
@@ -1270,7 +1040,10 @@ export const Life: React.FC = () => {
                 <div className="text-gray-400">
                   Gen: <span className="text-dfinity-turquoise">{gameState?.generation.toString() || 0}</span>
                 </div>
-                <div className="text-gray-400">Players: {gameState?.players.length || 0}/10</div>
+                <div className="text-gray-400">Players: {gameState?.players.length || 0}/9</div>
+                <div className="text-gray-400">
+                  Coins: <span className="text-yellow-400">{myBalance}</span>
+                </div>
               </div>
               {/* Player stats table */}
               <div className="mt-3">
@@ -1280,7 +1053,7 @@ export const Life: React.FC = () => {
                       <th className="text-left font-normal pb-1"></th>
                       <th className="text-right font-normal pb-1 px-1">Terr</th>
                       <th className="text-right font-normal pb-1 px-1">Cells</th>
-                      <th className="text-right font-normal pb-1 px-1">Pts</th>
+                      <th className="text-right font-normal pb-1 px-1">Coins</th>
                       <th className="text-right font-normal pb-1 px-1">Wallet</th>
                     </tr>
                   </thead>
@@ -1289,7 +1062,7 @@ export const Life: React.FC = () => {
                       const playerNum = idx + 1;
                       const territory = territoryCounts[playerNum] || 0;
                       const cells = cellCounts[playerNum] || 0;
-                      const pts = pointsInTerritory[playerNum] || 0;
+                      const coins = coinsInTerritory[playerNum] || 0;
                       return (
                         <tr key={playerNum} className="border-t border-gray-800">
                           <td className="py-0.5">
@@ -1305,7 +1078,7 @@ export const Life: React.FC = () => {
                             {cells.toLocaleString()}
                           </td>
                           <td className="text-right px-1 text-yellow-500">
-                            {pts}
+                            {coins}
                           </td>
                           <td className="text-right px-1 text-green-400">
                             {wallet.toLocaleString()}
@@ -1316,13 +1089,13 @@ export const Life: React.FC = () => {
                   </tbody>
                 </table>
                 <div className="text-xs text-gray-600 mt-2 border-t border-gray-700 pt-2">
-                  Total: <span className="text-yellow-500">{totalPoints.toLocaleString()}</span> pts
-                  <span className="text-gray-600 ml-1">({totalPointsInCells} + {totalPointsInWallets})</span>
+                  Total: <span className="text-yellow-500">{totalCoins.toLocaleString()}</span> coins
+                  <span className="text-gray-600 ml-1">({totalCoinsInCells} + {totalCoinsInWallets})</span>
                 </div>
               </div>
             </div>
 
-            {/* Minimap - inline canvas */}
+            {/* Minimap - INLINED */}
             <div className="minimap-container mb-4">
               <div className="text-xs text-gray-400 mb-1">World Map</div>
               <canvas
@@ -1337,7 +1110,7 @@ export const Life: React.FC = () => {
               </div>
             </div>
 
-            {/* Navigation Controls - inline */}
+            {/* Navigation Controls - INLINED */}
             <div className="navigation-controls mb-4">
               <button
                 onClick={toggleViewMode}
@@ -1370,11 +1143,11 @@ export const Life: React.FC = () => {
             {/* Pattern Section */}
             <div className="flex-1">
               <div className="text-xs text-gray-400 mb-2">Patterns</div>
-              {/* Category filter buttons - vertical stack */}
+              {/* Category filter buttons */}
               <div className="flex flex-col gap-1 mb-3">
                 <button
                   onClick={() => setSelectedCategory('all')}
-                  className={`px-3 py-1.5 rounded text-xs font-mono transition-all text-left ${
+                  className={`px-3 py-1.5 rounded text-xs font-mono text-left ${
                     selectedCategory === 'all'
                       ? 'bg-white/20 text-white border border-white/30'
                       : 'text-gray-400 hover:text-white hover:bg-white/5'
@@ -1388,7 +1161,7 @@ export const Life: React.FC = () => {
                     <button
                       key={cat}
                       onClick={() => setSelectedCategory(cat)}
-                      className={`px-3 py-1.5 rounded text-xs font-mono transition-all border text-left ${
+                      className={`px-3 py-1.5 rounded text-xs font-mono border text-left ${
                         selectedCategory === cat ? info.color : 'text-gray-400 border-transparent hover:text-white hover:bg-white/5'
                       }`}
                     >
@@ -1397,7 +1170,7 @@ export const Life: React.FC = () => {
                   );
                 })}
               </div>
-              {/* Pattern buttons - grid layout */}
+              {/* Pattern buttons */}
               <div className="grid grid-cols-2 gap-1">
                 {filteredPatterns.map((pattern) => {
                   const catInfo = CATEGORY_INFO[pattern.category];
@@ -1406,7 +1179,7 @@ export const Life: React.FC = () => {
                     <button
                       key={pattern.name}
                       onClick={() => setSelectedPattern(pattern)}
-                      className={`px-2 py-1.5 rounded text-xs font-mono transition-all border ${
+                      className={`px-2 py-1.5 rounded text-xs font-mono border ${
                         isSelected
                           ? catInfo.color + ' ring-1 ring-white/30'
                           : 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10'
@@ -1424,21 +1197,12 @@ export const Life: React.FC = () => {
                   {selectedPattern.name} ({parsedPattern.length} cells)
                 </div>
                 <div className="text-gray-500 mt-1">{selectedPattern.description}</div>
-                <div className="flex items-center gap-2 mt-2">
-                  <span className="text-gray-400">Rotation:</span>
-                  <button
-                    onClick={cycleRotation}
-                    className="px-2 py-0.5 bg-white/10 hover:bg-white/20 rounded text-white font-mono"
-                  >
-                    {['0°', '90°', '180°', '270°'][rotation]}
-                  </button>
-                  <span className="text-gray-500 text-[10px]">(R key)</span>
-                </div>
+                <div className="text-gray-400 mt-2">Click grid to place</div>
               </div>
             </div>
           </div>
 
-          {/* Collapsed indicators - shown when collapsed */}
+          {/* Collapsed indicators */}
           <div className={`${sidebarCollapsed ? 'flex flex-col items-center py-4 gap-2' : 'hidden'}`}>
             <div className="text-xs text-gray-400">G</div>
             <div className="text-dfinity-turquoise text-xs font-mono">{gameState?.generation.toString() || 0}</div>
@@ -1455,22 +1219,9 @@ export const Life: React.FC = () => {
 
         {/* Canvas Container */}
         <div className="flex-1 flex flex-col relative bg-black">
-          {/* WebSocket connection status indicator (Hybrid Architecture) */}
-          <div className={`absolute top-2 left-2 z-10 flex items-center gap-2 px-2 py-1 rounded text-xs font-mono ${
-            wsConnected
-              ? 'bg-green-900/80 text-green-400 border border-green-500/50'
-              : 'bg-red-900/80 text-red-400 border border-red-500/50 animate-pulse'
-          }`}>
-            <span className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-400' : 'bg-red-400'}`} />
-            <span>{wsConnected ? 'Live' : 'Reconnecting...'}</span>
-            {wsConnected && gameState?.generation && (
-              <span className="text-gray-400">Gen {gameState.generation.toString()}</span>
-            )}
-          </div>
-
           {/* Pending placements panel */}
           {pendingPlacements.length > 0 && viewMode === 'quadrant' && (
-            <div className="absolute top-12 left-2 z-10 bg-black/90 border border-white/30 text-white px-4 py-3 rounded-lg text-sm max-w-sm">
+            <div className="absolute top-2 left-2 z-10 bg-black/90 border border-white/30 text-white px-4 py-3 rounded-lg text-sm max-w-sm">
               <div className="flex items-center justify-between mb-2">
                 <span className="font-mono text-dfinity-turquoise">
                   {pendingPlacements.length} pattern{pendingPlacements.length > 1 ? 's' : ''}
@@ -1478,7 +1229,7 @@ export const Life: React.FC = () => {
                 <span className="text-gray-400">
                   Cost: <span className={myBalance >= pendingPlacements.reduce((sum, p) => sum + p.cells.length, 0) ? 'text-green-400' : 'text-red-400'}>
                     {pendingPlacements.reduce((sum, p) => sum + p.cells.length, 0)}
-                  </span> / {myBalance} pts
+                  </span> / {myBalance} coins
                 </span>
               </div>
 
@@ -1498,25 +1249,6 @@ export const Life: React.FC = () => {
                     </button>
                   </div>
                 ))}
-              </div>
-
-              {/* Next pattern preview with rotation */}
-              <div className="flex items-center gap-3 mb-2 p-2 bg-white/5 rounded">
-                <div className="flex-shrink-0">
-                  <PatternPreview pattern={rotatedPattern} color={myPlayerNum !== null ? PLAYER_COLORS[myPlayerNum] : '#FFFFFF'} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs text-gray-400">Next: {selectedPattern.name}</div>
-                  <div className="flex items-center gap-2 mt-1">
-                    <button
-                      onClick={cycleRotation}
-                      className="px-2 py-0.5 bg-white/10 hover:bg-white/20 rounded text-white font-mono text-xs"
-                    >
-                      {['0°', '90°', '180°', '270°'][rotation]}
-                    </button>
-                    <span className="text-gray-500 text-[10px]">R to rotate</span>
-                  </div>
-                </div>
               </div>
 
               {/* Error message */}
@@ -1551,7 +1283,7 @@ export const Life: React.FC = () => {
               </div>
 
               <div className="text-xs text-gray-500 mt-2">
-                Click grid to add more patterns
+                Click grid to add more • Enter to confirm • Esc to cancel
               </div>
             </div>
           )}
@@ -1579,29 +1311,60 @@ export const Life: React.FC = () => {
         </div>
       </div>
 
-      {/* Mobile Bottom Bar - inline to prevent remounting */}
+      {/* Mobile Bottom Bar - INLINED */}
       <div className="lg:hidden bg-black border-t border-white/20">
-        {/* Collapsed view - just expand button */}
+        {/* Collapsed view */}
         <div className="flex items-center justify-between p-2">
-          <div className="flex items-center gap-2 text-xs font-mono text-gray-400">
+          <div className="flex items-center gap-3 text-xs font-mono">
+            <span className="text-gray-400">Q{currentQuadrant}</span>
+            <span className="text-gray-400">Gen: <span className="text-dfinity-turquoise">{gameState?.generation.toString() || 0}</span></span>
             {myPlayerNum && (
-              <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[myPlayerNum] }} />
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[myPlayerNum] }} />
+              </span>
             )}
-            <span>Patterns</span>
           </div>
-          <button
-            onClick={() => setMobileExpanded(!mobileExpanded)}
-            className="p-2 text-gray-400 hover:text-white"
-          >
-            {mobileExpanded ? 'v' : '^'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={toggleViewMode}
+              className="px-2 py-1 text-xs bg-white/10 rounded text-white"
+            >
+              {viewMode === 'overview' ? 'Enter' : 'Map'}
+            </button>
+            <button
+              onClick={() => setMobileExpanded(!mobileExpanded)}
+              className="p-2 text-gray-400 hover:text-white"
+            >
+              {mobileExpanded ? 'v' : '^'}
+            </button>
+          </div>
         </div>
 
         {/* Expanded view */}
         {mobileExpanded && (
-          <div className="p-3 border-t border-white/10 max-h-64 overflow-y-auto">
+          <div className="p-3 border-t border-white/10 max-h-64 overflow-y-auto" style={{ overscrollBehavior: 'contain' }}>
+            {/* Navigation d-pad for mobile */}
+            {viewMode === 'quadrant' && (
+              <div className="flex items-center gap-4 mb-3">
+                <div className="grid grid-cols-3 gap-1">
+                  <div />
+                  <button onClick={() => navigateQuadrant('up')} className="w-8 h-8 bg-white/10 rounded text-white text-center">^</button>
+                  <div />
+                  <button onClick={() => navigateQuadrant('left')} className="w-8 h-8 bg-white/10 rounded text-white text-center">&lt;</button>
+                  <div className="w-8 h-8 bg-gray-800 rounded text-gray-600 text-center leading-8">o</div>
+                  <button onClick={() => navigateQuadrant('right')} className="w-8 h-8 bg-white/10 rounded text-white text-center">&gt;</button>
+                  <div />
+                  <button onClick={() => navigateQuadrant('down')} className="w-8 h-8 bg-white/10 rounded text-white text-center">v</button>
+                  <div />
+                </div>
+                <div className="text-xs text-gray-500">
+                  Q{currentQuadrant}<br/>
+                  ({viewX}, {viewY})
+                </div>
+              </div>
+            )}
 
-            {/* Territory/cell stats in row */}
+            {/* Territory/cell stats */}
             <div className="flex gap-4 mb-3 text-xs overflow-x-auto">
               <div className="flex items-center gap-2">
                 <span className="text-gray-500">Territory:</span>
@@ -1647,7 +1410,7 @@ export const Life: React.FC = () => {
                 );
               })}
             </div>
-            {/* Horizontal scrolling pattern selector */}
+            {/* Pattern selector */}
             <div className="flex gap-2 overflow-x-auto pb-2">
               {filteredPatterns.map((pattern) => {
                 const catInfo = CATEGORY_INFO[pattern.category];
@@ -1668,16 +1431,8 @@ export const Life: React.FC = () => {
               })}
             </div>
             {/* Selected pattern info */}
-            <div className="text-xs text-gray-400 mt-2 flex items-center gap-2 flex-wrap">
-              <span>
-                Selected: <span className={CATEGORY_INFO[selectedPattern.category].color.split(' ')[0]}>{selectedPattern.name}</span> ({parsedPattern.length} cells)
-              </span>
-              <button
-                onClick={cycleRotation}
-                className="px-2 py-0.5 bg-white/10 hover:bg-white/20 rounded text-white font-mono text-[10px]"
-              >
-                {['0°', '90°', '180°', '270°'][rotation]}
-              </button>
+            <div className="text-xs text-gray-400 mt-2">
+              Selected: <span className={CATEGORY_INFO[selectedPattern.category].color.split(' ')[0]}>{selectedPattern.name}</span> ({parsedPattern.length} cells) - {selectedPattern.description}
             </div>
           </div>
         )}

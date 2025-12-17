@@ -1386,6 +1386,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "life2_backend"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "ic-cdk",
+ "ic-cdk-timers",
+ "ic-stable-structures 0.6.9",
+ "serde",
+]
+
+[[package]]
 name = "life_core"
 version = "0.1.0"
 dependencies = [

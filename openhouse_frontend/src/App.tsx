@@ -16,6 +16,7 @@ import { Wallet } from './pages/Wallet';
 import { Liquidity } from './pages/Liquidity';
 import { Predict } from './pages/Predict';
 import { Life } from './pages/Life';
+import { Life2 } from './pages/Life2';
 
 function App() {
   return (
@@ -36,8 +37,8 @@ function App() {
                   <Route path="/liquidity" element={<Liquidity />} />
                   <Route path="/predict" element={<Predict />} />
                   <Route path="/life" element={<Life />} />
+                  <Route path="/life2" element={<Life2 />} />
                   <Route path="/admin" element={<Admin />} />
-                  <Route path="/life" element={<Life />} />
                 </Routes>
               </Layout>
             </GameBalanceProvider>

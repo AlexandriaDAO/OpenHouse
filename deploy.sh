@@ -33,6 +33,10 @@ while [[ $# -gt 0 ]]; do
             DEPLOY_TARGET="life"
             shift
             ;;
+        --life2-only)
+            DEPLOY_TARGET="life2"
+            shift
+            ;;
         --frontend-only)
             DEPLOY_TARGET="frontend"
             shift
@@ -51,7 +55,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --plinko-only      Deploy only plinko backend"
             echo "  --roulette-only   Deploy only roulette backend (Rust)"
             echo "  --dice-only        Deploy only dice backend"
-            echo "  --life-only        Deploy only life1 backend (Game of Life)"
+            echo "  --life-only        Deploy only life1 backend (Game of Life - Hybrid)"
+            echo "  --life2-only       Deploy only life2 backend (Game of Life - Pure IC)"
             echo "  --frontend-only    Deploy only the frontend"
             echo "  --test             Run post-deployment tests"
             echo "  --help             Show this help message"
@@ -88,6 +93,7 @@ echo "  Plinko Backend:    weupr-2qaaa-aaaap-abl3q-cai"
 echo "  Roulette Backend: wvrcw-3aaaa-aaaah-arm4a-cai"
 echo "  Dice Backend:      whchi-hyaaa-aaaao-a4ruq-cai"
 echo "  Life1 Backend:     pijnb-7yaaa-aaaae-qgcuq-cai"
+echo "  Life2 Backend:     qoski-4yaaa-aaaai-q4g4a-cai"
 echo "  Frontend:          pezw3-laaaa-aaaal-qssoa-cai"
 echo "================================================"
 echo ""
@@ -224,6 +230,28 @@ deploy_life() {
     echo ""
 }
 
+# Function to deploy life2 backend (Game of Life - Pure On-Chain)
+deploy_life2() {
+    echo "================================================"
+    echo "Deploying Life2 Backend Canister (Pure IC)"
+    echo "================================================"
+
+    # Build the backend canister
+    echo "Building life2 backend canister..."
+    cargo build --release --target wasm32-unknown-unknown --package life2_backend
+
+    # Skip candid extraction - using manually created .did file
+    echo "Using pre-defined candid interface..."
+
+    # Deploy to mainnet
+    echo "Deploying life2 backend to mainnet..."
+    dfx deploy life2_backend --network ic
+
+    echo "Life2 backend deployment completed!"
+    echo "Life2 Canister ID: qoski-4yaaa-aaaai-q4g4a-cai"
+    echo ""
+}
+
 # Function to deploy frontend
 deploy_frontend() {
     echo "=================================================="
@@ -237,6 +265,7 @@ deploy_frontend() {
     dfx generate roulette_backend 2>/dev/null || echo "Warning: Could not generate roulette_backend declarations"
     dfx generate dice_backend 2>/dev/null || echo "Warning: Could not generate dice_backend declarations"
     dfx generate life1_backend 2>/dev/null || echo "Warning: Could not generate life1_backend declarations"
+    dfx generate life2_backend 2>/dev/null || echo "Warning: Could not generate life2_backend declarations"
 
     # Sync declarations
     echo "Copying fresh declarations to frontend..."
@@ -326,6 +355,9 @@ main() {
         life)
             deploy_life
             ;;
+        life2)
+            deploy_life2
+            ;;
         frontend)
             deploy_frontend
             ;;
@@ -335,6 +367,7 @@ main() {
             deploy_roulette
             deploy_dice
             deploy_life
+            deploy_life2
             deploy_frontend
             ;;
     esac
@@ -351,6 +384,7 @@ main() {
     echo "Roulette Backend: https://dashboard.internetcomputer.org/canister/wvrcw-3aaaa-aaaah-arm4a-cai"
     echo "Dice Backend:      https://dashboard.internetcomputer.org/canister/whchi-hyaaa-aaaao-a4ruq-cai"
     echo "Life1 Backend:     https://dashboard.internetcomputer.org/canister/pijnb-7yaaa-aaaae-qgcuq-cai"
+    echo "Life2 Backend:     https://dashboard.internetcomputer.org/canister/qoski-4yaaa-aaaai-q4g4a-cai"
     echo "Frontend:          https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io"
     echo ""
     echo "Remember: All changes are live on mainnet immediately!"

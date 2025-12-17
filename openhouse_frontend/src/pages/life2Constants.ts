@@ -3,13 +3,11 @@ export const GRID_SIZE = 512;
 export const QUADRANT_SIZE = 128;
 export const QUADRANTS_PER_ROW = 4;
 export const TOTAL_QUADRANTS = 16;
+export const TOTAL_CELLS = GRID_SIZE * GRID_SIZE; // 262,144 cells
 
 // Legacy constants for backend compatibility
 export const GRID_WIDTH = GRID_SIZE;
 export const GRID_HEIGHT = GRID_SIZE;
-
-// Quadrant constants
-export const QUADRANT_CELLS = QUADRANT_SIZE * QUADRANT_SIZE; // 16,384
 
 // Simulation timing
 export const LOCAL_TICK_MS = 100;      // Local simulation: 10 generations/second
@@ -22,22 +20,19 @@ export const GRID_COLOR = 'rgba(255, 255, 255, 0.08)';
 export const SWIPE_THRESHOLD = 50;
 export const DEAD_COLOR = '#000000';
 
-// Gold border for cells with points
+// Gold border for cells with coins
 export const GOLD_BORDER_MIN_OPACITY = 0.3;
 export const GOLD_BORDER_MAX_OPACITY = 1.0;
 
-// Canister ID
-export const LIFE1_CANISTER_ID = 'pijnb-7yaaa-aaaae-qgcuq-cai';
+// Canister ID - Life2 (Sparse)
+export const LIFE2_CANISTER_ID = 'qoski-4yaaa-aaaai-q4g4a-cai';
 
 // View modes
 export type ViewMode = 'overview' | 'quadrant';
 
 // Pattern types - re-exported from organized pattern library
-export type { PatternInfo, PatternCategory } from './life/patterns';
-export { PATTERNS, CATEGORY_INFO, getPatternsByCategory, getPatternByName } from './life/patterns';
-
-// Legacy category type alias for backwards compatibility
-export type LegacyPatternCategory = 'gun' | 'spaceship' | 'defense' | 'bomb' | 'oscillator';
+export type { PatternInfo, PatternCategory } from './life2/patterns';
+export { PATTERNS, CATEGORY_INFO, getPatternsByCategory, getPatternByName } from './life2/patterns';
 
 // Batch placement support
 export interface PendingPlacement {
@@ -46,9 +41,6 @@ export interface PendingPlacement {
   patternName: string;
   centroid: [number, number]; // For display purposes
 }
-
-// Point transfers from territory capture: [playerNum, pointsGained]
-export type PointTransfer = [number, number];
 
 // 10 Player colors
 export const PLAYER_COLORS: Record<number, string> = {
@@ -77,5 +69,5 @@ export const TERRITORY_COLORS: Record<number, string> = {
   10: 'rgba(163, 230, 53, 0.15)',
 };
 
-// Note: CATEGORY_INFO and PATTERNS are now imported from './life/patterns'
-// See src/pages/life/patterns/ for the organized pattern library
+// Note: CATEGORY_INFO and PATTERNS are now imported from './life2/patterns'
+// See src/pages/life2/patterns/ for the organized pattern library

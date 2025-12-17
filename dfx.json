@@ -35,6 +35,12 @@
       "candid": "life1_backend/life1_backend.did",
       "specified_id": "pijnb-7yaaa-aaaae-qgcuq-cai"
     },
+    "life2_backend": {
+      "type": "rust",
+      "package": "life2_backend",
+      "candid": "life2_backend/life2_backend.did",
+      "specified_id": "qoski-4yaaa-aaaai-q4g4a-cai"
+    },
     "openhouse_frontend": {
       "type": "assets",
       "source": ["openhouse_frontend/dist"],
