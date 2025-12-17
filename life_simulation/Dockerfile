@@ -1,4 +1,4 @@
-# Build stage
+# Build stage - Rust 1.83 required for edition2024 dependencies
 FROM rust:1.83-slim as builder
 
 WORKDIR /app
