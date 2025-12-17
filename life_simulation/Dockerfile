@@ -1,6 +1,9 @@
 # Build stage - Rust 1.83 required for edition2024 dependencies
 FROM rust:1.83-slim as builder
 
+# Cache buster - change this value to force full rebuild
+ARG CACHE_BUST=2024121701
+
 WORKDIR /app
 
 # Install build dependencies
