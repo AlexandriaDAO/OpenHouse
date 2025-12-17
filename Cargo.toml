@@ -5,6 +5,8 @@ members = [
     "dice_backend",
     "roulette_backend",
     "life1_backend",
+    "life_core",
+    "life_simulation",
 ]
 resolver = "2"
 

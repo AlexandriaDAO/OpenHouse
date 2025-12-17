@@ -29,6 +29,10 @@ while [[ $# -gt 0 ]]; do
             DEPLOY_TARGET="dice"
             shift
             ;;
+        --life-only)
+            DEPLOY_TARGET="life"
+            shift
+            ;;
         --frontend-only)
             DEPLOY_TARGET="frontend"
             shift
@@ -47,6 +51,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --plinko-only      Deploy only plinko backend"
             echo "  --roulette-only   Deploy only roulette backend (Rust)"
             echo "  --dice-only        Deploy only dice backend"
+            echo "  --life-only        Deploy only life1 backend (Game of Life)"
             echo "  --frontend-only    Deploy only the frontend"
             echo "  --test             Run post-deployment tests"
             echo "  --help             Show this help message"
@@ -82,6 +87,7 @@ echo "  Crash Backend:     fws6k-tyaaa-aaaap-qqc7q-cai"
 echo "  Plinko Backend:    weupr-2qaaa-aaaap-abl3q-cai"
 echo "  Roulette Backend: wvrcw-3aaaa-aaaah-arm4a-cai"
 echo "  Dice Backend:      whchi-hyaaa-aaaao-a4ruq-cai"
+echo "  Life1 Backend:     pijnb-7yaaa-aaaae-qgcuq-cai"
 echo "  Frontend:          pezw3-laaaa-aaaal-qssoa-cai"
 echo "================================================"
 echo ""
@@ -193,6 +199,31 @@ deploy_dice() {
     echo ""
 }
 
+# Function to deploy life1 backend (Game of Life - Hybrid Architecture)
+deploy_life() {
+    echo "================================================"
+    echo "Deploying Life1 Backend Canister"
+    echo "================================================"
+
+    # Build the backend canister
+    echo "Building life1 backend canister..."
+    cargo build --release --target wasm32-unknown-unknown --package life1_backend
+
+    # Skip candid extraction - using manually created .did file
+    echo "Using pre-defined candid interface..."
+
+    # Deploy to mainnet (--mode reinstall to handle architecture migration)
+    echo "Deploying life1 backend to mainnet..."
+    echo "WARNING: Using --mode reinstall (wipes existing state for hybrid architecture migration)"
+    dfx deploy life1_backend --network ic --mode reinstall --yes
+
+    echo "Life1 backend deployment completed!"
+    echo ""
+    echo "NOTE: For full hybrid architecture, also deploy the Fly.io simulation server:"
+    echo "  cd life_simulation && flyctl deploy"
+    echo ""
+}
+
 # Function to deploy frontend
 deploy_frontend() {
     echo "=================================================="
@@ -292,6 +323,9 @@ main() {
         dice)
             # deploy_dice
             ;;
+        life)
+            deploy_life
+            ;;
         frontend)
             deploy_frontend
             ;;
@@ -300,6 +334,7 @@ main() {
             deploy_plinko
             deploy_roulette
             deploy_dice
+            deploy_life
             deploy_frontend
             ;;
     esac
@@ -315,6 +350,7 @@ main() {
     echo "Plinko Backend:    https://dashboard.internetcomputer.org/canister/weupr-2qaaa-aaaap-abl3q-cai"
     echo "Roulette Backend: https://dashboard.internetcomputer.org/canister/wvrcw-3aaaa-aaaah-arm4a-cai"
     echo "Dice Backend:      https://dashboard.internetcomputer.org/canister/whchi-hyaaa-aaaao-a4ruq-cai"
+    echo "Life1 Backend:     https://dashboard.internetcomputer.org/canister/pijnb-7yaaa-aaaae-qgcuq-cai"
     echo "Frontend:          https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io"
     echo ""
     echo "Remember: All changes are live on mainnet immediately!"

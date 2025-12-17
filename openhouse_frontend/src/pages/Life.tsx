@@ -3,167 +3,39 @@ import { AuthClient } from '@dfinity/auth-client';
 import { Actor, HttpAgent, ActorSubclass } from '@dfinity/agent';
 import { Principal } from '@dfinity/principal';
 import { idlFactory } from '../declarations/life1_backend';
-import type { _SERVICE, GameState, Cell } from '../declarations/life1_backend/life1_backend.did.d';
+import type { _SERVICE, GameState, Cell, QuadrantInfo } from '../declarations/life1_backend/life1_backend.did.d';
 
-const LIFE1_CANISTER_ID = 'pijnb-7yaaa-aaaae-qgcuq-cai';
+// Import constants and types from separate file
+import {
+  LIFE1_CANISTER_ID,
+  GRID_SIZE,
+  QUADRANT_SIZE,
+  QUADRANTS_PER_ROW,
+  TOTAL_QUADRANTS,
+  GRID_WIDTH,
+  GRID_HEIGHT,
+  QUADRANT_CELLS,
+  DOMINATION_THRESHOLD,
+  QUADRANT_POLL_INTERVAL,
+  LOCAL_TICK_MS,
+  BACKEND_SYNC_MS,
+  GRID_COLOR,
+  SWIPE_THRESHOLD,
+  DEAD_COLOR,
+  GOLD_BORDER_MIN_OPACITY,
+  GOLD_BORDER_MAX_OPACITY,
+  PLAYER_COLORS,
+  TERRITORY_COLORS,
+  CATEGORY_INFO,
+  PATTERNS,
+  type ViewMode,
+  type PatternCategory,
+  type PatternInfo,
+  type PendingPlacement,
+} from './lifeConstants';
 
-// Grid dimensions - 512x512 divided into 16 quadrants of 128x128
-const GRID_SIZE = 512;
-const QUADRANT_SIZE = 128;
-const QUADRANTS_PER_ROW = 4;
-const TOTAL_QUADRANTS = 16;
-
-// Legacy constants for backend compatibility
-const GRID_WIDTH = GRID_SIZE;
-const GRID_HEIGHT = GRID_SIZE;
-
-// Simulation timing
-const LOCAL_TICK_MS = 100;      // Local simulation: 10 generations/second
-const BACKEND_SYNC_MS = 5000;   // Sync with backend every 5 seconds
-
-// Rendering constants
-const GRID_COLOR = 'rgba(255, 255, 255, 0.08)';
-
-// View modes
-type ViewMode = 'overview' | 'quadrant';
-
-// Swipe detection
-const SWIPE_THRESHOLD = 50;
-const DEAD_COLOR = '#000000';
-
-// 10 Player colors
-const PLAYER_COLORS: Record<number, string> = {
-  1: '#39FF14',  // Neon Green
-  2: '#FF3939',  // Red
-  3: '#3939FF',  // Blue
-  4: '#FFD700',  // Gold
-  5: '#FF39FF',  // Magenta
-  6: '#39FFFF',  // Cyan
-  7: '#FF8C00',  // Orange
-  8: '#8B5CF6',  // Purple
-  9: '#F472B6',  // Pink
-  10: '#A3E635', // Lime
-};
-
-const TERRITORY_COLORS: Record<number, string> = {
-  1: 'rgba(57, 255, 20, 0.15)',
-  2: 'rgba(255, 57, 57, 0.15)',
-  3: 'rgba(57, 57, 255, 0.15)',
-  4: 'rgba(255, 215, 0, 0.15)',
-  5: 'rgba(255, 57, 255, 0.15)',
-  6: 'rgba(57, 255, 255, 0.15)',
-  7: 'rgba(255, 140, 0, 0.15)',
-  8: 'rgba(139, 92, 246, 0.15)',
-  9: 'rgba(244, 114, 182, 0.15)',
-  10: 'rgba(163, 230, 53, 0.15)',
-};
-
-// Gold border for cells with points
-const GOLD_BORDER_MIN_OPACITY = 0.3;
-const GOLD_BORDER_MAX_OPACITY = 1.0;
-
-// Pattern types
-type PatternCategory = 'gun' | 'spaceship' | 'defense' | 'bomb' | 'oscillator';
-
-interface PatternInfo {
-  name: string;
-  rle: string;
-  category: PatternCategory;
-  description: string;
-}
-
-// Batch placement support
-interface PendingPlacement {
-  id: string;
-  cells: [number, number][];
-  patternName: string;
-  centroid: [number, number]; // For display purposes
-}
-
-// RLE Parser
-function parseRLE(rle: string): [number, number][] {
-  const coords: [number, number][] = [];
-  const lines = rle.split('\n');
-  let patternData = '';
-  let width = 0;
-  let height = 0;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith('#')) continue;
-    if (trimmed.startsWith('x')) {
-      const match = trimmed.match(/x\s*=\s*(\d+).*y\s*=\s*(\d+)/);
-      if (match) {
-        width = parseInt(match[1]);
-        height = parseInt(match[2]);
-      }
-      continue;
-    }
-    patternData += trimmed;
-  }
-
-  let x = 0, y = 0, countStr = '';
-  for (const char of patternData) {
-    if (char >= '0' && char <= '9') {
-      countStr += char;
-    } else if (char === 'b') {
-      x += countStr ? parseInt(countStr) : 1;
-      countStr = '';
-    } else if (char === 'o') {
-      const count = countStr ? parseInt(countStr) : 1;
-      for (let i = 0; i < count; i++) coords.push([x + i, y]);
-      x += count;
-      countStr = '';
-    } else if (char === '$') {
-      y += countStr ? parseInt(countStr) : 1;
-      x = 0;
-      countStr = '';
-    } else if (char === '!') break;
-  }
-
-  // Center the pattern
-  const centerX = Math.floor(width / 2);
-  const centerY = Math.floor(height / 2);
-  return coords.map(([cx, cy]) => [cx - centerX, cy - centerY]);
-}
-
-// Pattern library
-const PATTERNS: PatternInfo[] = [
-  { name: 'Glider', category: 'spaceship', description: 'Classic diagonal mover',
-    rle: `x = 3, y = 3\nbo$2bo$3o!` },
-  { name: 'LWSS', category: 'spaceship', description: 'Lightweight spaceship',
-    rle: `x = 5, y = 4\nbo2bo$o$o3bo$4o!` },
-  { name: 'MWSS', category: 'spaceship', description: 'Middleweight spaceship',
-    rle: `x = 6, y = 5\n3bo$bo3bo$o$o4bo$5o!` },
-  { name: 'HWSS', category: 'spaceship', description: 'Heavyweight spaceship',
-    rle: `x = 7, y = 5\n3b2o$bo4bo$o$o5bo$6o!` },
-  { name: 'Gosper Gun', category: 'gun', description: 'Fires gliders every 30 gen',
-    rle: `x = 36, y = 9\n24bo$22bobo$12b2o6b2o12b2o$11bo3bo4b2o12b2o$2o8bo5bo3b2o$2o8bo3bob2o4bobo$10bo5bo7bo$11bo3bo$12b2o!` },
-  { name: 'Simkin Gun', category: 'gun', description: 'Smallest known gun',
-    rle: `x = 33, y = 21\n2o5b2o$2o5b2o2$4b2o$4b2o5$22b2ob2o$21bo5bo$21bo6bo2b2o$21b3o3bo3b2o$26bo4$20b2o$20bo$21b3o$23bo!` },
-  { name: 'Block', category: 'defense', description: 'Simplest still life',
-    rle: `x = 2, y = 2\n2o$2o!` },
-  { name: 'Beehive', category: 'defense', description: 'Common still life',
-    rle: `x = 4, y = 3\nb2o$o2bo$b2o!` },
-  { name: 'Eater 1', category: 'defense', description: 'Absorbs gliders',
-    rle: `x = 4, y = 4\n2o$bo$bobo$2b2o!` },
-  { name: 'R-pentomino', category: 'bomb', description: 'Chaos bomb - 1103 gen',
-    rle: `x = 3, y = 3\nb2o$2o$bo!` },
-  { name: 'Acorn', category: 'bomb', description: 'Spawns gliders - 5206 gen',
-    rle: `x = 7, y = 3\nbo$3bo$2o2b3o!` },
-  { name: 'Blinker', category: 'oscillator', description: 'Period 2',
-    rle: `x = 3, y = 1\n3o!` },
-  { name: 'Pulsar', category: 'oscillator', description: 'Period 3',
-    rle: `x = 13, y = 13\n2b3o3b3o2$o4bobo4bo$o4bobo4bo$o4bobo4bo$2b3o3b3o2$2b3o3b3o$o4bobo4bo$o4bobo4bo$o4bobo4bo2$2b3o3b3o!` },
-];
-
-const CATEGORY_INFO: Record<PatternCategory, { label: string; color: string; icon: string }> = {
-  gun: { label: 'Guns', color: 'text-red-400 border-red-500/50 bg-red-500/10', icon: '>' },
-  spaceship: { label: 'Ships', color: 'text-blue-400 border-blue-500/50 bg-blue-500/10', icon: '~' },
-  defense: { label: 'Defense', color: 'text-green-400 border-green-500/50 bg-green-500/10', icon: '#' },
-  bomb: { label: 'Bombs', color: 'text-orange-400 border-orange-500/50 bg-orange-500/10', icon: '*' },
-  oscillator: { label: 'Oscillators', color: 'text-purple-400 border-purple-500/50 bg-purple-500/10', icon: 'o' },
-};
+// Import utility functions from separate file
+import { parseRLE, rotatePattern } from './lifeUtils';
 
 // Small preview canvas for patterns
 const PatternPreview: React.FC<{ pattern: [number, number][]; color: string }> = ({ pattern, color }) => {
@@ -226,73 +98,6 @@ const PatternPreview: React.FC<{ pattern: [number, number][]; color: string }> =
   );
 };
 
-// Local Game of Life simulation - mirrors backend rules exactly
-const stepLocalGeneration = (cells: Cell[]): Cell[] => {
-  const newCells: Cell[] = new Array(GRID_WIDTH * GRID_HEIGHT);
-
-  for (let row = 0; row < GRID_HEIGHT; row++) {
-    for (let col = 0; col < GRID_WIDTH; col++) {
-      const idx = row * GRID_WIDTH + col;
-      const current = cells[idx];
-
-      // Count neighbors and track owner counts
-      let neighborCount = 0;
-      const ownerCounts: number[] = new Array(11).fill(0); // 0-10 players
-
-      for (let di = -1; di <= 1; di++) {
-        for (let dj = -1; dj <= 1; dj++) {
-          if (di === 0 && dj === 0) continue;
-
-          // Toroidal wrap
-          const nRow = (row + di + GRID_HEIGHT) % GRID_HEIGHT;
-          const nCol = (col + dj + GRID_WIDTH) % GRID_WIDTH;
-          const neighbor = cells[nRow * GRID_WIDTH + nCol];
-
-          if (neighbor.alive) {
-            neighborCount++;
-            if (neighbor.owner > 0 && neighbor.owner <= 10) {
-              ownerCounts[neighbor.owner]++;
-            }
-          }
-        }
-      }
-
-      // Apply Conway's rules
-      let newAlive = false;
-      let newOwner = current.owner;
-
-      if (current.alive) {
-        // Living cell survives with 2-3 neighbors
-        newAlive = neighborCount === 2 || neighborCount === 3;
-      } else {
-        // Dead cell born with exactly 3 neighbors
-        if (neighborCount === 3) {
-          newAlive = true;
-          // New owner = majority owner among parents
-          let maxCount = 0;
-          let majorityOwner = 1;
-          for (let o = 1; o <= 10; o++) {
-            if (ownerCounts[o] > maxCount) {
-              maxCount = ownerCounts[o];
-              majorityOwner = o;
-            }
-          }
-          newOwner = majorityOwner;
-        }
-      }
-
-      // Preserve owner (territory) and points - they persist even when cells die
-      newCells[idx] = {
-        owner: newOwner,
-        points: current.points,  // Points stay in cell
-        alive: newAlive,
-      };
-    }
-  }
-
-  return newCells;
-};
-
 export const Life: React.FC = () => {
   // Canvas refs
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -325,12 +130,15 @@ export const Life: React.FC = () => {
 
   // Game state from backend - now uses unified GameState with Cell array
   const [gameState, setGameState] = useState<GameState | null>(null);
-  // Local cells for optimistic simulation (runs independently, synced from backend periodically)
+  // Local cells - now comes from WebSocket (Fly.io simulation server)
   const [localCells, setLocalCells] = useState<Cell[]>([]);
-  // Track last checkpoint to detect when backend state actually changed (new placements)
-  const lastCheckpointRef = useRef<bigint>(BigInt(0));
   const [myPlayerNum, setMyPlayerNum] = useState<number | null>(null);
   const [myBalance, setMyBalance] = useState(1000);
+
+  // WebSocket connection to Fly.io simulation server (Hybrid Architecture)
+  const [wsConnected, setWsConnected] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+  const wsReconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [placementError, setPlacementError] = useState<string | null>(null);
 
   // Pending placements - accumulate patterns before confirming
@@ -347,6 +155,14 @@ export const Life: React.FC = () => {
   const [mode, setMode] = useState<'lobby' | 'game'>('game');
   const [games, setGames] = useState<any[]>([]);
   const [newGameName, setNewGameName] = useState('');
+
+  // Quadrant domination state
+  const [quadrantStates, setQuadrantStates] = useState<QuadrantInfo[]>([]);
+  const [selectedQuadrantForInfo, setSelectedQuadrantForInfo] = useState<number | null>(null);
+  const [isWiping, setIsWiping] = useState(false);
+  const [wipeConfirmQuadrant, setWipeConfirmQuadrant] = useState<number | null>(null);
+  const [wipeError, setWipeError] = useState<string | null>(null);
+  const [wipeSuccess, setWipeSuccess] = useState<string | null>(null);
 
   // Simulation control - always running
   const [isRunning, setIsRunning] = useState(true);
@@ -372,23 +188,10 @@ export const Life: React.FC = () => {
     setRotation(0);
   }, [selectedPattern]);
 
-  // Rotate pattern coordinates: 0=0°, 1=90°, 2=180°, 3=270° clockwise
-  const rotatePattern = useCallback((coords: [number, number][], rot: number): [number, number][] => {
-    if (rot === 0) return coords;
-    return coords.map(([x, y]) => {
-      switch (rot) {
-        case 1: return [y, -x];      // 90° clockwise
-        case 2: return [-x, -y];     // 180°
-        case 3: return [-y, x];      // 270° clockwise
-        default: return [x, y];
-      }
-    });
-  }, []);
-
-  // Get rotated pattern
+  // Get rotated pattern (rotatePattern imported from lifeUtils)
   const rotatedPattern = useMemo(() =>
     rotatePattern(parsedPattern, rotation),
-    [parsedPattern, rotation, rotatePattern]
+    [parsedPattern, rotation]
   );
 
   // Cycle rotation
@@ -627,86 +430,50 @@ export const Life: React.FC = () => {
     };
   }, [isAuthenticated]);
 
-  // Backend sync - use lightweight get_metadata() for fast checks
-  // Only fetch full state when checkpoint actually changes
+  // Backend sync - balances and player info only (Hybrid Architecture)
+  // Grid state comes from WebSocket to Fly.io, balances come from IC canister
   useEffect(() => {
     if (!actor || !isAuthenticated) return;
 
     let cancelled = false;
 
-    const syncFromBackend = async () => {
+    const syncBalances = async () => {
       if (cancelled) return;
 
-      const isFirstLoad = lastCheckpointRef.current === BigInt(0);
-
       try {
-        if (isFirstLoad) {
-          // First load: fetch full state with cells
-          const stateResult = await actor.get_state(currentGameId);
+        // Use lightweight metadata for balance and player info
+        const metaResult = await actor.get_metadata(currentGameId);
 
-          if ('Ok' in stateResult && !cancelled) {
-            const backendState = stateResult.Ok;
-            setGameState(backendState);
-            setLocalCells(backendState.cells);
-            lastCheckpointRef.current = backendState.checkpoint_timestamp_ns;
+        if ('Ok' in metaResult && !cancelled) {
+          const meta = metaResult.Ok;
 
-            const myIdx = backendState.players.findIndex(
-              p => p.toText() === myPrincipal?.toText()
-            );
-            if (myIdx >= 0) {
-              setMyPlayerNum(myIdx + 1);
-              setMyBalance(Number(backendState.balances[myIdx]));
-            }
+          // Update player info
+          const myIdx = meta.players.findIndex(
+            p => p.toText() === myPrincipal?.toText()
+          );
+          if (myIdx >= 0) {
+            setMyPlayerNum(myIdx + 1);
+            setMyBalance(Number(meta.balances[myIdx]));
           }
-        } else {
-          // Subsequent syncs: use lightweight metadata check
-          const metaResult = await actor.get_metadata(currentGameId);
 
-          if ('Ok' in metaResult && !cancelled) {
-            const meta = metaResult.Ok;
-            const checkpointChanged = meta.checkpoint_timestamp_ns !== lastCheckpointRef.current;
-
-            // Update player info from metadata
-            const myIdx = meta.players.findIndex(
-              p => p.toText() === myPrincipal?.toText()
-            );
-            if (myIdx >= 0) {
-              setMyPlayerNum(myIdx + 1);
-              setMyBalance(Number(meta.balances[myIdx]));
-            }
-
-            if (checkpointChanged) {
-              // Checkpoint changed - need to fetch full state
-              const stateResult = await actor.get_state(currentGameId);
-
-              if ('Ok' in stateResult && !cancelled) {
-                const backendState = stateResult.Ok;
-                setGameState(backendState);
-                setLocalCells(backendState.cells);
-                lastCheckpointRef.current = backendState.checkpoint_timestamp_ns;
-              }
-            } else {
-              // No change - just update generation display
-              setGameState(prev => prev ? {
-                ...prev,
-                generation: meta.generation,
-                players: meta.players,
-                balances: Array.from(meta.balances),
-                is_running: meta.is_running,
-              } : prev);
-            }
-          }
+          // Update game metadata (but NOT cells - those come from WebSocket)
+          setGameState(prev => prev ? {
+            ...prev,
+            players: meta.players,
+            balances: Array.from(meta.balances),
+            is_running: meta.is_running,
+          } : prev);
         }
       } catch (err) {
-        console.error('Backend sync error:', err);
+        console.error('Balance sync error:', err);
       }
     };
 
     // Initial sync
-    syncFromBackend();
+    syncBalances();
 
     // Periodic sync every 5 seconds
-    const syncInterval = setInterval(syncFromBackend, BACKEND_SYNC_MS);
+    const syncInterval = setInterval(syncBalances, BACKEND_SYNC_MS);
 
     return () => {
       cancelled = true;
@@ -714,19 +481,138 @@ export const Life: React.FC = () => {
     };
   }, [actor, currentGameId, myPrincipal, isAuthenticated]);
 
+  // NOTE: Quadrant states polling disabled - backend methods not yet implemented
+  // TODO: Re-enable when get_quadrant_states and wipe_quadrant are added to life1_backend
+
+  // Wipe quadrant function - disabled until backend support is added
+  const handleWipeQuadrant = useCallback(async (_quadrantId: number) => {
+    setWipeError('Quadrant wipe feature not yet available');
+  }, []);
+
+  // Get player's claimable quadrants count (for win condition display)
+  const myClaimedQuadrants = useMemo(() => {
+    if (!myPlayerNum || quadrantStates.length === 0) return 0;
+    return quadrantStates.filter(q => q.claimed_by === myPlayerNum).length;
+  }, [quadrantStates, myPlayerNum]);
+
+  // Get quadrant info for current view
+  const currentQuadrantInfo = useMemo(() => {
+    return quadrantStates.find(q => q.id === currentQuadrant);
+  }, [quadrantStates, currentQuadrant]);
+
+  // Check if current player can wipe any quadrant
+  const canWipeQuadrants = useMemo(() => {
+    if (!myPlayerNum || quadrantStates.length === 0) return [];
+    return quadrantStates.filter(q => q.can_wipe[myPlayerNum - 1]);
+  }, [quadrantStates, myPlayerNum]);
+
   // Track if we have cells (stable reference to avoid unnecessary effect reruns)
   const hasCells = localCells.length > 0;
 
-  // Local simulation - runs every 100ms for smooth visuals
+  // WebSocket connection to Fly.io simulation server
+  // Receives real-time grid state updates (Hybrid Architecture)
   useEffect(() => {
-    if (!isRunning || !hasCells) return;
+    if (!isAuthenticated) return;
 
-    const localTick = setInterval(() => {
-      setLocalCells(cells => stepLocalGeneration(cells));
-    }, LOCAL_TICK_MS);
+    // Fly.io WebSocket URL - will be configured for production
+    const WS_URL = process.env.REACT_APP_LIFE_WS_URL || 'wss://openhouse-life.fly.dev/ws';
 
-    return () => clearInterval(localTick);
-  }, [isRunning, hasCells]);
+    const connectWebSocket = () => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) return;
+
+      console.log('Connecting to simulation server:', WS_URL);
+      const ws = new WebSocket(WS_URL);
+
+      ws.onopen = () => {
+        setWsConnected(true);
+        ws.send(JSON.stringify({ type: 'Subscribe' }));
+        console.log('Connected to simulation server');
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+
+          if (msg.type === 'FullState') {
+            // Initial state on connect - cells are packed u16 values
+            const cells: Cell[] = msg.cells.map((packed: number) => ({
+              owner: packed & 0x0F,
+              points: (packed >> 4) & 0x7F,
+              alive: (packed & (1 << 11)) !== 0,
+            }));
+            setLocalCells(cells);
+            setGameState(prev => prev ? {
+              ...prev,
+              generation: BigInt(msg.generation),
+            } : {
+              cells: cells,
+              width: msg.width,
+              height: msg.height,
+              generation: BigInt(msg.generation),
+              players: [],
+              balances: [],
+              is_running: true,
+              checkpoint_timestamp_ns: BigInt(0),
+            });
+            console.log(`Received full state: gen=${msg.generation}, cells=${cells.length}`);
+          } else if (msg.type === 'Delta') {
+            // Incremental updates - apply changed cells
+            setLocalCells(cells => {
+              const newCells = [...cells];
+              for (const [idx, packed] of msg.changed_cells) {
+                if (idx < newCells.length) {
+                  newCells[idx] = {
+                    owner: packed & 0x0F,
+                    points: (packed >> 4) & 0x7F,
+                    alive: (packed & (1 << 11)) !== 0,
+                  };
+                }
+              }
+              return newCells;
+            });
+            setGameState(prev => prev ? {
+              ...prev,
+              generation: BigInt(msg.generation),
+            } : prev);
+          }
+        } catch (err) {
+          console.error('WebSocket message parse error:', err);
+        }
+      };
+
+      ws.onerror = (err) => {
+        console.error('WebSocket error:', err);
+      };
+
+      ws.onclose = () => {
+        setWsConnected(false);
+        console.log('Disconnected from simulation server');
+
+        // Auto-reconnect after 2 seconds
+        if (wsReconnectTimeoutRef.current) {
+          clearTimeout(wsReconnectTimeoutRef.current);
+        }
+        wsReconnectTimeoutRef.current = setTimeout(connectWebSocket, 2000);
+      };
+
+      wsRef.current = ws;
+    };
+
+    connectWebSocket();
+
+    return () => {
+      if (wsReconnectTimeoutRef.current) {
+        clearTimeout(wsReconnectTimeoutRef.current);
+      }
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, [isAuthenticated]);
+
+  // NOTE: Local simulation removed - Fly.io handles all simulation
+  // Grid state comes from WebSocket connection above
 
   // Helper to draw cells within a region
   const drawCells = useCallback((
@@ -824,6 +710,108 @@ export const Life: React.FC = () => {
       ctx.stroke();
     }
   }, []);
+
+  // Draw quadrant overlays (claimed status, domination %) in overview mode
+  const drawQuadrantOverlays = useCallback((ctx: CanvasRenderingContext2D, cellSize: number) => {
+    if (quadrantStates.length === 0) return;
+
+    const quadrantPixelSize = QUADRANT_SIZE * cellSize;
+
+    for (const qInfo of quadrantStates) {
+      const qRow = qInfo.row;
+      const qCol = qInfo.col;
+      const x = qCol * quadrantPixelSize;
+      const y = qRow * quadrantPixelSize;
+
+      if (qInfo.claimed_by > 0) {
+        // Claimed quadrant - overlay with owner's color
+        const ownerColor = PLAYER_COLORS[qInfo.claimed_by] || '#FFFFFF';
+        ctx.fillStyle = ownerColor;
+        ctx.globalAlpha = 0.25;
+        ctx.fillRect(x, y, quadrantPixelSize, quadrantPixelSize);
+        ctx.globalAlpha = 1;
+
+        // Draw border in owner's color
+        ctx.strokeStyle = ownerColor;
+        ctx.lineWidth = 4;
+        ctx.strokeRect(x + 2, y + 2, quadrantPixelSize - 4, quadrantPixelSize - 4);
+
+        // Draw "LOCKED" text
+        ctx.fillStyle = ownerColor;
+        ctx.font = `bold ${Math.floor(quadrantPixelSize * 0.12)}px monospace`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('LOCKED', x + quadrantPixelSize / 2, y + quadrantPixelSize / 2);
+      } else {
+        // Unclaimed - check for domination
+        const territoryCounts = Array.from(qInfo.territory_counts);
+        const dominantPlayer = territoryCounts
+          .map((count, idx) => ({ player: idx + 1, count }))
+          .filter(p => p.count > 0)
+          .sort((a, b) => b.count - a.count)[0];
+
+        if (dominantPlayer) {
+          const dominationPct = dominantPlayer.count / QUADRANT_CELLS;
+
+          if (dominationPct >= DOMINATION_THRESHOLD) {
+            // Can be wiped - show strong indicator
+            const playerColor = PLAYER_COLORS[dominantPlayer.player] || '#FFFFFF';
+            ctx.strokeStyle = playerColor;
+            ctx.lineWidth = 4;
+            ctx.setLineDash([10, 5]);
+            ctx.strokeRect(x + 2, y + 2, quadrantPixelSize - 4, quadrantPixelSize - 4);
+            ctx.setLineDash([]);
+
+            // Show percentage
+            ctx.fillStyle = playerColor;
+            ctx.font = `bold ${Math.floor(quadrantPixelSize * 0.1)}px monospace`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(`${Math.floor(dominationPct * 100)}%`, x + quadrantPixelSize / 2, y + quadrantPixelSize * 0.4);
+            ctx.fillText('WIPE?', x + quadrantPixelSize / 2, y + quadrantPixelSize * 0.6);
+          } else if (dominationPct >= 0.5) {
+            // Significant presence - show percentage
+            const playerColor = PLAYER_COLORS[dominantPlayer.player] || '#FFFFFF';
+            ctx.fillStyle = playerColor;
+            ctx.globalAlpha = 0.7;
+            ctx.font = `bold ${Math.floor(quadrantPixelSize * 0.08)}px monospace`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(`${Math.floor(dominationPct * 100)}%`, x + quadrantPixelSize / 2, y + quadrantPixelSize / 2);
+            ctx.globalAlpha = 1;
+          }
+        }
+      }
+    }
+  }, [quadrantStates]);
+
+  // Draw current quadrant status overlay (in quadrant view mode)
+  const drawCurrentQuadrantStatus = useCallback((ctx: CanvasRenderingContext2D, cellSize: number) => {
+    if (!currentQuadrantInfo) return;
+
+    const size = QUADRANT_SIZE * cellSize;
+
+    if (currentQuadrantInfo.claimed_by > 0) {
+      // Draw locked indicator at top
+      const ownerColor = PLAYER_COLORS[currentQuadrantInfo.claimed_by] || '#FFFFFF';
+      ctx.fillStyle = ownerColor;
+      ctx.globalAlpha = 0.15;
+      ctx.fillRect(0, 0, size, size);
+      ctx.globalAlpha = 1;
+
+      // Border
+      ctx.strokeStyle = ownerColor;
+      ctx.lineWidth = 6;
+      ctx.strokeRect(3, 3, size - 6, size - 6);
+    } else if (myPlayerNum && currentQuadrantInfo.can_wipe[myPlayerNum - 1]) {
+      // Player can wipe - pulsing green border
+      ctx.strokeStyle = '#39FF14';
+      ctx.lineWidth = 4;
+      ctx.setLineDash([15, 8]);
+      ctx.strokeRect(2, 2, size - 4, size - 4);
+      ctx.setLineDash([]);
+    }
+  }, [currentQuadrantInfo, myPlayerNum]);
 
   // Draw cell grid lines (quadrant mode only)
   const drawGridLines = useCallback((ctx: CanvasRenderingContext2D, cellSize: number, gridWidth: number, gridHeight: number) => {
@@ -946,6 +934,9 @@ export const Life: React.FC = () => {
       drawCells(ctx, 0, 0, GRID_SIZE, GRID_SIZE, cellSize);
       drawQuadrantGrid(ctx, cellSize);
 
+      // Draw quadrant domination overlays
+      drawQuadrantOverlays(ctx, cellSize);
+
       // Highlight current quadrant position
       const qRow = viewY / QUADRANT_SIZE;
       const qCol = viewX / QUADRANT_SIZE;
@@ -980,6 +971,9 @@ export const Life: React.FC = () => {
       // Draw preview cells on top
       drawPreviewCells(ctx, viewX, viewY, cellSize, previewPulse);
 
+      // Draw current quadrant status overlay (locked/can wipe)
+      drawCurrentQuadrantStatus(ctx, cellSize);
+
       // Boundary
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
       ctx.lineWidth = 2;
@@ -987,7 +981,7 @@ export const Life: React.FC = () => {
 
       ctx.restore();
     }
-  }, [viewMode, viewX, viewY, localCells, drawCells, drawQuadrantGrid, drawGridLines, drawPreviewCells, previewPulse]);
+  }, [viewMode, viewX, viewY, localCells, drawCells, drawQuadrantGrid, drawGridLines, drawPreviewCells, previewPulse, drawQuadrantOverlays, drawCurrentQuadrantStatus]);
 
   useEffect(() => { draw(); }, [draw]);
 
@@ -1048,8 +1042,9 @@ export const Life: React.FC = () => {
     }
   };
 
-  // Confirm placement - send all pending placements to backend
-  // Uses event-driven architecture: sends expected_generation for optimistic concurrency
+  // Confirm placement - send all pending placements to IC canister (Hybrid Architecture)
+  // IC records the event, Fly.io polls for events and applies them, WebSocket pushes updates
+  // Cells will appear via WebSocket in ~1-2 seconds after IC confirms the event
   const confirmPlacement = useCallback(async () => {
     const cellsToPlace: [number, number][] = pendingPlacements.flatMap(p => p.cells);
 
@@ -1063,7 +1058,7 @@ export const Life: React.FC = () => {
       return;
     }
 
-    // Check for conflicts with current local state
+    // Check for conflicts with current local state (from WebSocket)
     const conflicts = cellsToPlace.filter(([col, row]) => {
       const idx = row * GRID_SIZE + col;
       return localCells[idx]?.alive;
@@ -1089,85 +1084,52 @@ export const Life: React.FC = () => {
       }
     }
 
-    // Calculate expected generation from checkpoint
-    const now = Date.now();
-    const checkpointTimeMs = gameState?.checkpoint_timestamp_ns
-      ? Number(gameState.checkpoint_timestamp_ns) / 1_000_000
-      : now;
-    const elapsedSecs = (now - checkpointTimeMs) / 1000;
-    const checkpointGen = gameState?.generation ? Number(gameState.generation) : 0;
-    const expectedGeneration = BigInt(Math.floor(checkpointGen + elapsedSecs * 10));
-
     setIsConfirmingPlacement(true);
     setPlacementError(null);
 
     try {
-      const result = await actor.place_cells(currentGameId, cellsToPlace, expectedGeneration);
+      // In hybrid architecture, place_cells just records an event - no simulation
+      // The expected_generation is used for optimistic concurrency control
+      const currentGen = gameState?.generation ? BigInt(gameState.generation) : BigInt(0);
+      const result = await actor.place_cells(currentGameId, cellsToPlace, currentGen);
 
       if ('Err' in result) {
         let errorMsg = result.Err;
         if (errorMsg.includes('alive cells')) {
-          errorMsg = 'Placement failed: Another player placed cells there, or the game evolved. Try a different position.';
+          errorMsg = 'Placement failed: Another player placed cells there. Try a different position.';
         } else if (errorMsg.includes('Insufficient')) {
           errorMsg = 'Not enough points. Your balance may have changed.';
-        } else if (errorMsg.includes('Generation mismatch')) {
-          errorMsg = 'Game state changed. Refreshing... Please try again.';
         }
         setPlacementError(errorMsg);
       } else {
-        const { placed_count, new_generation, new_timestamp_ns } = result.Ok;
+        const { placed_count, new_balance } = result.Ok;
 
-        // Immediately fetch state to get our actual player number
-        // This is critical for new players who don't have a player number yet
-        let actualOwner = myPlayerNum ?? 1;
-        try {
-          const stateResult = await actor.get_state(currentGameId);
-          if ('Ok' in stateResult) {
-            const backendState = stateResult.Ok;
-            const myIdx = backendState.players.findIndex(
-              p => p.toText() === myPrincipal?.toText()
-            );
-            if (myIdx >= 0) {
-              actualOwner = myIdx + 1;
-              setMyPlayerNum(actualOwner);
-              setMyBalance(Number(backendState.balances[myIdx]));
-            }
-            // Sync cells from backend to ensure correct ownership
-            setLocalCells(backendState.cells);
-            lastCheckpointRef.current = backendState.checkpoint_timestamp_ns;
-            setGameState(backendState);
-          }
-        } catch (syncErr) {
-          console.error('Failed to sync after placement:', syncErr);
-          // Fall back to local update if sync fails
-          setGameState(prev => prev ? {
-            ...prev,
-            generation: new_generation,
-            checkpoint_timestamp_ns: new_timestamp_ns,
-          } : prev);
-          lastCheckpointRef.current = new_timestamp_ns;
-          setLocalCells(cells => {
-            const newCells = [...cells];
-            for (const [cx, cy] of cellsToPlace) {
-              const idx = cy * GRID_SIZE + cx;
-              if (idx >= 0 && idx < newCells.length) {
-                newCells[idx] = {
-                  ...newCells[idx],
-                  alive: true,
-                  owner: actualOwner,
-                };
+        // Update balance from IC response (authoritative source)
+        setMyBalance(Number(new_balance));
+
+        // If this is our first placement, fetch metadata to get player number
+        if (myPlayerNum === null) {
+          try {
+            const metaResult = await actor.get_metadata(currentGameId);
+            if ('Ok' in metaResult) {
+              const myIdx = metaResult.Ok.players.findIndex(
+                p => p.toText() === myPrincipal?.toText()
+              );
+              if (myIdx >= 0) {
+                setMyPlayerNum(myIdx + 1);
               }
             }
-            return newCells;
-          });
-          setMyBalance(prev => prev - cost);
+          } catch (err) {
+            console.error('Failed to fetch player number:', err);
+          }
         }
 
-        // Clear pending placements
+        // Clear pending placements - cells will appear via WebSocket from Fly.io
+        // Fly.io polls IC events, applies them, and broadcasts via WebSocket
         setPendingPlacements([]);
         setPlacementError(null);
 
-        console.log(`Placed ${placed_count} cells, new generation: ${new_generation}`);
+        console.log(`Placed ${placed_count} cells - waiting for WebSocket update from Fly.io`);
       }
     } catch (err) {
       console.error('Place error:', err);
@@ -1175,7 +1137,7 @@ export const Life: React.FC = () => {
     } finally {
       setIsConfirmingPlacement(false);
     }
-  }, [actor, pendingPlacements, isConfirmingPlacement, myBalance, localCells, currentGameId, myPlayerNum, gameState]);
+  }, [actor, pendingPlacements, isConfirmingPlacement, myBalance, localCells, currentGameId, myPlayerNum, myPrincipal, gameState]);
 
   // Clear all pending placements
   const cancelPreview = useCallback(() => {
@@ -1257,22 +1219,24 @@ export const Life: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [viewMode, navigateQuadrant, toggleViewMode, pendingPlacements.length, isConfirmingPlacement, confirmPlacement, cancelPreview, cycleRotation]);
 
-  // Controls - local simulation only
+  // Controls - simulation now runs on Fly.io server (Hybrid Architecture)
+  // These controls are kept for UI consistency but don't affect server-side simulation
   const handlePlayPause = () => {
+    // In hybrid architecture, simulation always runs on Fly.io at 10 gen/sec
+    // This toggle only affects local UI state (if we add client-side pause later)
     setIsRunning(!isRunning);
   };
 
   const handleStep = () => {
-    // Manually advance local simulation by one generation
-    if (localCells.length > 0) {
-      setLocalCells(cells => stepLocalGeneration(cells));
-    }
+    // In hybrid architecture, stepping is not supported
+    // Simulation runs continuously on Fly.io at 10 gen/sec
+    console.log('Step not available - simulation runs on Fly.io server');
   };
 
   const handleClear = () => {
-    // Clear local cells only (backend state persists)
-    setIsRunning(false);
-    setLocalCells(cells => cells.map(() => ({ owner: 0, points: 0, alive: false })));
+    // In hybrid architecture, clearing is not supported from frontend
+    // The grid state is managed by Fly.io server
+    console.log('Clear not available - grid managed by Fly.io server');
   };
 
   // Cell counts - uses localCells for live updates
@@ -1305,7 +1269,7 @@ export const Life: React.FC = () => {
   // Memoized Minimap - renders quadrant heatmap
   const minimapRef = useRef<HTMLCanvasElement>(null);
 
-  // Draw minimap when localCells or currentQuadrant changes
+  // Draw minimap when localCells, currentQuadrant, or quadrantStates change
   useEffect(() => {
     const canvas = minimapRef.current;
     if (!canvas || localCells.length === 0) return;
@@ -1319,27 +1283,65 @@ export const Life: React.FC = () => {
     ctx.fillStyle = '#1a1a2e';
     ctx.fillRect(0, 0, size, size);
 
-    // Draw cell density per quadrant (heatmap)
+    // Draw each quadrant with domination/claimed status
     for (let q = 0; q < TOTAL_QUADRANTS; q++) {
       const qRow = Math.floor(q / QUADRANTS_PER_ROW);
       const qCol = q % QUADRANTS_PER_ROW;
+      const qInfo = quadrantStates.find(qs => qs.id === q);
 
-      // Calculate density for this quadrant
-      const startY = qRow * QUADRANT_SIZE;
-      const startX = qCol * QUADRANT_SIZE;
-      let livingCells = 0;
-      for (let row = startY; row < startY + QUADRANT_SIZE; row++) {
-        for (let col = startX; col < startX + QUADRANT_SIZE; col++) {
-          const cell = localCells[row * GRID_SIZE + col];
-          if (cell && cell.alive && cell.owner > 0) livingCells++;
+      const x = qCol * quadSize + 1;
+      const y = qRow * quadSize + 1;
+      const w = quadSize - 2;
+      const h = quadSize - 2;
+
+      if (qInfo && qInfo.claimed_by > 0) {
+        // Claimed quadrant - show owner's color with lock pattern
+        const ownerColor = PLAYER_COLORS[qInfo.claimed_by] || '#FFFFFF';
+        ctx.fillStyle = ownerColor;
+        ctx.globalAlpha = 0.6;
+        ctx.fillRect(x, y, w, h);
+        ctx.globalAlpha = 1;
+
+        // Draw lock icon (small padlock shape)
+        ctx.fillStyle = '#000';
+        ctx.font = `${Math.floor(quadSize * 0.4)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('L', x + w / 2, y + h / 2);
+      } else {
+        // Unclaimed - show cell density heatmap
+        const startY = qRow * QUADRANT_SIZE;
+        const startX = qCol * QUADRANT_SIZE;
+        let livingCells = 0;
+        for (let row = startY; row < startY + QUADRANT_SIZE; row++) {
+          for (let col = startX; col < startX + QUADRANT_SIZE; col++) {
+            const cell = localCells[row * GRID_SIZE + col];
+            if (cell && cell.alive && cell.owner > 0) livingCells++;
+          }
+        }
+        const density = livingCells / QUADRANT_CELLS;
+        const alpha = Math.min(0.8, density * 2);
+        ctx.fillStyle = `rgba(57, 255, 20, ${alpha})`;
+        ctx.fillRect(x, y, w, h);
+
+        // If a player has 90%+ territory, show pulsing indicator
+        if (qInfo) {
+          const totalTerritory = Array.from(qInfo.territory_counts).reduce((a, b) => a + b, 0);
+          const dominantPlayer = Array.from(qInfo.territory_counts)
+            .map((count, idx) => ({ player: idx + 1, count }))
+            .sort((a, b) => b.count - a.count)[0];
+
+          if (dominantPlayer && dominantPlayer.count / QUADRANT_CELLS >= DOMINATION_THRESHOLD) {
+            // Show domination indicator (player can wipe)
+            const playerColor = PLAYER_COLORS[dominantPlayer.player] || '#FFFFFF';
+            ctx.strokeStyle = playerColor;
+            ctx.lineWidth = 2;
+            ctx.setLineDash([3, 2]);
+            ctx.strokeRect(x + 2, y + 2, w - 4, h - 4);
+            ctx.setLineDash([]);
+          }
         }
       }
-      const density = livingCells / (QUADRANT_SIZE * QUADRANT_SIZE);
-
-      // Color based on density
-      const alpha = Math.min(0.8, density * 2);
-      ctx.fillStyle = `rgba(57, 255, 20, ${alpha})`;
-      ctx.fillRect(qCol * quadSize + 1, qRow * quadSize + 1, quadSize - 2, quadSize - 2);
     }
 
     // Highlight current quadrant
@@ -1363,7 +1365,7 @@ export const Life: React.FC = () => {
       ctx.lineTo(size, pos);
       ctx.stroke();
     }
-  }, [localCells, currentQuadrant]);
+  }, [localCells, currentQuadrant, quadrantStates]);
 
   const handleMinimapClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = minimapRef.current;
@@ -1513,6 +1515,106 @@ export const Life: React.FC = () => {
               </div>
             </div>
 
+            {/* Quadrant Domination Section */}
+            <div className="quadrant-domination mb-4 p-2 bg-gray-900/50 rounded border border-gray-700">
+              <div className="text-xs text-gray-400 mb-2 font-semibold">Quadrant Domination</div>
+
+              {/* Win condition progress */}
+              {myPlayerNum && (
+                <div className="mb-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-gray-400">Your Claimed:</span>
+                    <span className={`font-mono ${myClaimedQuadrants === TOTAL_QUADRANTS ? 'text-yellow-400' : 'text-white'}`}>
+                      {myClaimedQuadrants}/{TOTAL_QUADRANTS}
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 bg-gray-800 rounded-full mt-1">
+                    <div
+                      className="h-full rounded-full transition-all"
+                      style={{
+                        width: `${(myClaimedQuadrants / TOTAL_QUADRANTS) * 100}%`,
+                        backgroundColor: PLAYER_COLORS[myPlayerNum] || '#39FF14'
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Current quadrant info */}
+              {viewMode === 'quadrant' && currentQuadrantInfo && (
+                <div className="text-xs mt-2 pt-2 border-t border-gray-700">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-gray-400">Q{currentQuadrant} Status:</span>
+                    <span className={currentQuadrantInfo.claimed_by > 0 ? 'text-red-400' : 'text-green-400'}>
+                      {currentQuadrantInfo.claimed_by > 0 ? `Locked (P${currentQuadrantInfo.claimed_by})` : 'Open'}
+                    </span>
+                  </div>
+
+                  {/* Territory breakdown for current quadrant */}
+                  {currentQuadrantInfo.claimed_by === 0 && (
+                    <div className="mt-2 space-y-1">
+                      {Array.from(currentQuadrantInfo.territory_counts)
+                        .map((count, idx) => ({ player: idx + 1, count }))
+                        .filter(p => p.count > 0)
+                        .sort((a, b) => b.count - a.count)
+                        .slice(0, 3)
+                        .map(p => {
+                          const pct = (p.count / QUADRANT_CELLS) * 100;
+                          return (
+                            <div key={p.player} className="flex items-center gap-2">
+                              <div className="w-2 h-2 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[p.player] }} />
+                              <div className="flex-1 h-1 bg-gray-800 rounded-full">
+                                <div
+                                  className="h-full rounded-full"
+                                  style={{
+                                    width: `${pct}%`,
+                                    backgroundColor: PLAYER_COLORS[p.player],
+                                    opacity: pct >= 90 ? 1 : 0.6
+                                  }}
+                                />
+                              </div>
+                              <span className={`w-10 text-right ${pct >= 90 ? 'text-green-400 font-bold' : 'text-gray-400'}`}>
+                                {pct.toFixed(0)}%
+                              </span>
+                            </div>
+                          );
+                        })
+                      }
+                    </div>
+                  )}
+
+                  {/* Wipe button */}
+                  {myPlayerNum && currentQuadrantInfo.can_wipe[myPlayerNum - 1] && currentQuadrantInfo.claimed_by === 0 && (
+                    <button
+                      onClick={() => setWipeConfirmQuadrant(currentQuadrant)}
+                      disabled={isWiping}
+                      className="w-full mt-3 px-3 py-2 bg-green-600 hover:bg-green-500 rounded text-white text-sm font-mono transition-all disabled:opacity-50"
+                    >
+                      {isWiping ? 'Wiping...' : `WIPE Q${currentQuadrant}`}
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Can wipe other quadrants indicator */}
+              {canWipeQuadrants.length > 0 && viewMode === 'overview' && (
+                <div className="text-xs mt-2 pt-2 border-t border-gray-700">
+                  <div className="text-green-400 mb-1">Ready to wipe:</div>
+                  <div className="flex flex-wrap gap-1">
+                    {canWipeQuadrants.map(q => (
+                      <button
+                        key={q.id}
+                        onClick={() => jumpToQuadrant(q.id)}
+                        className="px-2 py-1 bg-green-600/30 border border-green-500/50 rounded text-green-400 text-xs font-mono hover:bg-green-600/50"
+                      >
+                        Q{q.id}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Navigation Controls - inline */}
             <div className="navigation-controls mb-4">
               <button
@@ -1631,25 +1733,85 @@ export const Life: React.FC = () => {
 
         {/* Canvas Container */}
         <div className="flex-1 flex flex-col relative bg-black">
-          {/* View mode toggle - top right overlay */}
-          <div className="absolute top-2 right-2 z-10 flex items-center gap-2 bg-black/70 rounded-lg p-2">
-            <button onClick={toggleViewMode}
-              className="px-3 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 text-xs font-mono">
-              {viewMode === 'overview' ? 'Enter Quadrant' : 'Overview'}
-            </button>
-            <span className="text-white text-xs font-mono px-2">
-              Q{currentQuadrant}
-            </span>
+          {/* WebSocket connection status indicator (Hybrid Architecture) */}
+          <div className={`absolute top-2 left-2 z-10 flex items-center gap-2 px-2 py-1 rounded text-xs font-mono ${
+            wsConnected
+              ? 'bg-green-900/80 text-green-400 border border-green-500/50'
+              : 'bg-red-900/80 text-red-400 border border-red-500/50 animate-pulse'
+          }`}>
+            <span className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-400' : 'bg-red-400'}`} />
+            <span>{wsConnected ? 'Live' : 'Reconnecting...'}</span>
+            {wsConnected && gameState?.generation && (
+              <span className="text-gray-400">Gen {gameState.generation.toString()}</span>
+            )}
           </div>
 
-          {/* Help text overlay - bottom left */}
-          <div className="absolute bottom-2 left-2 z-10 bg-black/70 rounded px-2 py-1 text-xs text-gray-400 font-mono">
-            {viewMode === 'overview'
-              ? `${GRID_SIZE}x${GRID_SIZE} | Click quadrant to enter | Space to toggle`
-              : pendingPlacements.length > 0
-              ? `${pendingPlacements.length} pattern${pendingPlacements.length > 1 ? 's' : ''} pending | Enter=Confirm | Esc=Clear | R=Rotate`
-              : `Q${currentQuadrant} | Click to place | R=Rotate (${['0°', '90°', '180°', '270°'][rotation]})`}
-          </div>
+          {/* Quick wipe indicator - top right overlay (only shown when can wipe) */}
+          {myPlayerNum && currentQuadrantInfo?.can_wipe[myPlayerNum - 1] && viewMode === 'quadrant' && (
+            <div className="absolute top-2 right-2 z-10">
+              <button
+                onClick={() => setWipeConfirmQuadrant(currentQuadrant)}
+                className="px-3 py-2 bg-green-600 hover:bg-green-500 rounded text-white text-sm font-mono animate-pulse"
+              >
+                WIPE Q{currentQuadrant}
+              </button>
+            </div>
+          )}
+
+          {/* Wipe confirmation dialog */}
+          {wipeConfirmQuadrant !== null && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80">
+              <div className="bg-gray-900 border-2 border-yellow-500 rounded-lg p-6 max-w-md mx-4">
+                <h3 className="text-xl font-bold text-yellow-400 mb-4">Confirm Quadrant Wipe</h3>
+                <p className="text-white mb-4">
+                  You are about to <span className="text-red-400 font-bold">WIPE Quadrant {wipeConfirmQuadrant}</span>.
+                </p>
+                <div className="text-sm text-gray-400 mb-4 space-y-2">
+                  <p>This action will:</p>
+                  <ul className="list-disc list-inside space-y-1 text-gray-300">
+                    <li><span className="text-red-400">Kill all cells</span> in the quadrant (yours and others')</li>
+                    <li><span className="text-green-400">Claim all territory</span> as yours</li>
+                    <li><span className="text-yellow-400">Lock the quadrant</span> - others cannot place cells inside</li>
+                    <li><span className="text-orange-400">Points are preserved</span> in the territory</li>
+                  </ul>
+                  <p className="mt-2 text-yellow-500 font-semibold">
+                    Warning: You can only wipe each quadrant ONCE per game!
+                  </p>
+                </div>
+                <div className="flex gap-3 justify-end">
+                  <button
+                    onClick={() => setWipeConfirmQuadrant(null)}
+                    className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-white text-sm font-mono"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleWipeQuadrant(wipeConfirmQuadrant)}
+                    disabled={isWiping}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-500 rounded text-white text-sm font-mono disabled:opacity-50"
+                  >
+                    {isWiping ? 'Wiping...' : 'WIPE QUADRANT'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Wipe success toast */}
+          {wipeSuccess && (
+            <div className="absolute top-16 left-1/2 -translate-x-1/2 z-40 bg-green-600/90 border border-green-400 text-white px-4 py-3 rounded-lg text-sm max-w-md flex items-center gap-3">
+              <span>{wipeSuccess}</span>
+              <button onClick={() => setWipeSuccess(null)} className="text-white/80 hover:text-white font-bold">x</button>
+            </div>
+          )}
+
+          {/* Wipe error toast */}
+          {wipeError && (
+            <div className="absolute top-16 left-1/2 -translate-x-1/2 z-40 bg-red-600/90 border border-red-400 text-white px-4 py-3 rounded-lg text-sm max-w-md flex items-center gap-3">
+              <span>{wipeError}</span>
+              <button onClick={() => setWipeError(null)} className="text-white/80 hover:text-white font-bold">x</button>
+            </div>
+          )}
 
           {/* Pending placements panel */}
           {pendingPlacements.length > 0 && viewMode === 'quadrant' && (
@@ -1764,56 +1926,25 @@ export const Life: React.FC = () => {
 
       {/* Mobile Bottom Bar - inline to prevent remounting */}
       <div className="lg:hidden bg-black border-t border-white/20">
-        {/* Collapsed view */}
+        {/* Collapsed view - just expand button */}
         <div className="flex items-center justify-between p-2">
-          <div className="flex items-center gap-3 text-xs font-mono">
-            <span className="text-gray-400">Q{currentQuadrant}</span>
-            <span className="text-gray-400">Gen: <span className="text-dfinity-turquoise">{gameState?.generation.toString() || 0}</span></span>
+          <div className="flex items-center gap-2 text-xs font-mono text-gray-400">
             {myPlayerNum && (
-              <span className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[myPlayerNum] }} />
-              </span>
+              <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[myPlayerNum] }} />
             )}
+            <span>Patterns</span>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={toggleViewMode}
-              className="px-2 py-1 text-xs bg-white/10 rounded text-white"
-            >
-              {viewMode === 'overview' ? 'Enter' : 'Map'}
-            </button>
-            <button
-              onClick={() => setMobileExpanded(!mobileExpanded)}
-              className="p-2 text-gray-400 hover:text-white"
-            >
-              {mobileExpanded ? 'v' : '^'}
-            </button>
-          </div>
+          <button
+            onClick={() => setMobileExpanded(!mobileExpanded)}
+            className="p-2 text-gray-400 hover:text-white"
+          >
+            {mobileExpanded ? 'v' : '^'}
+          </button>
         </div>
 
         {/* Expanded view */}
         {mobileExpanded && (
           <div className="p-3 border-t border-white/10 max-h-64 overflow-y-auto">
-            {/* Navigation d-pad for mobile (quadrant mode only) */}
-            {viewMode === 'quadrant' && (
-              <div className="flex items-center gap-4 mb-3">
-                <div className="grid grid-cols-3 gap-1">
-                  <div />
-                  <button onClick={() => navigateQuadrant('up')} className="w-8 h-8 bg-white/10 rounded text-white text-center">^</button>
-                  <div />
-                  <button onClick={() => navigateQuadrant('left')} className="w-8 h-8 bg-white/10 rounded text-white text-center">&lt;</button>
-                  <div className="w-8 h-8 bg-gray-800 rounded text-gray-600 text-center leading-8">o</div>
-                  <button onClick={() => navigateQuadrant('right')} className="w-8 h-8 bg-white/10 rounded text-white text-center">&gt;</button>
-                  <div />
-                  <button onClick={() => navigateQuadrant('down')} className="w-8 h-8 bg-white/10 rounded text-white text-center">v</button>
-                  <div />
-                </div>
-                <div className="text-xs text-gray-500">
-                  Q{currentQuadrant}<br/>
-                  ({viewX}, {viewY})
-                </div>
-              </div>
-            )}
 
             {/* Territory/cell stats in row */}
             <div className="flex gap-4 mb-3 text-xs overflow-x-auto">

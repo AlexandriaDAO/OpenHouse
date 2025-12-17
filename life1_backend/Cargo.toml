@@ -7,6 +7,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
+life_core = { path = "../life_core", features = ["candid"] }
 candid = "0.10"
 ic-cdk = "0.19"
 # ic-cdk-timers removed - using event-driven architecture instead of timer-based simulation
