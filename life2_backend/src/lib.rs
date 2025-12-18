@@ -7,6 +7,7 @@
 use candid::{CandidType, Deserialize, Principal};
 use ic_cdk::{init, post_upgrade, pre_upgrade, query, update};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::time::Duration;
 
 // ============================================================================
@@ -20,7 +21,7 @@ const TOTAL_CELLS: usize = 512 * 512; // 262,144
 const GRID_WORDS: usize = TOTAL_CELLS / 64; // 4,096 u64s for bitsets
 
 const MAX_PLAYERS: usize = 9;
-const STARTING_BALANCE: u64 = 1000;
+const FAUCET_AMOUNT: u64 = 1000;
 
 // Simulation timing: 10 generations per second, batched per tick
 const GENERATIONS_PER_TICK: u32 = 10;
@@ -31,6 +32,9 @@ const WIPE_INTERVAL_NS: u64 = 300_000_000_000; // 5 minutes
 const QUADRANT_SIZE: usize = 128;
 const QUADRANTS_PER_SIDE: usize = 4;
 const TOTAL_QUADRANTS: usize = 16;
+
+// Player slot grace period - how long a player can have 0 cells before losing their slot
+const SLOT_GRACE_PERIOD_NS: u64 = 600_000_000_000; // 10 minutes
 
 // ============================================================================
 // CELL ENCODING
@@ -168,10 +172,18 @@ thread_local! {
     static NEXT_POTENTIAL: RefCell<[u64; GRID_WORDS]> = RefCell::new([0u64; GRID_WORDS]);
 
     /// Player principals (index 0 = player 1, etc.)
+    /// Empty slots use Principal::anonymous() as a sentinel
     static PLAYERS: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
 
-    /// Player balances (parallel to PLAYERS)
-    static BALANCES: RefCell<Vec<u64>> = RefCell::new(Vec::new());
+    /// Player balances keyed by principal (persists even after "death")
+    static BALANCES: RefCell<HashMap<Principal, u64>> = RefCell::new(HashMap::new());
+
+    /// Alive cell count per player slot (parallel to PLAYERS)
+    static CELL_COUNTS: RefCell<Vec<u32>> = RefCell::new(Vec::new());
+
+    /// Timestamp (ns) when each player's cells first hit 0 (None if they have cells)
+    /// After SLOT_GRACE_PERIOD_NS, the slot is freed for reuse
+    static ZERO_CELLS_SINCE: RefCell<Vec<Option<u64>>> = RefCell::new(Vec::new());
 
     /// Current generation counter
     static GENERATION: RefCell<u64> = RefCell::new(0);
@@ -278,13 +290,15 @@ fn compute_cell_fate(
 
 /// Apply a computed change to the grid and update next_potential.
 /// Called in a second pass AFTER all fates are computed.
+/// Returns (owner_born, owner_died) for cell count tracking.
 fn apply_cell_change(
     grid: &mut [u8; TOTAL_CELLS],
     next_potential: &mut [u64; GRID_WORDS],
-    balances: &mut Vec<u64>,
+    balances: &mut HashMap<Principal, u64>,
+    players: &[Principal],
     idx: usize,
     change: CellChange,
-) {
+) -> (Option<u8>, Option<u8>) {
     let cell = grid[idx];
     let neighbors = get_neighbor_indices(idx);
 
@@ -293,22 +307,30 @@ fn apply_cell_change(
             // Cell stays alive - no grid change needed
             // Add to next_potential because neighbors might change
             add_with_neighbors(next_potential, idx);
+            (None, None)
         }
 
         CellChange::Birth { new_owner } => {
-            // CAPTURE LOGIC: Only transfer coins from ENEMY territory
             let old_owner = get_owner(cell);
             let old_coins = get_coins(cell);
-            if old_owner > 0 && old_owner != new_owner && old_coins > 0 {
-                let new_owner_idx = (new_owner - 1) as usize;
-                if new_owner_idx < balances.len() {
-                    balances[new_owner_idx] += old_coins as u64;
-                }
-            }
 
-            // Birth cell with 0 coins
-            grid[idx] = make_cell(new_owner, true, 0);
+            if old_owner > 0 && old_owner != new_owner && old_coins > 0 {
+                // CAPTURE: Enemy territory - transfer coins to captor's wallet
+                let new_owner_idx = (new_owner - 1) as usize;
+                if new_owner_idx < players.len() {
+                    let principal = players[new_owner_idx];
+                    if principal != Principal::anonymous() {
+                        *balances.entry(principal).or_insert(0) += old_coins as u64;
+                    }
+                }
+                // Captured cell starts with 0 coins
+                grid[idx] = make_cell(new_owner, true, 0);
+            } else {
+                // RECLAIM: Own territory - preserve coins on the cell (no free money)
+                grid[idx] = make_cell(new_owner, true, old_coins);
+            }
             add_with_neighbors(next_potential, idx);
+            (Some(new_owner), None) // new_owner gained a cell
         }
 
         CellChange::Death => {
@@ -321,10 +343,12 @@ fn apply_cell_change(
             for &n_idx in &neighbors {
                 add_with_neighbors(next_potential, n_idx);
             }
+            (None, Some(owner)) // owner lost a cell
         }
 
         CellChange::StaysDead => {
             // Nothing to do
+            (None, None)
         }
     }
 }
@@ -369,20 +393,84 @@ fn step_generation() {
         });
     });
 
+    // Track cell count deltas: [births, deaths] per owner
+    let mut count_deltas = [0i32; MAX_PLAYERS + 1]; // Index 0 unused, 1-9 for players
+
     // PASS 2: Apply all changes
     GRID.with(|grid| {
         NEXT_POTENTIAL.with(|next_potential| {
             BALANCES.with(|balances| {
-                let grid = &mut *grid.borrow_mut();
-                let next_potential = &mut *next_potential.borrow_mut();
-                let balances = &mut *balances.borrow_mut();
+                PLAYERS.with(|players| {
+                    let grid = &mut *grid.borrow_mut();
+                    let next_potential = &mut *next_potential.borrow_mut();
+                    let balances = &mut *balances.borrow_mut();
+                    let players = &*players.borrow();
 
-                // Clear next_potential
-                next_potential.fill(0);
+                    // Clear next_potential
+                    next_potential.fill(0);
 
-                // Apply each computed change
-                for (idx, change) in changes {
-                    apply_cell_change(grid, next_potential, balances, idx, change);
+                    // Apply each computed change
+                    for (idx, change) in changes {
+                        let (born, died) =
+                            apply_cell_change(grid, next_potential, balances, players, idx, change);
+
+                        if let Some(owner) = born {
+                            if (owner as usize) <= MAX_PLAYERS {
+                                count_deltas[owner as usize] += 1;
+                            }
+                        }
+                        if let Some(owner) = died {
+                            if (owner as usize) <= MAX_PLAYERS {
+                                count_deltas[owner as usize] -= 1;
+                            }
+                        }
+                    }
+                });
+            });
+        });
+    });
+
+    // Update cell counts and manage grace period for dead players
+    let now = ic_cdk::api::time();
+    CELL_COUNTS.with(|counts| {
+        ZERO_CELLS_SINCE.with(|zero_since| {
+            PLAYERS.with(|players| {
+                let counts = &mut *counts.borrow_mut();
+                let zero_since = &mut *zero_since.borrow_mut();
+                let players = &mut *players.borrow_mut();
+
+                for (owner, &delta) in count_deltas.iter().enumerate().skip(1) {
+                    let idx = owner - 1;
+                    if idx < counts.len() {
+                        let old_count = counts[idx];
+                        // Apply delta (can go negative temporarily, saturate to 0)
+                        let new_count = (old_count as i32 + delta).max(0) as u32;
+                        counts[idx] = new_count;
+
+                        // Extend zero_since vec if needed
+                        while zero_since.len() <= idx {
+                            zero_since.push(None);
+                        }
+
+                        if new_count == 0 && old_count > 0 {
+                            // Just hit 0 cells - start grace period
+                            zero_since[idx] = Some(now);
+                        } else if new_count > 0 && old_count == 0 {
+                            // Recovered from 0 cells - clear grace period
+                            zero_since[idx] = None;
+                        } else if new_count == 0 {
+                            // Still at 0 - check if grace period expired
+                            if let Some(since) = zero_since[idx] {
+                                if now.saturating_sub(since) >= SLOT_GRACE_PERIOD_NS {
+                                    // Grace period expired - free the slot
+                                    if idx < players.len() {
+                                        players[idx] = Principal::anonymous();
+                                    }
+                                    zero_since[idx] = None;
+                                }
+                            }
+                        }
+                    }
                 }
             });
         });
@@ -532,12 +620,25 @@ pub struct PlaceResult {
     pub new_balance: u64,
 }
 
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct SlotInfo {
+    pub slot: u8,                     // 1-9
+    pub occupied: bool,               // true if a player is in this slot
+    pub cell_count: u32,              // alive cells owned by this slot
+    pub territory_cells: u32,         // dead cells (territory) owned by this slot
+    pub territory_coins: u32,         // coins sitting in territory cells
+}
+
 #[derive(CandidType, Deserialize, Clone, Debug, Default)]
 struct Metadata {
     generation: u64,
     players: Vec<Principal>,
-    balances: Vec<u64>,
+    balances: Vec<(Principal, u64)>,
+    cell_counts: Vec<u32>,
     is_running: bool,
+    // Added later - optional for backward compatibility
+    #[serde(default)]
+    zero_cells_since: Vec<Option<u64>>,
 }
 
 // ============================================================================
@@ -558,40 +659,31 @@ fn init() {
 
 #[pre_upgrade]
 fn pre_upgrade() {
-    // 1. Save grid (256 KB)
+    // Save grid (256 KB)
     GRID.with(|g| {
-        let grid = g.borrow();
-        ic_cdk::stable::stable_grow(5).ok(); // Ensure enough pages (5 * 64KB = 320KB)
-        ic_cdk::stable::stable_write(0, &grid[..]);
+        ic_cdk::stable::stable_grow(5).ok();
+        ic_cdk::stable::stable_write(0, &g.borrow()[..]);
     });
 
-    // 2. Save metadata as candid at offset 256KB
+    // Save metadata at offset 256KB
     let metadata = Metadata {
         generation: GENERATION.with(|g| *g.borrow()),
         players: PLAYERS.with(|p| p.borrow().clone()),
-        balances: BALANCES.with(|b| b.borrow().clone()),
+        balances: BALANCES.with(|b| b.borrow().iter().map(|(&k, &v)| (k, v)).collect()),
+        cell_counts: CELL_COUNTS.with(|c| c.borrow().clone()),
         is_running: IS_RUNNING.with(|r| *r.borrow()),
+        zero_cells_since: ZERO_CELLS_SINCE.with(|z| z.borrow().clone()),
     };
     let encoded = candid::encode_one(&metadata).unwrap();
-    let len = encoded.len() as u32;
-
-    // Write length prefix then data
-    ic_cdk::stable::stable_write(TOTAL_CELLS as u64, &len.to_le_bytes());
+    ic_cdk::stable::stable_write(TOTAL_CELLS as u64, &(encoded.len() as u32).to_le_bytes());
     ic_cdk::stable::stable_write(TOTAL_CELLS as u64 + 4, &encoded);
-
-    ic_cdk::println!(
-        "Life2 pre_upgrade: saved {} cells, {} bytes metadata",
-        TOTAL_CELLS,
-        encoded.len()
-    );
 }
 
 #[post_upgrade]
 fn post_upgrade() {
-    // Check if we have valid stable memory
     let stable_size = ic_cdk::stable::stable_size();
     if stable_size >= 5 {
-        // 1. Restore grid
+        // Restore grid
         GRID.with(|g| {
             let mut grid = g.borrow_mut();
             let mut buf = [0u8; TOTAL_CELLS];
@@ -599,36 +691,32 @@ fn post_upgrade() {
             *grid = buf;
         });
 
-        // 2. Restore metadata
+        // Restore metadata
         let mut len_buf = [0u8; 4];
         ic_cdk::stable::stable_read(TOTAL_CELLS as u64, &mut len_buf);
         let len = u32::from_le_bytes(len_buf) as usize;
 
         if len > 0 && len < 100_000 {
-            // Sanity check
             let mut meta_buf = vec![0u8; len];
             ic_cdk::stable::stable_read(TOTAL_CELLS as u64 + 4, &mut meta_buf);
 
             if let Ok(metadata) = candid::decode_one::<Metadata>(&meta_buf) {
                 GENERATION.with(|g| *g.borrow_mut() = metadata.generation);
                 PLAYERS.with(|p| *p.borrow_mut() = metadata.players);
-                BALANCES.with(|b| *b.borrow_mut() = metadata.balances);
+                BALANCES.with(|b| {
+                    let mut balances = b.borrow_mut();
+                    for (principal, amount) in metadata.balances {
+                        balances.insert(principal, amount);
+                    }
+                });
+                CELL_COUNTS.with(|c| *c.borrow_mut() = metadata.cell_counts);
                 IS_RUNNING.with(|r| *r.borrow_mut() = metadata.is_running);
-                ic_cdk::println!(
-                    "Life2 post_upgrade: restored generation {}, {} players",
-                    metadata.generation,
-                    PLAYERS.with(|p| p.borrow().len())
-                );
+                ZERO_CELLS_SINCE.with(|z| *z.borrow_mut() = metadata.zero_cells_since);
             }
         }
-    } else {
-        ic_cdk::println!("Life2 post_upgrade: fresh deploy, no stable data");
     }
 
-    // 3. CRITICAL: Rebuild potential set from grid
     rebuild_potential_from_grid();
-
-    // 4. Restart timer
     start_simulation_timer();
 }
 
@@ -670,29 +758,101 @@ fn require_admin() -> Result<(), String> {
 // UPDATE METHODS
 // ============================================================================
 
+/// Find or create a player slot for a principal.
+/// Returns (player_number, is_new_player).
+/// Reuses empty slots (where previous player died) before adding new ones.
+fn get_or_create_player_slot(caller: Principal) -> Result<(u8, bool), String> {
+    PLAYERS.with(|p| {
+        CELL_COUNTS.with(|c| {
+            let mut players = p.borrow_mut();
+            let mut counts = c.borrow_mut();
+
+            // Check if already has an active slot
+            if let Some(pos) = players.iter().position(|&p| p == caller) {
+                return Ok(((pos + 1) as u8, false));
+            }
+
+            // Look for an empty slot (Principal::anonymous())
+            if let Some(pos) = players.iter().position(|&p| p == Principal::anonymous()) {
+                players[pos] = caller;
+                counts[pos] = 0;
+                return Ok(((pos + 1) as u8, true));
+            }
+
+            // No empty slots, try to add a new one
+            if players.len() >= MAX_PLAYERS {
+                return Err("Game full - max 9 players".to_string());
+            }
+
+            players.push(caller);
+            counts.push(0);
+            Ok((players.len() as u8, true))
+        })
+    })
+}
+
 /// Join the game and get assigned a player number (1-9)
 /// Requires authentication - anonymous users cannot join.
 #[update]
 fn join_game() -> Result<u8, String> {
     let caller = require_authenticated()?;
 
+    let (player_num, _is_new) = get_or_create_player_slot(caller)?;
+
+    // No automatic starting balance - players use faucet() to get coins
+    Ok(player_num)
+}
+
+/// Join the game at a specific slot (1-9).
+/// Lets player choose their color and potentially inherit territory from dead players.
+#[update]
+fn join_slot(slot: u8) -> Result<u8, String> {
+    let caller = require_authenticated()?;
+
+    if slot < 1 || slot > MAX_PLAYERS as u8 {
+        return Err(format!("Invalid slot: must be 1-{}", MAX_PLAYERS));
+    }
+
+    let now = ic_cdk::api::time();
+
     PLAYERS.with(|p| {
-        let mut players = p.borrow_mut();
+        CELL_COUNTS.with(|c| {
+            ZERO_CELLS_SINCE.with(|z| {
+                let mut players = p.borrow_mut();
+                let mut counts = c.borrow_mut();
+                let mut zero_since = z.borrow_mut();
 
-        // Check if already registered
-        if let Some(pos) = players.iter().position(|&p| p == caller) {
-            return Ok((pos + 1) as u8);
-        }
+                // Check if caller already has a slot
+                if let Some(pos) = players.iter().position(|&p| p == caller) {
+                    return Ok((pos + 1) as u8); // Return existing slot
+                }
 
-        // Check if room for new player
-        if players.len() >= MAX_PLAYERS {
-            return Err("Game full - max 9 players".to_string());
-        }
+                let idx = (slot - 1) as usize;
 
-        // Register new player
-        players.push(caller);
-        BALANCES.with(|b| b.borrow_mut().push(STARTING_BALANCE));
-        Ok(players.len() as u8)
+                // Extend vectors if needed
+                while players.len() <= idx {
+                    players.push(Principal::anonymous());
+                    counts.push(0);
+                }
+                while zero_since.len() <= idx {
+                    zero_since.push(None);
+                }
+
+                // Check if slot is available (empty or Principal::anonymous)
+                if players[idx] != Principal::anonymous() {
+                    return Err(format!("Slot {} is already occupied", slot));
+                }
+
+                // Claim the slot
+                players[idx] = caller;
+                counts[idx] = 0;
+                // Start grace period since they have 0 cells
+                zero_since[idx] = Some(now);
+
+                // No automatic starting balance - players use faucet() to get coins
+                Ok(slot)
+            })
+        })
     })
 }
 
@@ -702,81 +862,99 @@ fn join_game() -> Result<u8, String> {
 fn place_cells(cells: Vec<(i32, i32)>) -> Result<PlaceResult, String> {
     let caller = require_authenticated()?;
 
-    // Get or assign player number
-    let player_num = PLAYERS.with(|p| {
-        let mut players = p.borrow_mut();
+    // Get or assign player slot (reuses empty slots)
+    let (player_num, _is_new) = get_or_create_player_slot(caller)?;
 
-        // Check if already registered
-        if let Some(pos) = players.iter().position(|&p| p == caller) {
-            return Ok((pos + 1) as u8);
-        }
-
-        // Check if room for new player
-        if players.len() >= MAX_PLAYERS {
-            return Err("Game full".to_string());
-        }
-
-        // Register new player
-        players.push(caller);
-        BALANCES.with(|b| b.borrow_mut().push(STARTING_BALANCE));
-        Ok(players.len() as u8)
-    })?;
+    // No automatic starting balance - players use faucet() to get coins
 
     let player_idx = (player_num - 1) as usize;
     let cost = cells.len() as u64;
 
-    // Check balance
-    let balance = BALANCES.with(|b| b.borrow().get(player_idx).copied().unwrap_or(0));
+    // Check balance (from HashMap keyed by principal)
+    let balance = BALANCES.with(|b| b.borrow().get(&caller).copied().unwrap_or(0));
     if balance < cost {
         return Err(format!("Need {} coins, have {}", cost, balance));
     }
 
-    let mut placed = 0u32;
+    // Pre-compute wrapped coordinates for all cells
+    let wrapped_cells: Vec<usize> = cells
+        .iter()
+        .map(|(x, y)| {
+            let wx = ((*x % 512) + 512) as usize % 512;
+            let wy = ((*y % 512) + 512) as usize % 512;
+            coord_to_index(wx, wy)
+        })
+        .collect();
+
+    // VALIDATION PASS: Check ALL cells before placing any (all-or-nothing)
+    GRID.with(|g| {
+        let grid = g.borrow();
+        for &idx in &wrapped_cells {
+            let cell = grid[idx];
+
+            // Fail if cell is alive
+            if is_alive(cell) {
+                return Err("Cannot place on living cells".to_string());
+            }
+
+            // Fail if cell has 7 coins (cap)
+            if get_coins(cell) >= 7 {
+                return Err("Cannot place on cells with max coins".to_string());
+            }
+
+            // Fail if cell has coins belonging to another player's territory
+            let cell_owner = get_owner(cell);
+            if get_coins(cell) > 0 && cell_owner > 0 && cell_owner != player_num {
+                return Err("Cannot place on enemy territory with coins".to_string());
+            }
+        }
+        Ok(())
+    })?;
+
+    // PLACEMENT PASS: All validation passed, now place all cells
+    let placed = wrapped_cells.len() as u32;
 
     GRID.with(|g| {
         POTENTIAL.with(|p| {
             let grid = &mut *g.borrow_mut();
             let potential = &mut *p.borrow_mut();
 
-            for (x, y) in cells {
-                // Wrap coordinates to grid
-                let wx = ((x % 512) + 512) as usize % 512;
-                let wy = ((y % 512) + 512) as usize % 512;
-                let idx = coord_to_index(wx, wy);
-
+            for &idx in &wrapped_cells {
                 let cell = grid[idx];
-
-                // Skip if alive
-                if is_alive(cell) {
-                    continue;
-                }
-
-                // Skip if 7 coins (cap)
-                if get_coins(cell) >= 7 {
-                    continue;
-                }
-
-                // Place cell
                 let new_coins = get_coins(cell).saturating_add(1).min(7);
                 grid[idx] = make_cell(player_num, true, new_coins);
 
                 // Add to potential (CRITICAL!)
                 add_with_neighbors(potential, idx);
-
-                placed += 1;
             }
         });
     });
 
-    // Deduct balance (only for actually placed cells)
+    // Deduct balance (from HashMap keyed by principal)
     BALANCES.with(|b| {
-        if let Some(bal) = b.borrow_mut().get_mut(player_idx) {
-            *bal -= placed as u64;
+        if let Some(bal) = b.borrow_mut().get_mut(&caller) {
+            *bal = bal.saturating_sub(placed as u64);
         }
     });
 
+    // Update cell count for this player
+    CELL_COUNTS.with(|c| {
+        if let Some(count) = c.borrow_mut().get_mut(player_idx) {
+            *count += placed;
+        }
+    });
+
+    // Clear grace period if cells were placed
+    if placed > 0 {
+        ZERO_CELLS_SINCE.with(|z| {
+            if let Some(since) = z.borrow_mut().get_mut(player_idx) {
+                *since = None;
+            }
+        });
+    }
+
     let generation = GENERATION.with(|g| *g.borrow());
-    let new_balance = BALANCES.with(|b| b.borrow().get(player_idx).copied().unwrap_or(0));
+    let new_balance = BALANCES.with(|b| b.borrow().get(&caller).copied().unwrap_or(0));
 
     Ok(PlaceResult {
         placed,
@@ -802,6 +980,7 @@ fn resume_game() -> Result<(), String> {
 }
 
 /// Reset the game to initial state (admin only)
+/// Note: Wallets are tied to principal identity and persist across resets
 #[update]
 fn reset_game() -> Result<(), String> {
     require_admin()?;
@@ -809,18 +988,34 @@ fn reset_game() -> Result<(), String> {
     POTENTIAL.with(|p| p.borrow_mut().fill(0));
     NEXT_POTENTIAL.with(|np| np.borrow_mut().fill(0));
     GENERATION.with(|g| *g.borrow_mut() = 0);
-    // Reset balances but keep players
-    BALANCES.with(|b| {
-        let mut balances = b.borrow_mut();
-        for bal in balances.iter_mut() {
-            *bal = STARTING_BALANCE;
-        }
-    });
+    // Clear player slots (all become available)
+    PLAYERS.with(|p| p.borrow_mut().clear());
+    CELL_COUNTS.with(|c| c.borrow_mut().clear());
+    ZERO_CELLS_SINCE.with(|z| z.borrow_mut().clear());
+    // Wallets persist - they're tied to principal, not game state
+    // Players can use faucet() to get more coins
     IS_RUNNING.with(|r| *r.borrow_mut() = true);
     // Reset wipe state
     NEXT_WIPE_QUADRANT.with(|q| *q.borrow_mut() = 0);
     LAST_WIPE_TIME_NS.with(|t| *t.borrow_mut() = 0);
     Ok(())
+}
+
+/// Faucet: Add 1000 coins to caller's wallet
+/// Requires authentication - anonymous users cannot use faucet.
+/// No limits - can be called multiple times.
+#[update]
+fn faucet() -> Result<u64, String> {
+    let caller = require_authenticated()?;
+
+    let new_balance = BALANCES.with(|b| {
+        let mut balances = b.borrow_mut();
+        let balance = balances.entry(caller).or_insert(0);
+        *balance += FAUCET_AMOUNT;
+        *balance
+    });
+
+    Ok(new_balance)
 }
 
 // ============================================================================
@@ -866,19 +1061,30 @@ fn get_state() -> GameState {
         }
     });
 
-    let player_num = PLAYERS.with(|p| {
-        p.borrow()
+    let (players, player_num) = PLAYERS.with(|p| {
+        let players = p.borrow();
+        let player_num = players
             .iter()
             .position(|&p| p == caller)
-            .map(|i| (i + 1) as u8)
+            .map(|i| (i + 1) as u8);
+        (players.clone(), player_num)
+    });
+
+    // Build balances Vec parallel to players Vec (lookup each principal in HashMap)
+    let balances = BALANCES.with(|b| {
+        let balances_map = b.borrow();
+        players
+            .iter()
+            .map(|principal| balances_map.get(principal).copied().unwrap_or(0))
+            .collect()
     });
 
     GameState {
         generation: GENERATION.with(|g| *g.borrow()),
         alive_cells,
         territory,
-        players: PLAYERS.with(|p| p.borrow().clone()),
-        balances: BALANCES.with(|b| b.borrow().clone()),
+        players,
+        balances,
         player_num,
     }
 }
@@ -906,17 +1112,15 @@ fn get_potential_count() -> u32 {
     POTENTIAL.with(|p| count_potential(&p.borrow()))
 }
 
-/// Get player's balance
+/// Get player's balance (stored by principal, persists across slot changes)
 #[query]
 fn get_balance() -> Result<u64, String> {
     let caller = ic_cdk::api::msg_caller();
-    PLAYERS.with(|p| {
-        let players = p.borrow();
-        let idx = players
-            .iter()
-            .position(|&p| p == caller)
-            .ok_or("Not a player")?;
-        BALANCES.with(|b| Ok(b.borrow().get(idx).copied().unwrap_or(0)))
+    BALANCES.with(|b| {
+        b.borrow()
+            .get(&caller)
+            .copied()
+            .ok_or_else(|| "Not a player".to_string())
     })
 }
 
@@ -937,6 +1141,47 @@ fn get_next_wipe() -> (u8, u64) {
     let remaining_ns = WIPE_INTERVAL_NS.saturating_sub(elapsed);
     let remaining_secs = remaining_ns / 1_000_000_000;
     (quadrant as u8, remaining_secs)
+}
+
+/// Get info about all 9 player slots (for slot selection UI)
+#[query]
+fn get_slots_info() -> Vec<SlotInfo> {
+    // Count cells and coins per owner by scanning grid
+    let mut alive_counts = [0u32; MAX_PLAYERS + 1];
+    let mut territory_counts = [0u32; MAX_PLAYERS + 1];
+    let mut coin_counts = [0u32; MAX_PLAYERS + 1];
+
+    GRID.with(|g| {
+        let grid = g.borrow();
+        for cell in grid.iter() {
+            let owner = get_owner(*cell) as usize;
+            if owner > 0 && owner <= MAX_PLAYERS {
+                if is_alive(*cell) {
+                    alive_counts[owner] += 1;
+                } else {
+                    territory_counts[owner] += 1;
+                }
+                coin_counts[owner] += get_coins(*cell) as u32;
+            }
+        }
+    });
+
+    PLAYERS.with(|p| {
+        let players = p.borrow();
+        (1..=MAX_PLAYERS as u8)
+            .map(|slot| {
+                let idx = (slot - 1) as usize;
+                let occupied = idx < players.len() && players[idx] != Principal::anonymous();
+                SlotInfo {
+                    slot,
+                    occupied,
+                    cell_count: alive_counts[slot as usize],
+                    territory_cells: territory_counts[slot as usize],
+                    territory_coins: coin_counts[slot as usize],
+                }
+            })
+            .collect()
+    })
 }
 
 /// Simple greeting

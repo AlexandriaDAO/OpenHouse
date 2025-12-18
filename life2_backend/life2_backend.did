@@ -23,13 +23,23 @@ type PlaceResult = record {
     new_balance: nat64;
 };
 
+type SlotInfo = record {
+    slot: nat8;
+    occupied: bool;
+    cell_count: nat32;
+    territory_cells: nat32;
+    territory_coins: nat32;
+};
+
 service : {
     // Player actions
     join_game: () -> (variant { Ok: nat8; Err: text });
+    join_slot: (nat8) -> (variant { Ok: nat8; Err: text });
     place_cells: (vec record { int32; int32 }) -> (variant { Ok: PlaceResult; Err: text });
 
     // Queries (FREE - no cycles cost to caller)
     get_state: () -> (GameState) query;
+    get_slots_info: () -> (vec SlotInfo) query;
     get_generation: () -> (nat64) query;
     get_alive_count: () -> (nat32) query;
     get_potential_count: () -> (nat32) query;

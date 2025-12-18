@@ -72,14 +72,14 @@ fn test_neighbor_count() {
 }
 
 #[test]
-fn test_add_coins_cap() {
-    let cell = make_cell(1, true, 5);
-    let cell2 = add_coins(cell, 5);
-    assert_eq!(get_coins(cell2), 7); // Capped at 7
+fn test_coins_cap_at_7() {
+    // Test coins are capped at 7 (3 bits max = 0b111 = 7)
+    let cell = make_cell(1, true, 7);
+    assert_eq!(get_coins(cell), 7);
 
-    let cell3 = make_cell(1, true, 7);
-    let cell4 = add_coins(cell3, 1);
-    assert_eq!(get_coins(cell4), 7); // Still 7
+    // Verify coins overflow is capped
+    let cell2 = make_cell(1, true, 10); // Try to set coins > 7
+    assert_eq!(get_coins(cell2), 2); // 10 & 0x07 = 2 (masked)
 }
 
 #[test]
@@ -138,7 +138,10 @@ fn test_blinker_oscillator() {
     let mut grid = [0u8; TOTAL_CELLS];
     let mut potential = [0u64; GRID_WORDS];
     let mut next_potential = [0u64; GRID_WORDS];
-    let mut balances = vec![1000u64];
+    let mut balances = HashMap::new();
+    let test_principal = Principal::anonymous();
+    balances.insert(test_principal, 1000u64);
+    let players = vec![test_principal];
 
     // Set up vertical blinker at (100, 100)
     let cells = [
@@ -185,7 +188,7 @@ fn test_blinker_oscillator() {
     // Pass 2: Apply changes
     next_potential.fill(0);
     for (idx, change) in changes {
-        apply_cell_change(&mut grid, &mut next_potential, &mut balances, idx, change);
+        apply_cell_change(&mut grid, &mut next_potential, &mut balances, &players, idx, change);
     }
 
     // Verify blinker rotated to horizontal
@@ -222,7 +225,10 @@ fn test_glider_motion() {
     let mut grid = [0u8; TOTAL_CELLS];
     let mut potential = [0u64; GRID_WORDS];
     let mut next_potential = [0u64; GRID_WORDS];
-    let mut balances = vec![1000u64];
+    let mut balances = HashMap::new();
+    let test_principal = Principal::anonymous();
+    balances.insert(test_principal, 1000u64);
+    let players = vec![test_principal];
 
     // Standard glider at (10, 10) - using same orientation as classic
     // .X.
@@ -246,7 +252,8 @@ fn test_glider_motion() {
     let run_generation = |grid: &mut [u8; TOTAL_CELLS],
                           potential: &mut [u64; GRID_WORDS],
                           next_potential: &mut [u64; GRID_WORDS],
-                          balances: &mut Vec<u64>| {
+                          balances: &mut HashMap<Principal, u64>,
+                          players: &[Principal]| {
         let mut changes: Vec<(usize, CellChange)> = Vec::new();
 
         for word_idx in 0..GRID_WORDS {
@@ -270,7 +277,7 @@ fn test_glider_motion() {
 
         next_potential.fill(0);
         for (idx, change) in changes {
-            apply_cell_change(grid, next_potential, balances, idx, change);
+            apply_cell_change(grid, next_potential, balances, players, idx, change);
         }
 
         std::mem::swap(potential, next_potential);
@@ -291,6 +298,7 @@ fn test_glider_motion() {
             &mut potential,
             &mut next_potential,
             &mut balances,
+            &players,
         );
         assert_eq!(
             count_alive(&grid),

@@ -18,22 +18,12 @@ export interface PatternInfo {
   period?: number;     // For oscillators/guns
   speed?: string;      // For spaceships (e.g., "c/4", "c/2")
   lifespan?: number;   // For methuselahs
+  essential?: boolean; // Show in default view (true) or advanced view (false/undefined)
 }
 
 // Category display info for UI
+// Order: Spaceships, Guns, Bombs first (combat-focused), then utility categories
 export const CATEGORY_INFO: Record<PatternCategory, { label: string; color: string; icon: string; description: string }> = {
-  stillLife: {
-    label: 'Still Lifes',
-    color: 'text-green-400 border-green-500/50 bg-green-500/10',
-    icon: '#',
-    description: 'Stable defensive structures',
-  },
-  oscillator: {
-    label: 'Oscillators',
-    color: 'text-purple-400 border-purple-500/50 bg-purple-500/10',
-    icon: 'o',
-    description: 'Pulsing territory markers',
-  },
   spaceship: {
     label: 'Spaceships',
     color: 'text-blue-400 border-blue-500/50 bg-blue-500/10',
@@ -47,7 +37,7 @@ export const CATEGORY_INFO: Record<PatternCategory, { label: string; color: stri
     description: 'Spaceship factories',
   },
   methuselah: {
-    label: 'Methuselahs',
+    label: 'Bombs',
     color: 'text-orange-400 border-orange-500/50 bg-orange-500/10',
     icon: '!',
     description: 'Chaos grenades',
@@ -63,5 +53,17 @@ export const CATEGORY_INFO: Record<PatternCategory, { label: string; color: stri
     color: 'text-cyan-400 border-cyan-500/50 bg-cyan-500/10',
     icon: '@',
     description: 'Unique interactions',
+  },
+  oscillator: {
+    label: 'Oscillators',
+    color: 'text-purple-400 border-purple-500/50 bg-purple-500/10',
+    icon: 'o',
+    description: 'Pulsing territory markers',
+  },
+  stillLife: {
+    label: 'Defense',
+    color: 'text-green-400 border-green-500/50 bg-green-500/10',
+    icon: '#',
+    description: 'Stable defensive structures',
   },
 };

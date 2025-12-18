@@ -69,10 +69,21 @@ bo5bob$obo3bobo$o2bobo2bo$2bo3bo2b$2b2ob2o!`,
   {
     name: 'Blocker',
     category: 'oscillator',
-    description: 'Blocks incoming patterns, period 8',
+    description: 'Like a moving wall, period 8',
     cells: 12,
     period: 8,
+    essential: true,
     rle: `x = 10, y = 5, rule = B3/S23
 6bobob$5bo4b$2o2bo4bo$2obo2bob2o$4b2o!`,
+  },
+  {
+    name: 'Killer Toads',
+    category: 'oscillator',
+    description: 'Oscillator pair that devours anything it touches',
+    cells: 12,
+    period: 2,
+    essential: true,
+    rle: `x = 4, y = 7, rule = B3/S23
+b3o$3ob4$3ob$b3o!`,
   },
 ];
