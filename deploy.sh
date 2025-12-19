@@ -37,6 +37,10 @@ while [[ $# -gt 0 ]]; do
             DEPLOY_TARGET="life2"
             shift
             ;;
+        --risk-only)
+            DEPLOY_TARGET="risk"
+            shift
+            ;;
         --frontend-only)
             DEPLOY_TARGET="frontend"
             shift
@@ -57,6 +61,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --dice-only        Deploy only dice backend"
             echo "  --life-only        Deploy only life1 backend (Game of Life - Server 1)"
             echo "  --life2-only       Deploy only life2 backend (Game of Life - Server 2)"
+            echo "  --risk-only        Deploy only risk backend (Life2 v2 - Territory Control)"
             echo "  --frontend-only    Deploy only the frontend"
             echo "  --test             Run post-deployment tests"
             echo "  --help             Show this help message"
@@ -94,6 +99,7 @@ echo "  Roulette Backend: wvrcw-3aaaa-aaaah-arm4a-cai"
 echo "  Dice Backend:      whchi-hyaaa-aaaao-a4ruq-cai"
 echo "  Life1 Backend:     pijnb-7yaaa-aaaae-qgcuq-cai"
 echo "  Life2 Backend:     qoski-4yaaa-aaaai-q4g4a-cai"
+echo "  Risk Backend:      66p3s-uaaaa-aaaad-ac47a-cai"
 echo "  Frontend:          pezw3-laaaa-aaaal-qssoa-cai"
 echo "================================================"
 echo ""
@@ -249,6 +255,28 @@ deploy_life2() {
     echo ""
 }
 
+# Function to deploy risk backend (Life2 v2 - Territory Control)
+deploy_risk() {
+    echo "================================================"
+    echo "Deploying Risk Backend Canister"
+    echo "================================================"
+
+    # Build the backend canister
+    echo "Building risk backend canister..."
+    cargo build --release --target wasm32-unknown-unknown --package risk_backend
+
+    # Skip candid extraction - using manually created .did file
+    echo "Using pre-defined candid interface..."
+
+    # Deploy to mainnet
+    echo "Deploying risk backend to mainnet..."
+    dfx deploy risk_backend --network ic
+
+    echo "Risk backend deployment completed!"
+    echo "Risk Canister ID: 66p3s-uaaaa-aaaad-ac47a-cai"
+    echo ""
+}
+
 # Function to deploy frontend
 deploy_frontend() {
     echo "=================================================="
@@ -263,6 +291,7 @@ deploy_frontend() {
     dfx generate dice_backend 2>/dev/null || echo "Warning: Could not generate dice_backend declarations"
     dfx generate life1_backend 2>/dev/null || echo "Warning: Could not generate life1_backend declarations"
     dfx generate life2_backend 2>/dev/null || echo "Warning: Could not generate life2_backend declarations"
+    dfx generate risk_backend 2>/dev/null || echo "Warning: Could not generate risk_backend declarations"
 
     # Sync declarations
     echo "Copying fresh declarations to frontend..."
@@ -355,6 +384,9 @@ main() {
         life2)
             deploy_life2
             ;;
+        risk)
+            deploy_risk
+            ;;
         frontend)
             deploy_frontend
             ;;
@@ -365,6 +397,7 @@ main() {
             deploy_dice
             deploy_life
             deploy_life2
+            deploy_risk
             deploy_frontend
             ;;
     esac
@@ -382,6 +415,7 @@ main() {
     echo "Dice Backend:      https://dashboard.internetcomputer.org/canister/whchi-hyaaa-aaaao-a4ruq-cai"
     echo "Life1 Backend:     https://dashboard.internetcomputer.org/canister/pijnb-7yaaa-aaaae-qgcuq-cai"
     echo "Life2 Backend:     https://dashboard.internetcomputer.org/canister/qoski-4yaaa-aaaai-q4g4a-cai"
+    echo "Risk Backend:      https://dashboard.internetcomputer.org/canister/66p3s-uaaaa-aaaad-ac47a-cai"
     echo "Frontend:          https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io"
     echo ""
     echo "Remember: All changes are live on mainnet immediately!"

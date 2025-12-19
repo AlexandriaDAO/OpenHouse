@@ -49,6 +49,9 @@ interface Cell {
 
 // Local Game of Life simulation - mirrors backend rules exactly
 const stepLocalGeneration = (cells: Cell[]): Cell[] => {
+  // Guard against empty cells array (can happen during server switch)
+  if (cells.length === 0) return cells;
+
   const newCells: Cell[] = new Array(GRID_WIDTH * GRID_HEIGHT);
 
   for (let row = 0; row < GRID_HEIGHT; row++) {
@@ -1558,10 +1561,27 @@ export const Life: React.FC = () => {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-80px)] gap-6 p-4">
         <div className="text-center mb-4">
-          <h1 className="text-3xl font-bold text-white mb-2">Choose Your Color</h1>
-          <p className="text-gray-400">Pick a slot to join the game</p>
-          <p className="text-gray-500 text-sm mt-2">Unoccupied slots with territory contain coins you can inherit!</p>
+          <h1 className="text-3xl font-bold text-white mb-2">Choose Your Server & Color</h1>
+          <p className="text-gray-400">Select a server, then pick a slot to join</p>
         </div>
+
+        {/* Server selector */}
+        <div className="flex gap-2 mb-2">
+          {LIFE_SERVERS.map((server) => (
+            <button
+              key={server.id}
+              onClick={() => setSelectedServer(server)}
+              className={`px-4 py-2 rounded-lg font-mono text-sm transition-all ${
+                selectedServer.id === server.id
+                  ? 'bg-white/20 text-white border border-white/50'
+                  : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
+              }`}
+            >
+              {server.name}
+            </button>
+          ))}
+        </div>
+        <p className="text-gray-500 text-sm">Unoccupied slots with territory contain coins you can inherit!</p>
 
         {error && (
           <div className="bg-red-500/20 border border-red-500/50 text-red-400 px-4 py-2 rounded-lg text-sm">
