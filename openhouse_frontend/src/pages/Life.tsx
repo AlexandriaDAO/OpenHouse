@@ -52,6 +52,13 @@ import {
 // Import cell texture system
 import { getRegionTexture, getRegionPattern, preloadPatterns, clearPatternCache } from './life/cellTextures';
 
+// Import territory rendering system (pattern fills for GPU-efficient rendering)
+import {
+  initTerritoryPatterns,
+  renderTerritoryLayer,
+  arePatternsInitialized,
+} from './life/rendering';
+
 // Import tutorial component
 import { RiskTutorial } from './life/tutorial';
 
@@ -204,6 +211,10 @@ export const Risk: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasSizeRef = useRef({ width: 0, height: 0 });
   const minimapRef = useRef<HTMLCanvasElement>(null);
+
+  // Territory pattern rendering refs
+  const territoryAnimTimeRef = useRef<number>(0);
+  const territoryPatternsInitRef = useRef<boolean>(false);
 
   // Pattern state
   const [selectedPattern, setSelectedPattern] = useState<PatternInfo>(getPatternByName('Glider') || PATTERNS[0]);
@@ -944,20 +955,33 @@ export const Risk: React.FC = () => {
     const cells = localCells;
     const gap = cellSize > 2 ? 1 : 0;
 
-    // Draw territory (owner > 0, regardless of alive)
-    for (let row = 0; row < height; row++) {
-      for (let col = 0; col < width; col++) {
-        const gridRow = startY + row;
-        const gridCol = startX + col;
-        const idx = gridRow * GRID_SIZE + gridCol;
-        const cell = cells[idx];
-
-        if (cell && cell.owner > 0) {
-          ctx.fillStyle = TERRITORY_COLORS[cell.owner] || 'rgba(255,255,255,0.1)';
-          ctx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
-        }
-      }
+    // Initialize territory patterns on first draw (requires canvas context)
+    if (!territoryPatternsInitRef.current) {
+      initTerritoryPatterns(ctx);
+      territoryPatternsInitRef.current = true;
     }
+
+    // Update animation time
+    territoryAnimTimeRef.current += 0.016; // ~60fps assumption
+
+    // Draw territory using GPU-efficient pattern fills
+    // Instead of 100k individual fillRect calls, this batches by owner into ~8 fill() calls
+    const getCellOwner = (gridX: number, gridY: number): number => {
+      if (gridX < 0 || gridX >= GRID_SIZE || gridY < 0 || gridY >= GRID_SIZE) return 0;
+      const idx = gridY * GRID_SIZE + gridX;
+      return cells[idx]?.owner || 0;
+    };
+
+    renderTerritoryLayer(
+      ctx,
+      getCellOwner,
+      cellSize,
+      startX,
+      startY,
+      width,
+      height,
+      territoryAnimTimeRef.current
+    );
 
     // Draw living cells
     for (let row = 0; row < height; row++) {
@@ -2136,7 +2160,8 @@ export const Risk: React.FC = () => {
                   setIsJoiningSlot(true);
                   setError(null);
                   try {
-                    const result = await actor.join_game(baseX, baseY);
+                    // Pass the desired slot (region.id - 1 because regions are 1-indexed, slots are 0-indexed)
+                    const result = await actor.join_game(baseX, baseY, regionToUse.id - 1);
                     if ('Ok' in result) {
                       // Backend returns slot index (0-7), but myPlayerNum is 1-indexed (1-8)
                       setMyPlayerNum(result.Ok + 1);

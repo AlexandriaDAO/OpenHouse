@@ -1446,7 +1446,7 @@ fn faucet() -> Result<u64, String> {
 }
 
 #[ic_cdk::update]
-fn join_game(base_x: i32, base_y: i32) -> Result<u8, String> {
+fn join_game(base_x: i32, base_y: i32, desired_slot: u8) -> Result<u8, String> {
     let caller = ic_cdk::api::msg_caller();
 
     // Validation 1: Auth
@@ -1489,10 +1489,17 @@ fn join_game(base_x: i32, base_y: i32) -> Result<u8, String> {
         Ok(())
     })?;
 
-    // Find free slot
-    let slot = PLAYERS.with(|players| {
-        players.borrow().iter().position(|p| p.is_none())
-    }).ok_or("No free slots (max 8 players)")?;
+    // Validation 7: Desired slot is valid and available
+    if desired_slot as usize >= MAX_PLAYERS {
+        return Err(format!("Invalid slot {} (max {})", desired_slot, MAX_PLAYERS - 1));
+    }
+    let slot = desired_slot as usize;
+    let slot_available = PLAYERS.with(|players| {
+        players.borrow()[slot].is_none()
+    });
+    if !slot_available {
+        return Err(format!("Slot {} is already taken", desired_slot));
+    }
 
     // Deduct coins from wallet
     WALLETS.with(|wallets| {

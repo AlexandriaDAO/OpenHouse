@@ -101,7 +101,7 @@ type BenchmarkReport = record {
 service : {
     // Player Actions
     faucet : () -> (variant { Ok : nat64; Err : text });
-    join_game : (int32, int32) -> (variant { Ok : nat8; Err : text });
+    join_game : (int32, int32, nat8) -> (variant { Ok : nat8; Err : text });
     place_cells : (vec record { int32; int32 }) -> (variant { Ok : nat32; Err : text });
 
     // Game Control
