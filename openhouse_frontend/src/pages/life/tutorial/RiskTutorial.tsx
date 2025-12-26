@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { BASE_SIZE, BASE_WALL_COLOR } from '../../lifeConstants';
+import { BASE_SIZE } from '../../lifeConstants';
 import {
   TutorialCell,
   BaseState,
@@ -15,11 +15,11 @@ import {
   GLIDER_UP_RIGHT,
   BLOCK_PATTERN,
   createEmptyGrid,
-  isWall,
-  isInterior,
+  isInBase,
 } from './types';
 import { stepGenerationSinglePlayer, stepGenerationMultiplayer, checkTerritoryConnectivity, applyTerritoryCutoff, applyWiper } from './simulation';
 import { TUTORIAL_SLIDES } from './slides';
+import { drawProceduralTerritory, PLAYER_ELEMENT, ENEMY_ELEMENT } from './proceduralTexture';
 
 interface RiskTutorialProps {
   isOpen: boolean;
@@ -83,6 +83,9 @@ export const RiskTutorial: React.FC<RiskTutorialProps> = ({
   onClose,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const textureTimeRef = useRef<number>(0);
+  const textureAnimRef = useRef<number>(0);
+  const [renderTick, setRenderTick] = useState(0);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [cells, setCells] = useState<TutorialCell[][]>(createEmptyGrid);
   const [isAnimating, setIsAnimating] = useState(false);
@@ -154,9 +157,7 @@ export const RiskTutorial: React.FC<RiskTutorialProps> = ({
 
       for (let y = pb.y; y < pb.y + BASE_SIZE; y++) {
         for (let x = pb.x; x < pb.x + BASE_SIZE; x++) {
-          if (!isWall(x, y, pb.x, pb.y)) {
-            grid[y][x].territory = PLAYER_ID;
-          }
+          grid[y][x].territory = PLAYER_ID;
         }
       }
     }
@@ -172,9 +173,7 @@ export const RiskTutorial: React.FC<RiskTutorialProps> = ({
       for (let y = eb.y - 2; y < eb.y + BASE_SIZE + 2; y++) {
         for (let x = eb.x - 2; x < eb.x + BASE_SIZE + 2; x++) {
           if (y >= 0 && y < TUTORIAL_GRID_SIZE && x >= 0 && x < TUTORIAL_GRID_SIZE) {
-            if (!isWall(x, y, eb.x, eb.y)) {
-              grid[y][x].territory = ENEMY_ID;
-            }
+            grid[y][x].territory = ENEMY_ID;
           }
         }
       }
@@ -338,9 +337,7 @@ export const RiskTutorial: React.FC<RiskTutorialProps> = ({
         for (let y = pb.y - 2; y < pb.y + BASE_SIZE + 2; y++) {
           for (let x = pb.x - 2; x < pb.x + BASE_SIZE + 2; x++) {
             if (y >= 0 && y < TUTORIAL_GRID_SIZE && x >= 0 && x < TUTORIAL_GRID_SIZE) {
-              if (!isWall(x, y, pb.x, pb.y)) {
-                grid[y][x].territory = PLAYER_ID;
-              }
+              grid[y][x].territory = PLAYER_ID;
             }
           }
         }
@@ -496,51 +493,34 @@ export const RiskTutorial: React.FC<RiskTutorialProps> = ({
     const fadingSet = new Set(fadingTerritory.map(c => `${c.x},${c.y}`));
     const fadeProgress = fadeStartTime ? Math.min(1, (Date.now() - fadeStartTime) / 500) : 0;
 
-    // Territory
-    for (let y = 0; y < TUTORIAL_GRID_SIZE; y++) {
-      for (let x = 0; x < TUTORIAL_GRID_SIZE; x++) {
-        const territory = cells[y][x].territory;
-        if (territory !== 0) {
-          const inBase = bases.find(b => isWall(x, y, b.x, b.y));
-          if (!inBase) {
-            const isFading = fadingSet.has(`${x},${y}`);
-            if (isFading) {
-              if (fadeProgress < 0.3) {
-                ctx.fillStyle = `rgba(255, 100, 100, ${0.3 * (1 - fadeProgress / 0.3)})`;
-              } else {
-                const alpha = 0.15 * (1 - (fadeProgress - 0.3) / 0.7);
-                ctx.fillStyle = `rgba(57, 255, 20, ${alpha})`;
-              }
-            } else {
-              ctx.fillStyle = territory === PLAYER_ID ? PLAYER_TERRITORY_COLOR : ENEMY_TERRITORY_COLOR;
-            }
-            ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
-          }
-        }
-      }
-    }
+    // Territory - draw with procedural textures (skip fading cells)
+    drawProceduralTerritory(
+      ctx,
+      cells,
+      cellSize,
+      textureTimeRef.current,
+      PLAYER_ELEMENT,
+      ENEMY_ELEMENT,
+      PLAYER_ID,
+      ENEMY_ID,
+      fadingSet.size > 0 ? fadingSet : undefined
+    );
 
-    // Base walls
-    ctx.fillStyle = BASE_WALL_COLOR;
-    for (const base of bases) {
-      for (let y = 0; y < TUTORIAL_GRID_SIZE; y++) {
-        for (let x = 0; x < TUTORIAL_GRID_SIZE; x++) {
-          if (isWall(x, y, base.x, base.y)) {
-            ctx.fillRect(x * cellSize + 0.5, y * cellSize + 0.5, cellSize - 1, cellSize - 1);
-          }
+    // Draw fading cells with special effect (territory being cut off)
+    if (fadingSet.size > 0) {
+      for (const coord of fadingSet) {
+        const [xStr, yStr] = coord.split(',');
+        const x = parseInt(xStr);
+        const y = parseInt(yStr);
+        if (fadeProgress < 0.3) {
+          // Flash red
+          ctx.fillStyle = `rgba(255, 100, 100, ${0.3 * (1 - fadeProgress / 0.3)})`;
+        } else {
+          // Fade to transparent
+          const alpha = 0.15 * (1 - (fadeProgress - 0.3) / 0.7);
+          ctx.fillStyle = `rgba(57, 255, 20, ${alpha})`;
         }
-      }
-    }
-
-    // For slides without bases in state, draw from config
-    if (bases.length === 0 && slideConfig.playerBase) {
-      const pb = slideConfig.playerBase;
-      for (let y = 0; y < TUTORIAL_GRID_SIZE; y++) {
-        for (let x = 0; x < TUTORIAL_GRID_SIZE; x++) {
-          if (isWall(x, y, pb.x, pb.y)) {
-            ctx.fillRect(x * cellSize + 0.5, y * cellSize + 0.5, cellSize - 1, cellSize - 1);
-          }
-        }
+        ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
       }
     }
 
@@ -885,7 +865,7 @@ export const RiskTutorial: React.FC<RiskTutorialProps> = ({
       ctx.textBaseline = 'middle';
       ctx.fillText('Coming Soon', canvas.width / 2, canvas.height / 2);
     }
-  }, [cells, hasPlaced, showHint, bases, enemyCoins, currentSlideData, slideConfig, spawnAnimation, isAnimating, floatingNumbers, flyingCoins, territoryFlashes, wiperCountdown, targetQuadrant, wiperPhase, wipeFlashTime, fadingTerritory, fadeStartTime]);
+  }, [cells, hasPlaced, showHint, bases, enemyCoins, currentSlideData, slideConfig, spawnAnimation, isAnimating, floatingNumbers, flyingCoins, territoryFlashes, wiperCountdown, targetQuadrant, wiperPhase, wipeFlashTime, fadingTerritory, fadeStartTime, renderTick]);
 
   // Animation cleanup effect - remove expired animations
   useEffect(() => {
@@ -954,6 +934,38 @@ export const RiskTutorial: React.FC<RiskTutorialProps> = ({
     }, 30);
     return () => clearInterval(timer);
   }, [spawnAnimation]);
+
+  // Procedural texture animation loop - continuous update for smooth visuals
+  useEffect(() => {
+    if (!isOpen) return;
+
+    let lastTime = performance.now();
+    let frameCount = 0;
+
+    const animateTextures = (currentTime: number) => {
+      const deltaTime = (currentTime - lastTime) / 1000; // Convert to seconds
+      lastTime = currentTime;
+
+      textureTimeRef.current += deltaTime;
+      frameCount++;
+
+      // Trigger re-render every 2 frames (~30fps) to balance smoothness and performance
+      if (frameCount % 2 === 0) {
+        setRenderTick(prev => prev + 1);
+      }
+
+      textureAnimRef.current = requestAnimationFrame(animateTextures);
+    };
+
+    textureAnimRef.current = requestAnimationFrame(animateTextures);
+
+    return () => {
+      if (textureAnimRef.current) {
+        cancelAnimationFrame(textureAnimRef.current);
+      }
+    };
+  }, [isOpen]);
+
   // Coin economy: Passive income from territory
   useEffect(() => {
     if (currentSlideData?.id !== 'coins-economy') return;
@@ -1218,7 +1230,7 @@ export const RiskTutorial: React.FC<RiskTutorialProps> = ({
     const targetBase = slideConfig.playerBase;
     if (!targetBase) return;
 
-    if (isInterior(cellX, cellY, targetBase.x, targetBase.y)) {
+    if (isInBase(cellX, cellY, targetBase.x, targetBase.y)) {
       setCells(prev => {
         const next = prev.map(row => row.map(cell => ({ ...cell })));
 

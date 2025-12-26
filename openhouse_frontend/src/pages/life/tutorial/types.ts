@@ -69,19 +69,11 @@ export const createEmptyGrid = (): TutorialCell[][] =>
     Array(TUTORIAL_GRID_SIZE).fill(null).map(() => ({ alive: false, owner: 0, territory: 0 }))
   );
 
-// Check if position is base wall
-export const isWall = (x: number, y: number, baseX: number, baseY: number): boolean => {
+// Check if position is inside base (8x8 zone)
+export const isInBase = (x: number, y: number, baseX: number, baseY: number): boolean => {
   const relX = x - baseX;
   const relY = y - baseY;
-  if (relX < 0 || relX >= BASE_SIZE || relY < 0 || relY >= BASE_SIZE) return false;
-  return relX === 0 || relX === BASE_SIZE - 1 || relY === 0 || relY === BASE_SIZE - 1;
-};
-
-// Check if position is inside base interior
-export const isInterior = (x: number, y: number, baseX: number, baseY: number): boolean => {
-  const relX = x - baseX;
-  const relY = y - baseY;
-  return relX >= 1 && relX < BASE_SIZE - 1 && relY >= 1 && relY < BASE_SIZE - 1;
+  return relX >= 0 && relX < BASE_SIZE && relY >= 0 && relY < BASE_SIZE;
 };
 
 // Check if position is in any base zone

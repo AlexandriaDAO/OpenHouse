@@ -182,12 +182,12 @@ export const checkTerritoryConnectivity = (
   const visited = new Set<string>();
   const connected = new Set<string>();
 
-  // BFS from all interior cells of the base
+  // BFS from all cells of the base
   const queue: [number, number][] = [];
 
-  // Start from base interior
-  for (let dy = 1; dy < 7; dy++) {
-    for (let dx = 1; dx < 7; dx++) {
+  // Start from base cells (8x8)
+  for (let dy = 0; dy < 8; dy++) {
+    for (let dx = 0; dx < 8; dx++) {
       const x = baseX + dx;
       const y = baseY + dy;
       if (x >= 0 && x < width && y >= 0 && y < height) {

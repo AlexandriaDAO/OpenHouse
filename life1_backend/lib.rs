@@ -48,12 +48,11 @@ const MAX_PLACE_CELLS: usize = 1000;
 /// Timing
 const GENERATIONS_PER_TICK: u32 = 8;   // 8 gen/sec - matches frontend LOCAL_TICK_MS=125
 const TICK_INTERVAL_MS: u64 = 1000;
-const WIPE_INTERVAL_NS: u64 = 300_000_000_000; // 5 minutes
+const WIPE_INTERVAL_NS: u64 = 120_000_000_000; // 2 minutes
 const GRACE_PERIOD_NS: u64 = 600_000_000_000; // 10 minutes
 
 /// Base dimensions
 const BASE_SIZE: u16 = 8;
-const BASE_INTERIOR: u16 = 6;
 
 // =============================================================================
 // DATA STRUCTURES
@@ -172,6 +171,7 @@ struct PersistedState {
     is_running: bool,
     next_wipe_quadrant: u8,
     last_wipe_ns: u64,
+    owner: Vec<u8>,
 }
 
 // =============================================================================
@@ -241,6 +241,9 @@ thread_local! {
 
     // Warm path - accessed on births, place_cells
     static TERRITORY: RefCell<[PlayerTerritory; MAX_PLAYERS]> = RefCell::new(Default::default());
+
+    // O(1) owner lookup cache - 255 means unowned
+    static OWNER: RefCell<[u8; TOTAL_CELLS]> = RefCell::new([255u8; TOTAL_CELLS]);
 
     // Cold path - rarely accessed
     static PLAYERS: RefCell<[Option<Principal>; MAX_PLAYERS]> = RefCell::new([None; MAX_PLAYERS]);
@@ -330,14 +333,14 @@ fn mark_with_neighbors_potential(cell_idx: usize) {
     // Mark the cell itself
     set_potential_bit(cell_idx);
 
-    // Mark all 8 neighbors (with wrapping)
+    // Mark all 8 neighbors (with wrapping via bitwise AND since grid is 512)
     for dy in [-1i16, 0, 1] {
         for dx in [-1i16, 0, 1] {
             if dx == 0 && dy == 0 {
                 continue;
             }
-            let nx = ((x as i16 + dx).rem_euclid(GRID_SIZE as i16)) as u16;
-            let ny = ((y as i16 + dy).rem_euclid(GRID_SIZE as i16)) as u16;
+            let nx = x.wrapping_add(dx as u16) & 511;
+            let ny = y.wrapping_add(dy as u16) & 511;
             set_potential_bit(coords_to_idx(nx, ny));
         }
     }
@@ -346,14 +349,14 @@ fn mark_with_neighbors_potential(cell_idx: usize) {
 fn mark_neighbors_potential(cell_idx: usize) {
     let (x, y) = idx_to_coords(cell_idx);
 
-    // Mark all 8 neighbors (with wrapping)
+    // Mark all 8 neighbors (with wrapping via bitwise AND since grid is 512)
     for dy in [-1i16, 0, 1] {
         for dx in [-1i16, 0, 1] {
             if dx == 0 && dy == 0 {
                 continue;
             }
-            let nx = ((x as i16 + dx).rem_euclid(GRID_SIZE as i16)) as u16;
-            let ny = ((y as i16 + dy).rem_euclid(GRID_SIZE as i16)) as u16;
+            let nx = x.wrapping_add(dx as u16) & 511;
+            let ny = y.wrapping_add(dy as u16) & 511;
             set_potential_bit(coords_to_idx(nx, ny));
         }
     }
@@ -439,18 +442,6 @@ fn is_in_base(base: &Base, x: u16, y: u16) -> bool {
     dx < BASE_SIZE && dy < BASE_SIZE
 }
 
-fn is_wall(base: &Base, x: u16, y: u16) -> bool {
-    let dx = x.wrapping_sub(base.x) & 511;
-    let dy = y.wrapping_sub(base.y) & 511;
-    dx < BASE_SIZE && dy < BASE_SIZE && (dx == 0 || dx == BASE_SIZE - 1 || dy == 0 || dy == BASE_SIZE - 1)
-}
-
-fn is_interior(base: &Base, x: u16, y: u16) -> bool {
-    let dx = x.wrapping_sub(base.x) & 511;
-    let dy = y.wrapping_sub(base.y) & 511;
-    dx >= 1 && dx <= BASE_INTERIOR && dy >= 1 && dy <= BASE_INTERIOR
-}
-
 /// Check if position is in any player's protection zone
 /// Returns (base_owner_slot, is_same_owner)
 fn in_protection_zone(x: u16, y: u16) -> Option<usize> {
@@ -515,12 +506,12 @@ fn player_owns(player: usize, x: u16, y: u16) -> bool {
 }
 
 fn find_owner(x: u16, y: u16) -> Option<usize> {
-    for player in 0..MAX_PLAYERS {
-        if player_owns(player, x, y) {
-            return Some(player);
-        }
-    }
-    None
+    benchmark!(FindOwner);
+    let idx = coords_to_idx(x, y);
+    OWNER.with(|o| {
+        let owner = o.borrow()[idx];
+        if owner == 255 { None } else { Some(owner as usize) }
+    })
 }
 
 fn set_territory(player: usize, x: u16, y: u16) {
@@ -545,7 +536,13 @@ fn set_territory(player: usize, x: u16, y: u16) {
         let local_x = (x & 63) as usize;
         let local_y = (y & 63) as usize;
         pt.chunks[vec_idx][local_y] |= 1u64 << local_x;
-    })
+    });
+
+    // Update OWNER cache
+    OWNER.with(|o| {
+        let idx = coords_to_idx(x, y);
+        o.borrow_mut()[idx] = player as u8;
+    });
 }
 
 fn clear_territory(player: usize, x: u16, y: u16) {
@@ -576,7 +573,13 @@ fn clear_territory(player: usize, x: u16, y: u16) {
             pt.chunks.remove(vec_idx);
             pt.chunk_mask &= !(1u64 << chunk_idx);
         }
-    })
+    });
+
+    // Update OWNER cache
+    OWNER.with(|o| {
+        let idx = coords_to_idx(x, y);
+        o.borrow_mut()[idx] = 255;
+    });
 }
 
 fn count_territory_cells(player: usize) -> u32 {
@@ -600,16 +603,34 @@ fn count_territory_cells(player: usize) -> u32 {
 fn step_generation() {
     benchmark!(StepGeneration);
 
-    // Phase 1: Compute fates (read-only pass)
-    let (births, deaths, survivors) = {
-        benchmark!(ComputeFates);
-        compute_fates()
+    // Phase 0: Allocate vectors (measured separately)
+    let (mut births, mut deaths, mut survivors) = {
+        benchmark!(VecAllocation);
+        (
+            Vec::<(usize, usize)>::with_capacity(500),
+            Vec::<usize>::with_capacity(500),
+            Vec::<usize>::with_capacity(15000),
+        )
     };
+
+    // Phase 1: Compute fates (read-only pass)
+    {
+        benchmark!(ComputeFates);
+        compute_fates_into(&mut births, &mut deaths, &mut survivors);
+    }
 
     // Phase 2: Apply changes
     {
         benchmark!(ApplyChanges);
-        apply_changes(births, deaths, survivors);
+        apply_changes(&births, &deaths, &survivors);
+    }
+
+    // Phase 3: Deallocate vectors (measured separately)
+    {
+        benchmark!(VecDeallocation);
+        drop(births);
+        drop(deaths);
+        drop(survivors);
     }
 
     // Increment generation
@@ -618,10 +639,15 @@ fn step_generation() {
     });
 }
 
-fn compute_fates() -> (Vec<(usize, usize)>, Vec<usize>, Vec<usize>) {
-    let mut births: Vec<(usize, usize)> = Vec::with_capacity(500);
-    let mut deaths: Vec<usize> = Vec::with_capacity(500);
-    let mut survivors: Vec<usize> = Vec::with_capacity(15000);
+fn compute_fates_into(
+    births: &mut Vec<(usize, usize)>,
+    deaths: &mut Vec<usize>,
+    survivors: &mut Vec<usize>,
+) {
+    // Clear vectors (keeps capacity, O(1))
+    births.clear();
+    deaths.clear();
+    survivors.clear();
 
     POTENTIAL.with(|potential| {
         ALIVE.with(|alive| {
@@ -674,22 +700,48 @@ fn compute_fates() -> (Vec<(usize, usize)>, Vec<usize>, Vec<usize>) {
             }
         })
     });
-
-    (births, deaths, survivors)
 }
 
-fn compute_cell_fate(
+/// Count neighbors using popcount (WASM i64.popcnt instruction)
+/// This is the fast path for ~98% of cells (non-births)
+#[inline(always)]
+fn count_neighbors_popcount(
     bit_pos: usize,
     above: u64, same: u64, below: u64,
     left_above: u64, left_same: u64, left_below: u64,
     right_above: u64, right_same: u64, right_below: u64,
-    cell_idx: usize,
-) -> CellFate {
-    let currently_alive = (same >> bit_pos) & 1 == 1;
+) -> u8 {
+    if bit_pos == 0 {
+        // Left edge: combine bits from left_* words and main words
+        let above_bits = ((left_above >> 63) & 1) | ((above & 0b11) << 1);
+        let same_bits = ((left_same >> 63) & 1) | (((same >> 1) & 1) << 2);
+        let below_bits = ((left_below >> 63) & 1) | ((below & 0b11) << 1);
+        (above_bits.count_ones() + same_bits.count_ones() + below_bits.count_ones()) as u8
+    } else if bit_pos == 63 {
+        // Right edge: combine bits from main words and right_* words
+        let above_bits = ((above >> 62) & 0b11) | ((right_above & 1) << 2);
+        let same_bits = ((same >> 62) & 1) | ((right_same & 1) << 2);
+        let below_bits = ((below >> 62) & 0b11) | ((right_below & 1) << 2);
+        (above_bits.count_ones() + same_bits.count_ones() + below_bits.count_ones()) as u8
+    } else {
+        // Interior: all neighbors in the 3 main words (~97% of cells)
+        let shift = bit_pos - 1;
+        let above_3 = (above >> shift) & 0b111;  // 3 bits from above row
+        let below_3 = (below >> shift) & 0b111;  // 3 bits from below row
+        let same_2 = (same >> shift) & 0b101;    // 2 bits from same row (exclude center)
+        (above_3.count_ones() + same_2.count_ones() + below_3.count_ones()) as u8
+    }
+}
 
-    // Count alive neighbors using bit extraction
-    let (nw, n, ne, w, e, sw, s, se) = if bit_pos == 0 {
-        // Left neighbors come from left_* words (bit 63)
+/// Extract individual neighbor bits (needed only for births to determine ownership)
+#[inline(always)]
+fn extract_neighbor_bits(
+    bit_pos: usize,
+    above: u64, same: u64, below: u64,
+    left_above: u64, left_same: u64, left_below: u64,
+    right_above: u64, right_same: u64, right_below: u64,
+) -> (u8, u8, u8, u8, u8, u8, u8, u8) {
+    if bit_pos == 0 {
         (
             ((left_above >> 63) & 1) as u8,
             ((above >> 0) & 1) as u8,
@@ -701,7 +753,6 @@ fn compute_cell_fate(
             ((below >> 1) & 1) as u8,
         )
     } else if bit_pos == 63 {
-        // Right neighbors come from right_* words (bit 0)
         (
             ((above >> 62) & 1) as u8,
             ((above >> 63) & 1) as u8,
@@ -713,7 +764,6 @@ fn compute_cell_fate(
             ((right_below >> 0) & 1) as u8,
         )
     } else {
-        // Interior cell - all neighbors in main 3 words
         (
             ((above >> (bit_pos - 1)) & 1) as u8,
             ((above >> bit_pos) & 1) as u8,
@@ -724,14 +774,35 @@ fn compute_cell_fate(
             ((below >> bit_pos) & 1) as u8,
             ((below >> (bit_pos + 1)) & 1) as u8,
         )
-    };
+    }
+}
 
-    let alive_count = nw + n + ne + w + e + sw + s + se;
+fn compute_cell_fate(
+    bit_pos: usize,
+    above: u64, same: u64, below: u64,
+    left_above: u64, left_same: u64, left_below: u64,
+    right_above: u64, right_same: u64, right_below: u64,
+    cell_idx: usize,
+) -> CellFate {
+    let currently_alive = (same >> bit_pos) & 1 == 1;
+
+    // Fast path: use popcount for neighbor count (~11 WASM instructions vs ~24)
+    let alive_count = count_neighbors_popcount(
+        bit_pos, above, same, below,
+        left_above, left_same, left_below,
+        right_above, right_same, right_below,
+    );
 
     match (currently_alive, alive_count) {
         (true, 2) | (true, 3) => CellFate::Survives,
         (false, 3) => {
-            // Birth - find majority owner among 3 parents
+            // Birth: need individual bits for ownership determination
+            // This is the slow path, but births are ~2% of processed cells
+            let (nw, n, ne, w, e, sw, s, se) = extract_neighbor_bits(
+                bit_pos, above, same, below,
+                left_above, left_same, left_below,
+                right_above, right_same, right_below,
+            );
             let (x, y) = idx_to_coords(cell_idx);
             let owner = find_birth_owner(x, y, nw, n, ne, w, e, sw, s, se, cell_idx);
             CellFate::Birth(owner)
@@ -805,7 +876,7 @@ fn find_birth_owner(
     }
 }
 
-fn apply_changes(births: Vec<(usize, usize)>, deaths: Vec<usize>, survivors: Vec<usize>) {
+fn apply_changes(births: &[(usize, usize)], deaths: &[usize], survivors: &[usize]) {
     // Clear NEXT_POTENTIAL
     NEXT_POTENTIAL.with(|np| {
         np.borrow_mut().fill(0);
@@ -815,7 +886,7 @@ fn apply_changes(births: Vec<(usize, usize)>, deaths: Vec<usize>, survivors: Vec
     let mut territory_changes = TerritoryChanges::new();
 
     // Apply deaths
-    for cell_idx in deaths {
+    for &cell_idx in deaths {
         let (x, y) = idx_to_coords(cell_idx);
 
         // Find owner to decrement cell count
@@ -845,11 +916,15 @@ fn apply_changes(births: Vec<(usize, usize)>, deaths: Vec<usize>, survivors: Vec
     }
 
     // Apply births
-    for (cell_idx, new_owner) in births {
+    for &(cell_idx, new_owner) in births {
         let (x, y) = idx_to_coords(cell_idx);
 
-        // Check protection zone (siege mechanic)
-        if let Some(base_owner) = in_protection_zone(x, y) {
+        // Check protection zone (siege mechanic) - benchmarked
+        let base_owner_opt = {
+            benchmark!(ProtectionZoneCheck);
+            in_protection_zone(x, y)
+        };
+        if let Some(base_owner) = base_owner_opt {
             if base_owner != new_owner {
                 // SIEGE! Birth prevented, transfer 1 coin
                 let mut eliminated = false;
@@ -914,7 +989,7 @@ fn apply_changes(births: Vec<(usize, usize)>, deaths: Vec<usize>, survivors: Vec
     }
 
     // Apply survivors (just mark in NEXT_POTENTIAL)
-    for cell_idx in survivors {
+    for &cell_idx in survivors {
         mark_with_neighbors_potential(cell_idx);
     }
 
@@ -961,8 +1036,8 @@ fn check_all_disconnections(changes: &TerritoryChanges) {
             continue;
         };
 
-        // Check if all affected are in base interior (always connected)
-        if all_in_base_interior(&all_affected, &base) {
+        // Check if all affected are in base (always connected)
+        if all_in_base(&all_affected, &base) {
             continue;
         }
 
@@ -981,8 +1056,8 @@ fn check_all_disconnections(changes: &TerritoryChanges) {
     }
 }
 
-fn all_in_base_interior(affected: &[(u16, u16)], base: &Base) -> bool {
-    affected.iter().all(|&(x, y)| is_interior(base, x, y))
+fn all_in_base(affected: &[(u16, u16)], base: &Base) -> bool {
+    affected.iter().all(|&(x, y)| is_in_base(base, x, y))
 }
 
 fn bfs_find_unreached(
@@ -991,9 +1066,17 @@ fn bfs_find_unreached(
     base: &Base,
     affected: &[(u16, u16)],
 ) -> Vec<(u16, u16)> {
-    // Seed BFS with base interior cells
-    for dy in 1..7u16 {
-        for dx in 1..7u16 {
+    // Build O(1) lookup map for affected cells: coords -> index
+    let affected_map: HashMap<(u16, u16), usize> = affected
+        .iter()
+        .enumerate()
+        .take(64)
+        .map(|(i, &coords)| (coords, i))
+        .collect();
+
+    // Seed BFS with base cells
+    for dy in 0..BASE_SIZE {
+        for dx in 0..BASE_SIZE {
             let x = base.x.wrapping_add(dx) & 511;
             let y = base.y.wrapping_add(dy) & 511;
 
@@ -1017,9 +1100,9 @@ fn bfs_find_unreached(
         let x = (cell_idx & 511) as u16;
         let y = (cell_idx >> 9) as u16;
 
-        // Check if this is one of our affected neighbors
-        for (i, &(ax, ay)) in affected.iter().enumerate().take(64) {
-            if !affected_found[i] && x == ax && y == ay {
+        // O(1) lookup instead of linear search
+        if let Some(&i) = affected_map.get(&(x, y)) {
+            if !affected_found[i] {
                 affected_found[i] = true;
                 found_count += 1;
 
@@ -1123,7 +1206,8 @@ fn apply_disconnection(player: usize, disconnected: &[(u16, u16)]) {
 // =============================================================================
 
 fn eliminate_player(player: usize) {
-    // 1. Kill ALL player's alive cells (iterate via territory bitmap)
+    // 1. Kill ALL player's alive cells AND clear OWNER entries
+    //    (iterate via territory bitmap, do both in single pass)
     TERRITORY.with(|territory| {
         let territory = territory.borrow();
         let pt = &territory[player];
@@ -1149,10 +1233,16 @@ fn eliminate_player(player: usize) {
                     let y = (chunk_base_y + local_y) as u16;
                     let idx = coords_to_idx(x, y);
 
+                    // Kill cell if alive
                     if is_alive_idx(idx) {
                         clear_alive_idx(idx);
                         mark_neighbors_potential(idx);
                     }
+
+                    // Clear OWNER entry (MUST happen before territory reset)
+                    OWNER.with(|o| {
+                        o.borrow_mut()[idx] = 255;
+                    });
                 }
             }
 
@@ -1160,7 +1250,7 @@ fn eliminate_player(player: usize) {
         }
     });
 
-    // 2. Clear territory completely
+    // 2. Clear territory completely (OWNER already cleared above)
     TERRITORY.with(|territory| {
         territory.borrow_mut()[player] = PlayerTerritory::default();
     });
@@ -1507,13 +1597,9 @@ fn place_cells(cells: Vec<(i32, i32)>) -> Result<u32, String> {
         let x = x as u16;
         let y = y as u16;
 
-        if is_wall(&base, x, y) {
-            return Err("Cannot place on walls".to_string());
-        }
-
-        // Base interior is ALWAYS the owner's territory - no bitmap check needed
+        // Base (including walls) is ALWAYS the owner's territory - no bitmap check needed
         // For positions outside base, must own the territory
-        if !is_interior(&base, x, y) && !player_owns(slot, x, y) {
+        if !is_in_base(&base, x, y) && !player_owns(slot, x, y) {
             return Err("Not your territory".to_string());
         }
 
@@ -1827,6 +1913,7 @@ fn pre_upgrade() {
         is_running: IS_RUNNING.with(|r| *r.borrow()),
         next_wipe_quadrant: NEXT_WIPE_QUADRANT.with(|q| *q.borrow()),
         last_wipe_ns: LAST_WIPE_NS.with(|lw| *lw.borrow()),
+        owner: OWNER.with(|o| o.borrow().to_vec()),
     };
 
     ic_cdk::storage::stable_save((state,)).expect("Failed to save state");
@@ -1888,6 +1975,14 @@ fn post_upgrade() {
     NEXT_WIPE_QUADRANT.with(|q| *q.borrow_mut() = state.next_wipe_quadrant);
     LAST_WIPE_NS.with(|lw| *lw.borrow_mut() = state.last_wipe_ns);
 
+    // Restore OWNER cache
+    OWNER.with(|o| {
+        let mut owner = o.borrow_mut();
+        for (i, &v) in state.owner.iter().enumerate().take(TOTAL_CELLS) {
+            owner[i] = v;
+        }
+    });
+
     // Rebuild transient structures
     rebuild_potential_from_alive();
     BFS_WORKSPACE.with(|ws| {
@@ -1906,6 +2001,162 @@ fn init() {
     // Rebuild POTENTIAL in case there are any alive cells (shouldn't be on fresh init, but be safe)
     rebuild_potential_from_alive();
     start_timer();
+}
+
+// =============================================================================
+// TESTS
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Reference implementation using individual bit extraction (the old approach)
+    fn count_neighbors_reference(
+        bit_pos: usize,
+        above: u64, same: u64, below: u64,
+        left_above: u64, left_same: u64, left_below: u64,
+        right_above: u64, right_same: u64, right_below: u64,
+    ) -> u8 {
+        let (nw, n, ne, w, e, sw, s, se) = if bit_pos == 0 {
+            (
+                ((left_above >> 63) & 1) as u8,
+                ((above >> 0) & 1) as u8,
+                ((above >> 1) & 1) as u8,
+                ((left_same >> 63) & 1) as u8,
+                ((same >> 1) & 1) as u8,
+                ((left_below >> 63) & 1) as u8,
+                ((below >> 0) & 1) as u8,
+                ((below >> 1) & 1) as u8,
+            )
+        } else if bit_pos == 63 {
+            (
+                ((above >> 62) & 1) as u8,
+                ((above >> 63) & 1) as u8,
+                ((right_above >> 0) & 1) as u8,
+                ((same >> 62) & 1) as u8,
+                ((right_same >> 0) & 1) as u8,
+                ((below >> 62) & 1) as u8,
+                ((below >> 63) & 1) as u8,
+                ((right_below >> 0) & 1) as u8,
+            )
+        } else {
+            (
+                ((above >> (bit_pos - 1)) & 1) as u8,
+                ((above >> bit_pos) & 1) as u8,
+                ((above >> (bit_pos + 1)) & 1) as u8,
+                ((same >> (bit_pos - 1)) & 1) as u8,
+                ((same >> (bit_pos + 1)) & 1) as u8,
+                ((below >> (bit_pos - 1)) & 1) as u8,
+                ((below >> bit_pos) & 1) as u8,
+                ((below >> (bit_pos + 1)) & 1) as u8,
+            )
+        };
+        nw + n + ne + w + e + sw + s + se
+    }
+
+    #[test]
+    fn test_popcount_matches_reference_all_positions() {
+        let patterns: [u64; 8] = [
+            0u64, !0u64, 0xAAAAAAAAAAAAAAAA, 0x5555555555555555,
+            0xFF00FF00FF00FF00, 0x00FF00FF00FF00FF,
+            0x8000000000000001, 0x7FFFFFFFFFFFFFFE,
+        ];
+
+        for bit_pos in 0..64 {
+            for &above in &patterns {
+                for &same in &patterns {
+                    for &below in &patterns {
+                        let left_above = above.rotate_left(1);
+                        let left_same = same.rotate_left(1);
+                        let left_below = below.rotate_left(1);
+                        let right_above = above.rotate_right(1);
+                        let right_same = same.rotate_right(1);
+                        let right_below = below.rotate_right(1);
+
+                        let reference = count_neighbors_reference(
+                            bit_pos, above, same, below,
+                            left_above, left_same, left_below,
+                            right_above, right_same, right_below,
+                        );
+                        let popcount = count_neighbors_popcount(
+                            bit_pos, above, same, below,
+                            left_above, left_same, left_below,
+                            right_above, right_same, right_below,
+                        );
+
+                        assert_eq!(reference, popcount,
+                            "Mismatch at bit_pos={}, above={:#x}", bit_pos, above);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_popcount_edge_bit0() {
+        let above = 0b111u64;   // N(bit0), NE(bit1) set
+        let same = 0b010u64;    // E(bit1) set
+        let below = 0b111u64;   // S(bit0), SE(bit1) set
+        let left_above = 1u64 << 63;  // NW neighbor
+        let left_same = 1u64 << 63;   // W neighbor
+        let left_below = 1u64 << 63;  // SW neighbor
+
+        let count = count_neighbors_popcount(0, above, same, below, left_above, left_same, left_below, 0, 0, 0);
+        // NW(1) + N(1) + NE(1) + W(1) + E(1) + SW(1) + S(1) + SE(1) = 8
+        assert_eq!(count, 8);
+    }
+
+    #[test]
+    fn test_popcount_edge_bit63() {
+        let above = 0b11u64 << 62;
+        let below = 0b11u64 << 62;
+        let right_above = 1u64;
+        let right_same = 1u64;
+        let right_below = 1u64;
+
+        let count = count_neighbors_popcount(63, above, 0, below, 0, 0, 0, right_above, right_same, right_below);
+        assert_eq!(count, 7);
+    }
+
+    #[test]
+    fn test_popcount_interior() {
+        let above = 0b111u64 << 31;
+        let same = 0b101u64 << 31;
+        let below = 0b111u64 << 31;
+
+        let count = count_neighbors_popcount(32, above, same, below, 0, 0, 0, 0, 0, 0);
+        assert_eq!(count, 8);
+    }
+
+    #[test]
+    fn test_extract_matches_popcount() {
+        for bit_pos in [0, 1, 31, 32, 62, 63] {
+            let above = 0xAAAAAAAAAAAAAAAAu64;
+            let same = 0x5555555555555555u64;
+            let below = 0xFFFFFFFFFFFFFFFFu64;
+            let left_above = above.rotate_left(1);
+            let left_same = same.rotate_left(1);
+            let left_below = below.rotate_left(1);
+            let right_above = above.rotate_right(1);
+            let right_same = same.rotate_right(1);
+            let right_below = below.rotate_right(1);
+
+            let (nw, n, ne, w, e, sw, s, se) = extract_neighbor_bits(
+                bit_pos, above, same, below,
+                left_above, left_same, left_below,
+                right_above, right_same, right_below,
+            );
+            let sum = nw + n + ne + w + e + sw + s + se;
+            let popcount = count_neighbors_popcount(
+                bit_pos, above, same, below,
+                left_above, left_same, left_below,
+                right_above, right_same, right_below,
+            );
+
+            assert_eq!(sum, popcount, "Mismatch at bit_pos={}", bit_pos);
+        }
+    }
 }
 
 // =============================================================================

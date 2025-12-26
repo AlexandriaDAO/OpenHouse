@@ -93,6 +93,14 @@ pub struct BenchmarkData {
     pub join_game: OperationStats,
     /// Get state query
     pub get_state: OperationStats,
+    /// Vec allocation cost (births, deaths, survivors vectors)
+    pub vec_allocation: OperationStats,
+    /// Vec deallocation cost (dropping the vectors)
+    pub vec_deallocation: OperationStats,
+    /// find_owner calls (O(8) player scan)
+    pub find_owner: OperationStats,
+    /// in_protection_zone calls (O(8) base scan for siege check)
+    pub protection_zone_check: OperationStats,
     /// Timestamp of last reset
     pub last_reset_ns: u64,
     /// Total time tracked (nanoseconds)
@@ -112,6 +120,10 @@ impl BenchmarkData {
             place_cells: OperationStats::new(),
             join_game: OperationStats::new(),
             get_state: OperationStats::new(),
+            vec_allocation: OperationStats::new(),
+            vec_deallocation: OperationStats::new(),
+            find_owner: OperationStats::new(),
+            protection_zone_check: OperationStats::new(),
             last_reset_ns: 0,
             tracking_duration_ns: 0,
         }
@@ -196,6 +208,10 @@ pub enum BenchmarkOperation {
     PlaceCells,
     JoinGame,
     GetState,
+    VecAllocation,
+    VecDeallocation,
+    FindOwner,
+    ProtectionZoneCheck,
 }
 
 impl BenchmarkGuard {
@@ -223,6 +239,10 @@ impl Drop for BenchmarkGuard {
                 BenchmarkOperation::PlaceCells => b.place_cells.record(elapsed),
                 BenchmarkOperation::JoinGame => b.join_game.record(elapsed),
                 BenchmarkOperation::GetState => b.get_state.record(elapsed),
+                BenchmarkOperation::VecAllocation => b.vec_allocation.record(elapsed),
+                BenchmarkOperation::VecDeallocation => b.vec_deallocation.record(elapsed),
+                BenchmarkOperation::FindOwner => b.find_owner.record(elapsed),
+                BenchmarkOperation::ProtectionZoneCheck => b.protection_zone_check.record(elapsed),
             }
         });
     }

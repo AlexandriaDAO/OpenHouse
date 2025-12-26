@@ -26,21 +26,21 @@ import {
   DEAD_COLOR,
   PLAYER_COLORS,
   TERRITORY_COLORS,
+  REGIONS,
+  getRegion,
   CATEGORY_INFO,
   PATTERNS,
   getPatternByName,
   getQuadrant,
   BASE_SIZE,
-  BASE_WALL_COLOR,
   BASE_COST,
-  isBaseWall,
-  isBaseInterior,
   isInBaseZone,
   type ViewMode,
   type PatternCategory,
   type PatternInfo,
   type PendingPlacement,
   type RiskServer,
+  type RegionInfo,
 } from './lifeConstants';
 
 // Import utility functions from separate file
@@ -48,6 +48,9 @@ import {
   parseRLE,
   rotatePattern,
 } from './lifeUtils';
+
+// Import cell texture system
+import { getRegionTexture, getRegionPattern, preloadPatterns, clearPatternCache } from './life/cellTextures';
 
 // Import tutorial component
 import { RiskTutorial } from './life/tutorial';
@@ -73,8 +76,18 @@ interface CoinParticle {
   rotationSpeed: number;
 }
 
-// Local Risk simulation - mirrors backend rules exactly
-const stepLocalGeneration = (cells: Cell[]): Cell[] => {
+// Check if position is in a base's 8x8 protection zone
+const findProtectionZoneOwner = (x: number, y: number, bases: Map<number, BaseInfo>): number | null => {
+  for (const [playerNum, base] of bases) {
+    if (isInBaseZone(x, y, base.x, base.y)) {
+      return playerNum;
+    }
+  }
+  return null;
+};
+
+// Local Risk simulation - mirrors backend rules exactly (including siege mechanic)
+const stepLocalGeneration = (cells: Cell[], bases: Map<number, BaseInfo>): Cell[] => {
   // Guard against empty cells array (can happen during server switch)
   if (cells.length === 0) return cells;
 
@@ -128,6 +141,14 @@ const stepLocalGeneration = (cells: Cell[]): Cell[] => {
             }
           }
           newOwner = majorityOwner;
+
+          // SIEGE MECHANIC: Check if birth is blocked by enemy base protection zone
+          const protectionOwner = findProtectionZoneOwner(col, row, bases);
+          if (protectionOwner !== null && protectionOwner !== newOwner) {
+            // Birth blocked - enemy base's protection zone prevents birth
+            newAlive = false;
+            newOwner = current.owner; // Preserve existing owner/territory
+          }
         }
       }
 
@@ -140,6 +161,41 @@ const stepLocalGeneration = (cells: Cell[]): Cell[] => {
   }
 
   return newCells;
+};
+
+// Textured cell preview component for region selection
+const TexturedCellPreview: React.FC<{ regionId: number; size?: number; className?: string }> = ({
+  regionId,
+  size = 64,
+  className = ''
+}) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Set canvas size with device pixel ratio for crisp rendering
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = size * dpr;
+    canvas.height = size * dpr;
+    ctx.scale(dpr, dpr);
+
+    // Get the pre-generated texture and draw it
+    const textureCanvas = getRegionTexture(regionId, size);
+    ctx.drawImage(textureCanvas, 0, 0, size, size);
+  }, [regionId, size]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className={`rounded-lg ${className}`}
+      style={{ width: size, height: size }}
+    />
+  );
 };
 
 export const Risk: React.FC = () => {
@@ -173,13 +229,16 @@ export const Risk: React.FC = () => {
   const [selectedServer, setSelectedServer] = useState<RiskServer>(
     RISK_SERVERS.find(s => s.id === DEFAULT_SERVER_ID) || RISK_SERVERS[0]
   );
+  const [activeServers, setActiveServers] = useState<Record<string, boolean>>({});
 
   // Actor state (created when authenticated)
   const [actor, setActor] = useState<ActorSubclass<_SERVICE> | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Slot selection state
+  // Region and slot selection state
+  const [showRegionSelection, setShowRegionSelection] = useState(false);
+  const [selectedRegion, setSelectedRegion] = useState<RegionInfo | null>(null);
   const [showSlotSelection, setShowSlotSelection] = useState(false);
   const [slotsInfo, setSlotsInfo] = useState<SlotInfo[]>([]);
   const [isJoiningSlot, setIsJoiningSlot] = useState(false);
@@ -247,6 +306,7 @@ export const Risk: React.FC = () => {
   const localGenerationRef = useRef<bigint>(0n);
   const lastSyncedGenerationRef = useRef<bigint>(0n);
   const lastSyncTimeRef = useRef<number>(0);
+  const basesRef = useRef<Map<number, BaseInfo>>(new Map());
 
   // Query latency tracking
   const queryLatencyStats = useRef<{ samples: number[] }>({ samples: [] });
@@ -257,6 +317,7 @@ export const Risk: React.FC = () => {
   useEffect(() => { localGenerationRef.current = localGeneration; }, [localGeneration]);
   useEffect(() => { lastSyncedGenerationRef.current = lastSyncedGeneration; }, [lastSyncedGeneration]);
   useEffect(() => { lastSyncTimeRef.current = lastSyncTime; }, [lastSyncTime]);
+  useEffect(() => { basesRef.current = bases; }, [bases]);
 
   // Sidebar collapsed state with localStorage persistence
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -492,7 +553,7 @@ export const Risk: React.FC = () => {
           joinedAtGeneration.current = null; // Unknown - joined in previous session
           initialWalletRef.current = Number(balance);
         } else {
-          setShowSlotSelection(true);
+          setShowRegionSelection(true);  // Show region selection first
           // Reset elimination tracking refs
           hadBaseRef.current = false;
           joinedAtGeneration.current = null;
@@ -501,7 +562,7 @@ export const Risk: React.FC = () => {
       } catch (err) {
         console.error('Failed to setup actor:', err);
         setError(`Failed to connect: ${err}`);
-        setShowSlotSelection(true);
+        setShowRegionSelection(true);  // Show region selection on error
       } finally {
         setIsLoading(false);
       }
@@ -509,6 +570,33 @@ export const Risk: React.FC = () => {
 
     setupActor();
   }, [isAuthenticated, identity, selectedServer, principal]);
+
+  // Check all servers for player activity (for server selection UI)
+  useEffect(() => {
+    if (!isAuthenticated || !identity || !principal) return;
+
+    const checkServers = async () => {
+      const agent = new HttpAgent({ identity, host: 'https://icp-api.io' });
+      const results: Record<string, boolean> = {};
+
+      await Promise.all(RISK_SERVERS.map(async (server) => {
+        try {
+          const tempActor = Actor.createActor<_SERVICE>(idlFactory, { agent, canisterId: server.canisterId });
+          const slots = await tempActor.get_slots_info();
+          const isActive = slots.some(slot =>
+            slot.length > 0 && slot[0].principal.length > 0 && slot[0].principal[0].toText() === principal
+          );
+          results[server.id] = isActive;
+        } catch {
+          results[server.id] = false;
+        }
+      }));
+
+      setActiveServers(results);
+    };
+
+    checkServers();
+  }, [isAuthenticated, identity, principal]);
 
   // Refresh slot info
   const refreshSlotsInfo = async () => {
@@ -591,10 +679,10 @@ export const Risk: React.FC = () => {
     return dense;
   }, []);
 
-  // Canvas sizing - re-run when slot selection closes (canvas mounts)
+  // Canvas sizing - re-run when region/slot selection closes (canvas mounts)
   // Uses polling to handle race condition where refs aren't attached yet
   useEffect(() => {
-    if (!isAuthenticated || showSlotSelection) return;
+    if (!isAuthenticated || showRegionSelection || showSlotSelection) return;
 
     // CRITICAL: Reset canvasSizeRef to force fresh calculation
     // This prevents stale dimensions from causing "zoomed in" rendering
@@ -656,7 +744,7 @@ export const Risk: React.FC = () => {
       observer?.disconnect();
       if (retryTimeout) clearTimeout(retryTimeout);
     };
-  }, [isAuthenticated, showSlotSelection]);
+  }, [isAuthenticated, showRegionSelection, showSlotSelection]);
 
   // Backend sync - fetch authoritative state every 5 seconds
   useEffect(() => {
@@ -837,7 +925,7 @@ export const Risk: React.FC = () => {
     if (!ENABLE_LOCAL_SIM || !isRunning || localCells.length === 0) return;
 
     const localTick = setInterval(() => {
-      setLocalCells(cells => stepLocalGeneration(cells));
+      setLocalCells(cells => stepLocalGeneration(cells, basesRef.current));
       setLocalGeneration(g => g + 1n);  // Track generation for sync verification
     }, LOCAL_TICK_MS);
 
@@ -867,50 +955,6 @@ export const Risk: React.FC = () => {
         if (cell && cell.owner > 0) {
           ctx.fillStyle = TERRITORY_COLORS[cell.owner] || 'rgba(255,255,255,0.1)';
           ctx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
-        }
-      }
-    }
-
-    // Draw base walls for all players (fortress perimeter)
-    for (const [playerNum, baseInfo] of bases) {
-      const playerColor = PLAYER_COLORS[playerNum] || '#FFFFFF';
-
-      // Draw 8x8 base walls
-      for (let dy = 0; dy < BASE_SIZE; dy++) {
-        for (let dx = 0; dx < BASE_SIZE; dx++) {
-          // Only wall positions (perimeter)
-          if (dx !== 0 && dx !== BASE_SIZE - 1 && dy !== 0 && dy !== BASE_SIZE - 1) continue;
-
-          const gridCol = baseInfo.x + dx;
-          const gridRow = baseInfo.y + dy;
-
-          // Check if in view
-          const localCol = gridCol - startX;
-          const localRow = gridRow - startY;
-          if (localCol < 0 || localCol >= width || localRow < 0 || localRow >= height) continue;
-
-          const x = localCol * cellSize;
-          const y = localRow * cellSize;
-
-          // Draw fortress wall with gradient for 3D effect
-          if (cellSize > 3) {
-            const gradient = ctx.createLinearGradient(x, y, x, y + cellSize);
-            gradient.addColorStop(0, '#6B6B6B');
-            gradient.addColorStop(0.3, '#5A5A5A');
-            gradient.addColorStop(0.7, '#4A4A4A');
-            gradient.addColorStop(1, '#3A3A3A');
-            ctx.fillStyle = gradient;
-          } else {
-            ctx.fillStyle = BASE_WALL_COLOR;
-          }
-          ctx.fillRect(x, y, cellSize - gap, cellSize - gap);
-
-          // Add player color border to walls
-          ctx.strokeStyle = playerColor;
-          ctx.globalAlpha = 0.6;
-          ctx.lineWidth = 1;
-          ctx.strokeRect(x + 0.5, y + 0.5, cellSize - gap - 1, cellSize - gap - 1);
-          ctx.globalAlpha = 1;
         }
       }
     }
@@ -1141,13 +1185,12 @@ export const Risk: React.FC = () => {
         const existingCell = cells[idx];
         const cellKey = `${gridCol},${gridRow}`;
 
-        // v2 conflict checking: own territory only, not on walls
+        // v2 conflict checking: own territory only
         const hasAliveConflict = existingCell && existingCell.alive;
         const hasDuplicateConflict = (cellCounts.get(cellKey) || 0) > 1;
-        const hasWallConflict = myBase && isBaseWall(gridCol, gridRow, myBase.x, myBase.y);
         const hasNeutralConflict = !existingCell || existingCell.owner === 0;
         const hasEnemyConflict = existingCell && existingCell.owner !== 0 && existingCell.owner !== myPlayerNum;
-        const hasConflict = hasAliveConflict || hasDuplicateConflict || hasWallConflict || hasNeutralConflict || hasEnemyConflict;
+        const hasConflict = hasAliveConflict || hasDuplicateConflict || hasNeutralConflict || hasEnemyConflict;
 
         if (hasConflict) {
           ctx.fillStyle = `rgba(255, 60, 60, ${pulseAlpha})`;
@@ -1217,14 +1260,14 @@ export const Risk: React.FC = () => {
         ctx.strokeStyle = '#EAB308';
         ctx.lineWidth = 1;
         ctx.strokeRect(q3X, q3Y, quadrantPixelSize, quadrantPixelSize);
-        // Badge for +10m
+        // Badge for +4m
         ctx.font = `bold ${badgeFontSize}px monospace`;
         ctx.fillStyle = 'rgba(234, 179, 8, 0.9)';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('+10m', q3X + quadrantPixelSize / 2, q3Y + quadrantPixelSize / 2);
+        ctx.fillText('+4m', q3X + quadrantPixelSize / 2, q3Y + quadrantPixelSize / 2);
 
-        // Second quadrant (+5m) - orange
+        // Second quadrant (+2m) - orange
         const q2 = (wipeInfo.quadrant + 1) % TOTAL_QUADRANTS;
         const q2Row = Math.floor(q2 / QUADRANTS_PER_ROW);
         const q2Col = q2 % QUADRANTS_PER_ROW;
@@ -1235,10 +1278,10 @@ export const Risk: React.FC = () => {
         ctx.strokeStyle = '#F97316';
         ctx.lineWidth = 1.5;
         ctx.strokeRect(q2X, q2Y, quadrantPixelSize, quadrantPixelSize);
-        // Badge for +5m
+        // Badge for +2m
         ctx.font = `bold ${badgeFontSize * 1.1}px monospace`;
         ctx.fillStyle = 'rgba(249, 115, 22, 0.9)';
-        ctx.fillText('+5m', q2X + quadrantPixelSize / 2, q2Y + quadrantPixelSize / 2);
+        ctx.fillText('+2m', q2X + quadrantPixelSize / 2, q2Y + quadrantPixelSize / 2);
 
         // Next quadrant (imminent) - red with pulse and countdown
         const wipeRow = Math.floor(wipeInfo.quadrant / QUADRANTS_PER_ROW);
@@ -1490,13 +1533,13 @@ export const Risk: React.FC = () => {
       return;
     }
 
-    // Get my base info for wall checking
-    const myBase = myPlayerNum ? bases.get(myPlayerNum) : null;
-
     // Only do frontend validation if localCells is populated
     // If localCells is empty (pre-sync), skip validation and let backend handle it
     if (localCells.length > 0) {
-      // v2 placement validation: own territory only, not on walls, not on living cells
+      // Get player's base for wall placement validation
+      const myBase = myPlayerNum ? bases.get(myPlayerNum) : null;
+
+      // v2 placement validation: own territory OR own base (including walls), not on living cells
       const conflicts = cellsToPlace.filter(([col, row]) => {
         const idx = row * GRID_SIZE + col;
         const cell = localCells[idx];
@@ -1504,8 +1547,8 @@ export const Risk: React.FC = () => {
         // Cannot place on living cells
         if (cell && cell.alive) return true;
 
-        // Cannot place on base walls
-        if (myBase && isBaseWall(col, row, myBase.x, myBase.y)) return true;
+        // CAN place anywhere inside own base (including walls) - matches backend logic
+        if (myBase && isInBaseZone(col, row, myBase.x, myBase.y)) return false;
 
         // Cannot place on neutral territory (owner === 0)
         if (!cell || cell.owner === 0) return true;
@@ -1524,7 +1567,7 @@ export const Risk: React.FC = () => {
           return { col, row, idx, cell, myPlayerNum };
         });
         console.log('[PLACE] Validation conflicts:', { count: conflicts.length, details: conflictDetails });
-        setPlacementError(`${conflicts.length} cell(s) cannot be placed. You can only place on your own territory (not on walls, neutral, or enemy territory).`);
+        setPlacementError(`${conflicts.length} cell(s) cannot be placed. You can only place on your own territory (not on neutral or enemy territory).`);
         return;
       }
     }
@@ -1635,7 +1678,8 @@ export const Risk: React.FC = () => {
   const handleRejoin = useCallback(() => {
     setIsEliminated(false);
     setMyPlayerNum(null);
-    setShowSlotSelection(true);  // Go back to slot selection
+    setSelectedRegion(null);
+    setShowRegionSelection(true);  // Go back to region selection
     // Reset tracking refs for new session
     joinedAtGeneration.current = null;
     peakTerritoryRef.current = 0;
@@ -1781,7 +1825,7 @@ export const Risk: React.FC = () => {
   const handleStep = () => {
     // Manually advance local simulation by one generation
     if (localCells.length > 0) {
-      setLocalCells(cells => stepLocalGeneration(cells));
+      setLocalCells(cells => stepLocalGeneration(cells, bases));
     }
   };
 
@@ -1853,6 +1897,7 @@ export const Risk: React.FC = () => {
               }`}
             >
               {server.name}
+              {activeServers[server.id] && <span className="ml-1 text-green-400">●</span>}
             </button>
           ))}
         </div>
@@ -1865,6 +1910,114 @@ export const Risk: React.FC = () => {
           {isLoading ? 'Connecting...' : 'Login with Internet Identity'}
         </button>
         {error && <p className="text-red-400 text-sm">{error}</p>}
+      </div>
+    );
+  }
+
+  // Region selection screen - choose your element before placing base
+  if (showRegionSelection) {
+    // Determine which regions (slots) are already taken
+    const takenRegions = new Set<number>();
+    for (let i = 0; i < slotsInfo.length; i++) {
+      const slotOpt = slotsInfo[i];
+      if (slotOpt.length > 0 && slotOpt[0].base.length > 0) {
+        takenRegions.add(i + 1); // Slots are 0-indexed, regions are 1-indexed
+      }
+    }
+
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-80px)] gap-6 p-4">
+        <div className="text-center mb-4">
+          <h1 className="text-3xl font-bold text-white mb-2">Choose Your Region</h1>
+          <p className="text-gray-400">Select an elemental faction to command</p>
+        </div>
+
+        {/* Server selector */}
+        <div className="flex gap-2 mb-2">
+          {RISK_SERVERS.map((server) => (
+            <button
+              key={server.id}
+              onClick={() => setSelectedServer(server)}
+              className={`px-4 py-2 rounded-lg font-mono text-sm transition-all ${
+                selectedServer.id === server.id
+                  ? 'bg-white/20 text-white border border-white/50'
+                  : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
+              }`}
+            >
+              {server.name}
+              {activeServers[server.id] && <span className="ml-1 text-green-400">●</span>}
+            </button>
+          ))}
+        </div>
+
+        {error && (
+          <div className="bg-red-500/20 border border-red-500/50 text-red-400 px-4 py-2 rounded-lg text-sm">
+            {error}
+          </div>
+        )}
+
+        {/* Region grid - 2 rows of 4 */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-4xl">
+          {Object.values(REGIONS).map((region) => {
+            const isTaken = takenRegions.has(region.id);
+
+            return (
+              <button
+                key={region.id}
+                onClick={() => {
+                  if (!isTaken) {
+                    setSelectedRegion(region);
+                    setShowRegionSelection(false);
+                    setShowSlotSelection(true);
+                  }
+                }}
+                disabled={isTaken}
+                className={`
+                  relative p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-3
+                  ${isTaken
+                    ? 'bg-gray-900/50 border-gray-700/50 opacity-50 cursor-not-allowed'
+                    : 'bg-black/40 border-white/20 hover:border-opacity-100 cursor-pointer hover:scale-105'
+                  }
+                `}
+                style={{
+                  borderColor: isTaken ? undefined : region.primaryColor,
+                }}
+              >
+                {/* Textured cell preview */}
+                <div
+                  className="relative"
+                  style={{
+                    boxShadow: isTaken ? 'none' : `0 0 20px ${region.primaryColor}40`,
+                  }}
+                >
+                  <TexturedCellPreview regionId={region.id} size={64} />
+                </div>
+
+                {/* Region info */}
+                <div className="flex items-center justify-center gap-2">
+                  <span className="text-xl">{region.element}</span>
+                  <span
+                    className="font-bold text-lg"
+                    style={{ color: isTaken ? '#666' : region.primaryColor }}
+                  >
+                    {region.name}
+                  </span>
+                </div>
+
+                {/* Status badge */}
+                {isTaken && (
+                  <div className="absolute top-2 right-2 bg-red-500/80 text-white text-xs px-2 py-0.5 rounded">
+                    Taken
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="text-gray-600 text-xs mt-4 text-center">
+          Your cells will match your chosen element
+        </div>
       </div>
     );
   }
@@ -1884,12 +2037,41 @@ export const Risk: React.FC = () => {
     }
 
     const canAffordBase = myBalance >= BASE_COST;
+    const regionToUse = selectedRegion || REGIONS[1]; // Fallback to Earth if no region selected
 
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-80px)] gap-6 p-4">
+        {/* Back button and selected region display */}
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => {
+              setShowSlotSelection(false);
+              setShowRegionSelection(true);
+            }}
+            className="px-3 py-2 bg-white/10 hover:bg-white/20 text-gray-300 rounded-lg transition-colors"
+          >
+            ← Back
+          </button>
+          <div
+            className="flex items-center gap-3 px-4 py-2 rounded-lg border-2"
+            style={{
+              borderColor: regionToUse.primaryColor,
+              background: `${regionToUse.primaryColor}20`,
+            }}
+          >
+            <TexturedCellPreview regionId={regionToUse.id} size={32} />
+            <div>
+              <span className="text-xl mr-2">{regionToUse.element}</span>
+              <span className="font-bold" style={{ color: regionToUse.primaryColor }}>
+                {regionToUse.name}
+              </span>
+            </div>
+          </div>
+        </div>
+
         <div className="text-center mb-4">
           <h1 className="text-3xl font-bold text-white mb-2">Build Your Base</h1>
-          <p className="text-gray-400">Choose a quadrant to place your fortress</p>
+          <p className="text-gray-400">Choose a quadrant for your {regionToUse.name} fortress</p>
         </div>
 
         {/* Server selector */}
@@ -1905,6 +2087,7 @@ export const Risk: React.FC = () => {
               }`}
             >
               {server.name}
+              {activeServers[server.id] && <span className="ml-1 text-green-400">●</span>}
             </button>
           ))}
         </div>
@@ -2039,7 +2222,7 @@ export const Risk: React.FC = () => {
         </div>
 
         <div className="text-gray-600 text-xs mt-4 max-w-md text-center">
-          Cost: {BASE_COST} coins. Your base is an 8x8 fortress with a 6x6 interior territory.
+          Cost: {BASE_COST} coins. Your base is an 8x8 territory that you always control.
           Defend it from siege attacks or lose when your base reaches 0 coins!
         </div>
       </div>
@@ -2101,12 +2284,17 @@ export const Risk: React.FC = () => {
                     }`}
                   >
                     {server.name}
+                    {activeServers[server.id] && <span className="ml-1 text-green-400">●</span>}
                   </button>
                 ))}
               </div>
               <p className="text-gray-500 text-xs">
                 {myPlayerNum ? (
-                  <>You are Player {myPlayerNum} <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[myPlayerNum] }}></span></>
+                  <>
+                    <span className="text-xl mr-1">{getRegion(myPlayerNum).element}</span>
+                    <span style={{ color: getRegion(myPlayerNum).primaryColor }}>{getRegion(myPlayerNum).name}</span>
+                    <span className="inline-block w-3 h-3 rounded-sm ml-1" style={{ background: getRegion(myPlayerNum).cssGradient || getRegion(myPlayerNum).primaryColor }}></span>
+                  </>
                 ) : isSpectating ? (
                   <span className="text-purple-400">👁 Spectating</span>
                 ) : (
@@ -2115,7 +2303,7 @@ export const Risk: React.FC = () => {
               </p>
               {isSpectating && (
                 <button
-                  onClick={() => setShowSlotSelection(true)}
+                  onClick={() => setShowRegionSelection(true)}
                   className="mt-2 w-full px-3 py-2 bg-green-600 hover:bg-green-500 text-white text-sm rounded transition-colors"
                 >
                   Join Game
@@ -2125,7 +2313,7 @@ export const Risk: React.FC = () => {
                 <div className="text-gray-400">
                   Gen: <span className="text-dfinity-turquoise">{gameState?.generation.toString() || 0}</span>
                 </div>
-                <div className="text-gray-400">Players: {gameState?.slots.filter(s => s.length > 0).length || 0}/8</div>
+                <div className="text-gray-400">Regions: {gameState?.slots.filter(s => s.length > 0).length || 0}/8</div>
                 <div className="text-gray-400 flex items-center gap-2">
                   Wallet: <span className="text-yellow-400">{myBalance}</span>
                   <button
@@ -2191,8 +2379,10 @@ export const Risk: React.FC = () => {
                           <td className="py-0.5">
                             <div className="flex items-center gap-1">
                               {isMe && <span className="text-white text-[10px]">▶</span>}
-                              <div className="w-2 h-2 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[playerNum] }} />
-                              <span className={isMe ? 'text-white font-medium' : 'text-gray-400'}>P{playerNum}</span>
+                              <span className="text-sm">{getRegion(playerNum).element}</span>
+                              <span className={isMe ? 'font-medium' : ''} style={{ color: getRegion(playerNum).primaryColor }}>
+                                {getRegion(playerNum).name.slice(0, 4)}
+                              </span>
                             </div>
                           </td>
                           <td className="text-right px-1" style={{ color: PLAYER_COLORS[playerNum], opacity: 0.6 }}>
@@ -2701,7 +2891,7 @@ export const Risk: React.FC = () => {
               <div className="py-2">
                 <p className="text-purple-400 text-sm mb-2">👁 Spectating</p>
                 <button
-                  onClick={() => setShowSlotSelection(true)}
+                  onClick={() => setShowRegionSelection(true)}
                   className="w-full px-3 py-2 bg-green-600 hover:bg-green-500 text-white text-sm rounded transition-colors"
                 >
                   Join Game

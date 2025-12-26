@@ -330,14 +330,14 @@ fn mark_with_neighbors_potential(cell_idx: usize) {
     // Mark the cell itself
     set_potential_bit(cell_idx);
 
-    // Mark all 8 neighbors (with wrapping)
+    // Mark all 8 neighbors (with wrapping via bitwise AND since grid is 512)
     for dy in [-1i16, 0, 1] {
         for dx in [-1i16, 0, 1] {
             if dx == 0 && dy == 0 {
                 continue;
             }
-            let nx = ((x as i16 + dx).rem_euclid(GRID_SIZE as i16)) as u16;
-            let ny = ((y as i16 + dy).rem_euclid(GRID_SIZE as i16)) as u16;
+            let nx = x.wrapping_add(dx as u16) & 511;
+            let ny = y.wrapping_add(dy as u16) & 511;
             set_potential_bit(coords_to_idx(nx, ny));
         }
     }
@@ -346,14 +346,14 @@ fn mark_with_neighbors_potential(cell_idx: usize) {
 fn mark_neighbors_potential(cell_idx: usize) {
     let (x, y) = idx_to_coords(cell_idx);
 
-    // Mark all 8 neighbors (with wrapping)
+    // Mark all 8 neighbors (with wrapping via bitwise AND since grid is 512)
     for dy in [-1i16, 0, 1] {
         for dx in [-1i16, 0, 1] {
             if dx == 0 && dy == 0 {
                 continue;
             }
-            let nx = ((x as i16 + dx).rem_euclid(GRID_SIZE as i16)) as u16;
-            let ny = ((y as i16 + dy).rem_euclid(GRID_SIZE as i16)) as u16;
+            let nx = x.wrapping_add(dx as u16) & 511;
+            let ny = y.wrapping_add(dy as u16) & 511;
             set_potential_bit(coords_to_idx(nx, ny));
         }
     }
@@ -991,6 +991,14 @@ fn bfs_find_unreached(
     base: &Base,
     affected: &[(u16, u16)],
 ) -> Vec<(u16, u16)> {
+    // Build O(1) lookup map for affected cells: coords -> index
+    let affected_map: HashMap<(u16, u16), usize> = affected
+        .iter()
+        .enumerate()
+        .take(64)
+        .map(|(i, &coords)| (coords, i))
+        .collect();
+
     // Seed BFS with base interior cells
     for dy in 1..7u16 {
         for dx in 1..7u16 {
@@ -1017,9 +1025,9 @@ fn bfs_find_unreached(
         let x = (cell_idx & 511) as u16;
         let y = (cell_idx >> 9) as u16;
 
-        // Check if this is one of our affected neighbors
-        for (i, &(ax, ay)) in affected.iter().enumerate().take(64) {
-            if !affected_found[i] && x == ax && y == ay {
+        // O(1) lookup instead of linear search
+        if let Some(&i) = affected_map.get(&(x, y)) {
+            if !affected_found[i] {
                 affected_found[i] = true;
                 found_count += 1;
 

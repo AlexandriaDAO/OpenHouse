@@ -66,6 +66,10 @@ type BenchmarkData = record {
     place_cells : OperationStats;
     join_game : OperationStats;
     get_state : OperationStats;
+    vec_allocation : OperationStats;
+    vec_deallocation : OperationStats;
+    find_owner : OperationStats;
+    protection_zone_check : OperationStats;
     last_reset_ns : nat64;
     tracking_duration_ns : nat64;
 };

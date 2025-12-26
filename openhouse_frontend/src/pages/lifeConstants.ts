@@ -7,7 +7,6 @@ export const TOTAL_CELLS = GRID_SIZE * GRID_SIZE; // 262,144 cells
 
 // Base dimensions (v2 base-centric system)
 export const BASE_SIZE = 8;           // Total base footprint (8x8)
-export const BASE_INTERIOR_SIZE = 6;  // Interior territory (6x6)
 export const BASE_COST = 100;         // Cost to place a base
 
 /** Get quadrant index (0-15) from cell coordinates */
@@ -17,25 +16,7 @@ export function getQuadrant(x: number, y: number): number {
   return qy * QUADRANTS_PER_ROW + qx;
 }
 
-/** Check if a position is within a base's wall positions */
-export function isBaseWall(cellX: number, cellY: number, baseX: number, baseY: number): boolean {
-  const relX = cellX - baseX;
-  const relY = cellY - baseY;
-  // Must be within 8x8 bounds
-  if (relX < 0 || relX >= BASE_SIZE || relY < 0 || relY >= BASE_SIZE) return false;
-  // Wall = on the perimeter
-  return relX === 0 || relX === BASE_SIZE - 1 || relY === 0 || relY === BASE_SIZE - 1;
-}
-
-/** Check if a position is within a base's interior (6x6) */
-export function isBaseInterior(cellX: number, cellY: number, baseX: number, baseY: number): boolean {
-  const relX = cellX - baseX;
-  const relY = cellY - baseY;
-  // Interior is 1 to 6 (exclusive of perimeter)
-  return relX >= 1 && relX < BASE_SIZE - 1 && relY >= 1 && relY < BASE_SIZE - 1;
-}
-
-/** Check if a position is within a base's 8x8 protection zone */
+/** Check if a position is within a base's 8x8 zone */
 export function isInBaseZone(cellX: number, cellY: number, baseX: number, baseY: number): boolean {
   const relX = cellX - baseX;
   const relY = cellY - baseY;
@@ -75,8 +56,6 @@ export const GRID_COLOR = 'rgba(255, 255, 255, 0.08)';
 export const SWIPE_THRESHOLD = 50;
 export const DEAD_COLOR = '#000000';
 
-// Base wall color
-export const BASE_WALL_COLOR = '#4A4A4A';  // Dark gray for fortress walls
 
 // Server definitions
 export interface RiskServer {
@@ -108,32 +87,122 @@ export interface PendingPlacement {
   centroid: [number, number]; // For display purposes
 }
 
-// 10 Player colors
-export const PLAYER_COLORS: Record<number, string> = {
-  1: '#39FF14',  // Neon Green
-  2: '#FF3939',  // Red
-  3: '#3939FF',  // Blue
-  4: '#FFD700',  // Gold
-  5: '#FF39FF',  // Magenta
-  6: '#39FFFF',  // Cyan
-  7: '#FF8C00',  // Orange
-  8: '#8B5CF6',  // Purple
-  9: '#F472B6',  // Pink
-  10: '#A3E635', // Lime
+// Region definitions - elemental themes for each player slot
+export interface RegionInfo {
+  id: number;
+  name: string;
+  element: string;
+  primaryColor: string;      // Main cell color
+  secondaryColor?: string;   // For gradients/effects
+  territoryColor: string;    // Semi-transparent for territory overlay
+  description: string;
+  cssGradient?: string;      // Optional gradient for preview cells
+}
+
+export const REGIONS: Record<number, RegionInfo> = {
+  1: {
+    id: 1,
+    name: 'Earth',
+    element: '🌍',
+    primaryColor: '#8B4513',      // Saddle brown
+    secondaryColor: '#228B22',    // Forest green
+    territoryColor: 'rgba(139, 69, 19, 0.15)',
+    description: 'Sturdy and resilient, drawing strength from the land',
+    cssGradient: 'linear-gradient(135deg, #8B4513 0%, #228B22 50%, #6B8E23 100%)',
+  },
+  2: {
+    id: 2,
+    name: 'Water',
+    element: '💧',
+    primaryColor: '#00BFFF',      // Deep sky blue
+    secondaryColor: '#1E90FF',    // Dodger blue
+    territoryColor: 'rgba(0, 191, 255, 0.15)',
+    description: 'Fluid and adaptive, flowing around obstacles',
+    cssGradient: 'linear-gradient(135deg, #00BFFF 0%, #1E90FF 50%, #87CEEB 100%)',
+  },
+  3: {
+    id: 3,
+    name: 'Fire',
+    element: '🔥',
+    primaryColor: '#FF4500',      // Orange red
+    secondaryColor: '#FFD700',    // Gold/yellow
+    territoryColor: 'rgba(255, 69, 0, 0.15)',
+    description: 'Aggressive and consuming, spreading rapidly',
+    cssGradient: 'linear-gradient(135deg, #FF4500 0%, #FF6B35 50%, #FFD700 100%)',
+  },
+  4: {
+    id: 4,
+    name: 'Stone',
+    element: '🪨',
+    primaryColor: '#708090',      // Slate gray
+    secondaryColor: '#A9A9A9',    // Dark gray
+    territoryColor: 'rgba(112, 128, 144, 0.15)',
+    description: 'Unyielding and persistent, like mountains',
+    cssGradient: 'linear-gradient(135deg, #708090 0%, #A9A9A9 50%, #C0C0C0 100%)',
+  },
+  5: {
+    id: 5,
+    name: 'Light',
+    element: '✨',
+    primaryColor: '#FFFACD',      // Lemon chiffon (warm white)
+    secondaryColor: '#FFFFFF',    // Pure white
+    territoryColor: 'rgba(255, 250, 205, 0.15)',
+    description: 'Pure and radiant, illuminating the darkness',
+    cssGradient: 'linear-gradient(135deg, #FFFACD 0%, #FFFFFF 50%, #FFF8DC 100%)',
+  },
+  6: {
+    id: 6,
+    name: 'Ice',
+    element: '❄️',
+    primaryColor: '#E0FFFF',      // Light cyan
+    secondaryColor: '#B0E0E6',    // Powder blue
+    territoryColor: 'rgba(224, 255, 255, 0.15)',
+    description: 'Cold and precise, crystalline structures',
+    cssGradient: 'linear-gradient(135deg, #E0FFFF 0%, #B0E0E6 50%, #ADD8E6 100%)',
+  },
+  7: {
+    id: 7,
+    name: 'Plasma',
+    element: '⚡',
+    primaryColor: '#9932CC',      // Dark orchid (purple)
+    secondaryColor: '#FFD700',    // Yellow for electric streaks
+    territoryColor: 'rgba(153, 50, 204, 0.15)',
+    description: 'Chaotic energy, unpredictable and powerful',
+    cssGradient: 'linear-gradient(135deg, #9932CC 0%, #DA70D6 50%, #FFD700 100%)',
+  },
+  8: {
+    id: 8,
+    name: 'Void',
+    element: '🌑',
+    primaryColor: '#1a1a2e',      // Very dark blue-black
+    secondaryColor: '#16213e',    // Slightly lighter dark
+    territoryColor: 'rgba(26, 26, 46, 0.20)',
+    description: 'Consuming emptiness, absorbing all',
+    cssGradient: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%)',
+  },
 };
 
-export const TERRITORY_COLORS: Record<number, string> = {
-  1: 'rgba(57, 255, 20, 0.15)',
-  2: 'rgba(255, 57, 57, 0.15)',
-  3: 'rgba(57, 57, 255, 0.15)',
-  4: 'rgba(255, 215, 0, 0.15)',
-  5: 'rgba(255, 57, 255, 0.15)',
-  6: 'rgba(57, 255, 255, 0.15)',
-  7: 'rgba(255, 140, 0, 0.15)',
-  8: 'rgba(139, 92, 246, 0.15)',
-  9: 'rgba(244, 114, 182, 0.15)',
-  10: 'rgba(163, 230, 53, 0.15)',
-};
+// Legacy PLAYER_COLORS for backwards compatibility - now derived from REGIONS
+export const PLAYER_COLORS: Record<number, string> = Object.fromEntries(
+  Object.entries(REGIONS).map(([id, region]) => [id, region.primaryColor])
+);
+
+// Add extra slots for 9-10 if needed later
+PLAYER_COLORS[9] = '#F472B6';  // Pink
+PLAYER_COLORS[10] = '#A3E635'; // Lime
+
+export const TERRITORY_COLORS: Record<number, string> = Object.fromEntries(
+  Object.entries(REGIONS).map(([id, region]) => [id, region.territoryColor])
+);
+
+// Add extra slots for 9-10 if needed later
+TERRITORY_COLORS[9] = 'rgba(244, 114, 182, 0.15)';
+TERRITORY_COLORS[10] = 'rgba(163, 230, 53, 0.15)';
+
+/** Get region info by player number, with fallback */
+export function getRegion(playerNum: number): RegionInfo {
+  return REGIONS[playerNum] || REGIONS[1];
+}
 
 // Note: CATEGORY_INFO and PATTERNS are now imported from './life/patterns'
 // See src/pages/life/patterns/ for the organized pattern library
