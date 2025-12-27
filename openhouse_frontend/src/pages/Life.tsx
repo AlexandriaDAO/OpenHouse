@@ -1,8 +1,8 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Actor, HttpAgent, ActorSubclass } from '@dfinity/agent';
 import { useAuth } from '../providers/AuthProvider';
-import { idlFactory } from '../declarations/risk_backend';
-import type { _SERVICE, GameState, SlotInfo, BaseInfo, TerritoryExport } from '../declarations/risk_backend/risk_backend.did.d';
+import { idlFactory } from '../declarations/life1_backend';
+import type { _SERVICE, GameState, SlotInfo, BaseInfo, TerritoryExport } from '../declarations/life1_backend/life1_backend.did.d';
 
 // Import constants and types from separate file
 import {
@@ -39,6 +39,9 @@ import {
   type PatternCategory,
   type PatternInfo,
   type PendingPlacement,
+  type ConfirmedPlacement,
+  PLACEMENT_GRADUATION_GENS,
+  PLACEMENT_TIMEOUT_MS,
   type RiskServer,
   type RegionInfo,
 } from './lifeConstants';
@@ -57,6 +60,7 @@ import {
   initTerritoryPatterns,
   renderTerritoryLayer,
   arePatternsInitialized,
+  TERRITORY_BRIGHTNESS,
 } from './life/rendering';
 
 // Import tutorial component
@@ -240,8 +244,20 @@ export const Risk: React.FC = () => {
   const [selectedPlacementIds, setSelectedPlacementIds] = useState<Set<string>>(new Set());
   const nextPlacementIdRef = useRef(0);
   const [isConfirmingPlacement, setIsConfirmingPlacement] = useState(false);
+
+  // Confirmed placements - backend acknowledged but awaiting graduation
+  // These render as pulsing static cells until backend catches up, preventing snap-back
+  const [confirmedPlacements, setConfirmedPlacements] = useState<ConfirmedPlacement[]>([]);
+  const confirmedPlacementsRef = useRef<ConfirmedPlacement[]>([]);
+  useEffect(() => { confirmedPlacementsRef.current = confirmedPlacements; }, [confirmedPlacements]);
   const [isRequestingFaucet, setIsRequestingFaucet] = useState(false);
-  const [previewPulse, setPreviewPulse] = useState(0); // For animation
+  // Animation values stored as refs to avoid re-renders every 16ms
+  const previewPulseRef = useRef(0);
+  const animationFrameRef = useRef<number | null>(null);
+  const lastFrameTimeRef = useRef(0);
+  const drawRef = useRef<(() => void) | null>(null);
+  const coinParticlesRef = useRef<CoinParticle[]>([]);
+  const pendingPlacementsLengthRef = useRef(0);
 
   // Elimination modal state
   const [isEliminated, setIsEliminated] = useState(false);
@@ -299,6 +315,7 @@ export const Risk: React.FC = () => {
   // Query latency tracking
   const queryLatencyStats = useRef<{ samples: number[] }>({ samples: [] });
   const querySequence = useRef<number>(0);
+  const lastSyncedQueryId = useRef<number>(0);  // Reject out-of-order responses
 
   // Keep refs in sync with state
   useEffect(() => { localCellsRef.current = localCells; }, [localCells]);
@@ -334,14 +351,60 @@ export const Risk: React.FC = () => {
     setPatternRotation(0);
   }, [selectedPattern]);
 
-  // Pulse animation for pending placements
+  // Keep animation refs in sync with state
+  useEffect(() => { coinParticlesRef.current = coinParticles; }, [coinParticles]);
+  useEffect(() => { pendingPlacementsLengthRef.current = pendingPlacements.length; }, [pendingPlacements.length]);
+
+  // Unified animation loop using requestAnimationFrame
+  // This replaces multiple setInterval calls with a single RAF loop to prevent UI freezing
+  // Uses refs to avoid restarting the loop on state changes
   useEffect(() => {
-    if (pendingPlacements.length === 0) return;
-    const interval = setInterval(() => {
-      setPreviewPulse(p => (p + 1) % 60); // 60 frames per cycle at ~16ms
-    }, 16);
-    return () => clearInterval(interval);
-  }, [pendingPlacements.length]);
+    const animate = (timestamp: number) => {
+      const deltaTime = timestamp - lastFrameTimeRef.current;
+
+      // Only update if enough time has passed (target ~60fps)
+      if (deltaTime >= 16) {
+        lastFrameTimeRef.current = timestamp;
+
+        // Update preview pulse animation (if there are pending placements)
+        if (pendingPlacementsLengthRef.current > 0) {
+          previewPulseRef.current = (previewPulseRef.current + 1) % 60;
+        }
+
+        // Update coin particle physics using functional update to avoid stale closure
+        if (coinParticlesRef.current.length > 0) {
+          setCoinParticles(prev => {
+            if (prev.length === 0) return prev;
+            const updated = prev
+              .map(p => ({
+                ...p,
+                offsetX: p.offsetX + p.velocityX,
+                offsetY: p.offsetY + p.velocityY,
+                velocityY: p.velocityY + 0.15, // Gravity
+                opacity: p.opacity - 0.02,
+                rotation: p.rotation + p.rotationSpeed,
+              }))
+              .filter(p => p.opacity > 0);
+            return updated;
+          });
+        }
+
+        // Trigger canvas redraw
+        drawRef.current?.();
+      }
+
+      animationFrameRef.current = requestAnimationFrame(animate);
+    };
+
+    // Start the animation loop
+    animationFrameRef.current = requestAnimationFrame(animate);
+
+    return () => {
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, []); // Empty deps - loop runs once and uses refs for current values
 
   // Local countdown for wipe timer (smooth decrement between backend syncs)
   // Note: We never auto-rotate quadrants here - only the backend determines the current wipe quadrant
@@ -402,29 +465,7 @@ export const Risk: React.FC = () => {
     }
   }, [bases]);
 
-  // Animate coin particles (physics update loop)
-  useEffect(() => {
-    if (coinParticles.length === 0) return;
-
-    const interval = setInterval(() => {
-      setCoinParticles(prev => {
-        const updated = prev
-          .map(p => ({
-            ...p,
-            offsetX: p.offsetX + p.velocityX,
-            offsetY: p.offsetY + p.velocityY,
-            velocityY: p.velocityY + 0.15, // Gravity
-            opacity: p.opacity - 0.02,
-            rotation: p.rotation + p.rotationSpeed,
-          }))
-          .filter(p => p.opacity > 0);
-
-        return updated;
-      });
-    }, 16); // ~60fps
-
-    return () => clearInterval(interval);
-  }, [coinParticles.length > 0]);
+  // Coin particle physics now handled by unified RAF loop above
 
   // Navigate to adjacent quadrant with toroidal wrapping
   const navigateQuadrant = useCallback((direction: 'up' | 'down' | 'left' | 'right') => {
@@ -731,12 +772,18 @@ export const Risk: React.FC = () => {
       });
     };
 
-    setupCanvas();
+    // Wait for document to be fully loaded before measuring layout
+    if (document.readyState === 'complete') {
+      setupCanvas();
+    } else {
+      window.addEventListener('load', setupCanvas, { once: true });
+    }
 
     return () => {
       cancelled = true;
       observer?.disconnect();
       if (retryTimeout) clearTimeout(retryTimeout);
+      window.removeEventListener('load', setupCanvas);
     };
   }, [isAuthenticated, showRegionSelection, showSlotSelection]);
 
@@ -800,7 +847,14 @@ export const Risk: React.FC = () => {
           // genDiff > 0 means local is AHEAD of estimated backend
           // genDiff < 0 means local is BEHIND estimated backend
 
-          // REJECT: True out-of-order (older than what we've already synced to)
+          // REJECT: Out-of-order query (older query arriving after newer one was synced)
+          // This prevents stale high-latency responses from causing oscillation
+          if (queryId <= lastSyncedQueryId.current) {
+            if (DEBUG_SYNC) console.log('[SYNC:reject]', { queryId, reason: 'out-of-order' });
+            return;
+          }
+
+          // REJECT: True out-of-order generation (older than what we've already synced to)
           if (incomingGen < currentLastSyncedGen) {
             // Don't log these - they're expected with parallel queries
             return;
@@ -816,30 +870,23 @@ export const Risk: React.FC = () => {
 
           // Skip if roughly in sync (unless force sync needed)
           if (!localBehind && !localTooFarAhead && !needsForceSync) {
-            console.log('[SYNC:skip]', {
-              queryId,
-              incoming: incomingGen.toString(),
-              estimated: estimatedBackendNow.toString(),
-              localGen: currentLocalGen.toString(),
-              drift: genDiff,
-              rttComp: `+${rttGens}`,
-            });
+            // Don't log skips - too noisy
             return;
           }
 
-          // Log the sync event
-          const reason = localBehind ? 'catchup' : (needsForceSync ? 'force' : 'drift');
-          console.log('[SYNC:apply]', {
-            queryId,
-            backendReported: incomingGen.toString(),
-            rttCompensation: `+${rttGens}`,
-            estimatedBackend: estimatedBackendNow.toString(),
-            wasAt: currentLocalGen.toString(),
-            newLocalGen: estimatedBackendNow.toString(),
-            netJump: Number(estimatedBackendNow - currentLocalGen),
-            reason,
-            latency: `${latencyMs.toFixed(0)}ms`,
-          });
+          // Log sync applies only in debug mode
+          if (DEBUG_SYNC) {
+            const reason = localBehind ? 'catchup' : (needsForceSync ? 'force' : 'drift');
+            console.log('[SYNC:apply]', {
+              queryId,
+              gen: incomingGen.toString(),
+              jump: Number(estimatedBackendNow - currentLocalGen),
+              reason,
+            });
+          }
+
+          // Track which query we synced from (reject older queries)
+          lastSyncedQueryId.current = queryId;
 
           // Update UI indicator
           setSyncStatus({
@@ -855,8 +902,49 @@ export const Risk: React.FC = () => {
           setLastSyncTime(Date.now());
 
           setGameState(state);
-          // Convert bitmap to dense for local simulation
-          setLocalCells(sparseToDense(state));
+
+          // Convert bitmap to dense for local simulation FIRST
+          // This allows us to check if cells are already in backend state for graduation
+          const newCells = sparseToDense(state);
+
+          // Graduate confirmed placements using multiple criteria:
+          // 1. Generation-based: backend gen >= placedAtGen + 8
+          // 2. Content-based: all cells are already alive in backend state
+          // 3. Time-based: timeout after PLACEMENT_TIMEOUT_MS
+          setConfirmedPlacements(prev => {
+            const stillPending: ConfirmedPlacement[] = [];
+            const now = Date.now();
+
+            for (const p of prev) {
+              const genCaughtUp = state.generation >= p.placedAtGen + PLACEMENT_GRADUATION_GENS;
+              const timedOut = now - p.placedAtTime > PLACEMENT_TIMEOUT_MS;
+
+              // Check if all cells are already alive in backend state (content-based graduation)
+              // This handles cases where backend gen is stuck but cells are actually there
+              const allCellsInBackend = p.cells.every(([col, row]) => {
+                const idx = row * GRID_SIZE + col;
+                const cell = newCells[idx];
+                return cell && cell.alive && cell.owner === p.owner;
+              });
+
+              if (genCaughtUp || allCellsInBackend) {
+                // Graduated - cells are now in backend state
+                if (DEBUG_SYNC) console.log('[PLACEMENT:graduated]', { id: p.id, reason: allCellsInBackend ? 'content' : 'generation' });
+              } else if (timedOut) {
+                // Timed out - but check if cells are at least partially there
+                if (DEBUG_SYNC) console.warn('[PLACEMENT:timeout]', { id: p.id, age: now - p.placedAtTime });
+              } else {
+                // Still waiting for backend to catch up
+                stillPending.push(p);
+              }
+            }
+
+            return stillPending;
+          });
+
+          // NOTE: Confirmed placement cells are rendered as OVERLAY only (via drawConfirmedCells)
+          // We do NOT force them into localCells - that would create duplicates and mess up simulation
+          setLocalCells(newCells);
 
           // Extract base info from slots (v2 format)
           const newBases = new Map<number, BaseInfo>();
@@ -985,6 +1073,31 @@ export const Risk: React.FC = () => {
       return cells[idx]?.owner || 0;
     };
 
+    // Build a set of base cell positions for quick lookup
+    const baseCellSet = new Set<number>();
+    for (const [, baseInfo] of bases) {
+      for (let dy = 0; dy < BASE_SIZE; dy++) {
+        for (let dx = 0; dx < BASE_SIZE; dx++) {
+          const cellIdx = (baseInfo.y + dy) * GRID_SIZE + (baseInfo.x + dx);
+          baseCellSet.add(cellIdx);
+        }
+      }
+    }
+
+    // Brightness function: base cells and alive cells are bright, dead territory is dim
+    const getCellBrightness = (gridX: number, gridY: number): number => {
+      if (gridX < 0 || gridX >= GRID_SIZE || gridY < 0 || gridY >= GRID_SIZE) return TERRITORY_BRIGHTNESS.DEAD;
+      const idx = gridY * GRID_SIZE + gridX;
+      const cell = cells[idx];
+      if (!cell || cell.owner === 0) return TERRITORY_BRIGHTNESS.DEAD;
+      // Base cells are always bright
+      if (baseCellSet.has(idx)) return TERRITORY_BRIGHTNESS.BASE;
+      // Alive cells are bright
+      if (cell.alive) return TERRITORY_BRIGHTNESS.ALIVE;
+      // Dead territory is dimmed
+      return TERRITORY_BRIGHTNESS.DEAD;
+    };
+
     renderTerritoryLayer(
       ctx,
       getCellOwner,
@@ -993,10 +1106,11 @@ export const Risk: React.FC = () => {
       startY,
       width,
       height,
-      territoryAnimTimeRef.current
+      territoryAnimTimeRef.current,
+      getCellBrightness
     );
 
-    // Draw living cells
+    // Draw living cells with glowing borders
     for (let row = 0; row < height; row++) {
       for (let col = 0; col < width; col++) {
         const gridRow = startY + row;
@@ -1005,13 +1119,29 @@ export const Risk: React.FC = () => {
         const cell = cells[idx];
 
         if (cell && cell.alive && cell.owner > 0) {
-          ctx.fillStyle = PLAYER_COLORS[cell.owner] || '#FFFFFF';
-          ctx.fillRect(
-            col * cellSize,
-            row * cellSize,
-            cellSize - gap,
-            cellSize - gap
-          );
+          const x = col * cellSize;
+          const y = row * cellSize;
+          const size = cellSize - gap;
+          const playerColor = PLAYER_COLORS[cell.owner] || '#FFFFFF';
+
+          // Draw glowing border (outer glow effect)
+          if (cellSize >= 3) {
+            ctx.save();
+            ctx.shadowColor = playerColor;
+            ctx.shadowBlur = Math.max(2, cellSize * 0.4);
+            ctx.fillStyle = playerColor;
+            ctx.fillRect(x, y, size, size);
+            ctx.restore();
+
+            // Inner bright highlight border
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+            ctx.lineWidth = Math.max(1, cellSize * 0.1);
+            ctx.strokeRect(x + 0.5, y + 0.5, size - 1, size - 1);
+          } else {
+            // For very small cells, just use bright fill
+            ctx.fillStyle = playerColor;
+            ctx.fillRect(x, y, size, size);
+          }
         }
       }
     }
@@ -1248,6 +1378,59 @@ export const Risk: React.FC = () => {
     }
   }, [localCells, myPlayerNum, pendingPlacements, bases]);
 
+  // Draw confirmed placement cells with pulsing animation
+  // These are cells that backend confirmed but haven't been "graduated" to live yet
+  // They render as static (not simulated) pulsing cells until backend catches up
+  // IMPORTANT: Skip cells that are already alive in localCells to prevent duplicates!
+  const drawConfirmedCells = useCallback((
+    ctx: CanvasRenderingContext2D,
+    startX: number,
+    startY: number,
+    cellSize: number,
+    timestamp: number
+  ) => {
+    // Nothing to draw if no confirmed placements
+    if (confirmedPlacements.length === 0) return;
+
+    const gap = cellSize > 2 ? 1 : 0;
+    const cells = localCells;
+
+    for (const placement of confirmedPlacements) {
+      // Slower pulse for confirmed cells (0.6 to 1.0 alpha)
+      const age = timestamp - placement.placedAtTime;
+      const pulseAlpha = 0.6 + 0.4 * Math.sin(age * 0.003); // Slower pulse than preview
+
+      const playerColor = PLAYER_COLORS[placement.owner] || '#FFFFFF';
+      const rgb = playerColor.match(/\w\w/g)?.map(x => parseInt(x, 16)) || [255, 255, 255];
+
+      for (const [gridCol, gridRow] of placement.cells) {
+        // Check if cell is already alive in localCells - if so, skip overlay
+        // This prevents duplicate rendering when backend has caught up
+        const idx = gridRow * GRID_SIZE + gridCol;
+        const existingCell = cells[idx];
+        if (existingCell && existingCell.alive && existingCell.owner === placement.owner) {
+          // Cell is already in localCells with correct owner - no overlay needed
+          continue;
+        }
+
+        const localCol = gridCol - startX;
+        const localRow = gridRow - startY;
+
+        // Skip if outside current view
+        if (localCol < 0 || localCol >= QUADRANT_SIZE || localRow < 0 || localRow >= QUADRANT_SIZE) continue;
+
+        // Draw the cell with pulsing effect
+        ctx.fillStyle = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${pulseAlpha})`;
+        ctx.fillRect(localCol * cellSize, localRow * cellSize, cellSize - gap, cellSize - gap);
+
+        // Subtle glow outline to indicate "pending" state
+        ctx.strokeStyle = `rgba(255, 255, 255, ${pulseAlpha * 0.5})`;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(localCol * cellSize, localRow * cellSize, cellSize - gap, cellSize - gap);
+      }
+    }
+  }, [confirmedPlacements, localCells]);
+
   // Main draw function - simplified for quadrant-based navigation
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -1371,8 +1554,11 @@ export const Risk: React.FC = () => {
       drawCells(ctx, viewX, viewY, QUADRANT_SIZE, QUADRANT_SIZE, cellSize);
       drawGridLines(ctx, cellSize, QUADRANT_SIZE, QUADRANT_SIZE);
 
-      // Draw preview cells on top
-      drawPreviewCells(ctx, viewX, viewY, cellSize, previewPulse);
+      // Draw confirmed placement cells (pulsing until graduated)
+      drawConfirmedCells(ctx, viewX, viewY, cellSize, Date.now());
+
+      // Draw preview cells on top (uses ref to avoid re-renders)
+      drawPreviewCells(ctx, viewX, viewY, cellSize, previewPulseRef.current);
 
       // Boundary
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
@@ -1381,9 +1567,13 @@ export const Risk: React.FC = () => {
 
       ctx.restore();
     }
-  }, [viewMode, viewX, viewY, localCells, drawCells, drawQuadrantGrid, drawGridLines, drawPreviewCells, previewPulse, wipeInfo]);
+  }, [viewMode, viewX, viewY, localCells, drawCells, drawQuadrantGrid, drawGridLines, drawConfirmedCells, drawPreviewCells, wipeInfo]);
 
-  useEffect(() => { draw(); }, [draw]);
+  // Store draw function in ref for RAF loop to call, and draw on meaningful state changes
+  useEffect(() => {
+    drawRef.current = draw;
+    draw();
+  }, [draw]);
 
   // Minimap drawing effect
   useEffect(() => {
@@ -1548,24 +1738,12 @@ export const Risk: React.FC = () => {
   const confirmPlacement = useCallback(async () => {
     const cellsToPlace: [number, number][] = pendingPlacements.flatMap(p => p.cells);
 
-    console.log('[PLACE] confirmPlacement called', {
-      cellCount: cellsToPlace.length,
-      cells: cellsToPlace.slice(0, 10), // First 10 cells
-      myPlayerNum,
-      myBalance,
-      localCellsLength: localCells.length,
-    });
-
-    if (!actor || cellsToPlace.length === 0 || isConfirmingPlacement) {
-      console.log('[PLACE] Early return:', { hasActor: !!actor, cellCount: cellsToPlace.length, isConfirmingPlacement });
-      return;
-    }
+    if (!actor || cellsToPlace.length === 0 || isConfirmingPlacement) return;
 
     const cost = cellsToPlace.length;
 
     // Check if player has enough coins
     if (myBalance < cost) {
-      console.log('[PLACE] Not enough coins:', { cost, myBalance });
       setPlacementError(`Not enough coins. Need ${cost}, have ${myBalance}`);
       return;
     }
@@ -1597,19 +1775,10 @@ export const Risk: React.FC = () => {
       });
 
       if (conflicts.length > 0) {
-        // Log details about the first few conflicts
-        const conflictDetails = cellsToPlace.slice(0, 5).map(([col, row]) => {
-          const idx = row * GRID_SIZE + col;
-          const cell = localCells[idx];
-          return { col, row, idx, cell, myPlayerNum };
-        });
-        console.log('[PLACE] Validation conflicts:', { count: conflicts.length, details: conflictDetails });
         setPlacementError(`${conflicts.length} cell(s) cannot be placed. You can only place on your own territory (not on neutral or enemy territory).`);
         return;
       }
     }
-
-    console.log('[PLACE] Validation passed, calling backend...');
 
     // Check for internal overlaps between placements
     if (pendingPlacements.length > 1) {
@@ -1629,49 +1798,49 @@ export const Risk: React.FC = () => {
     setIsConfirmingPlacement(true);
     setPlacementError(null);
 
-    // 1. Optimistically apply to local state FIRST (before backend call)
-    // This provides immediate visual feedback; next backend sync will correct if rejected
+    // Capture pattern names for confirmed placement tracking
+    const patternNames = pendingPlacements.map(p => p.patternName).join(', ');
+    const placementId = `confirmed-${Date.now()}-${nextPlacementIdRef.current++}`;
+
+    // IMMEDIATELY add to confirmedPlacements - this provides visual continuity
+    // Cells will render as pulsing overlay until backend catches up (no gap!)
+    // Use lastSyncedGenerationRef (backend gen) not localGenerationRef (may be ahead)
     if (myPlayerNum) {
-      setLocalCells(prev => {
-        const updated = [...prev];
-        for (const [col, row] of cellsToPlace) {
-          const idx = row * GRID_SIZE + col;
-          if (idx >= 0 && idx < updated.length) {
-            updated[idx] = { ...updated[idx], alive: true, owner: myPlayerNum };
-          }
-        }
-        return updated;
-      });
+      const confirmedPlacement: ConfirmedPlacement = {
+        id: placementId,
+        cells: cellsToPlace,
+        owner: myPlayerNum,
+        placedAtGen: lastSyncedGenerationRef.current,  // Use BACKEND generation
+        placedAtTime: Date.now(),
+        patternName: patternNames,
+      };
+      setConfirmedPlacements(prev => [...prev, confirmedPlacement]);
     }
 
-    // Clear pending placements immediately for snappy UI
+    // Clear pending placements - cells now in confirmedPlacements overlay
     setPendingPlacements([]);
     setSelectedPlacementIds(new Set());
 
-    // 2. Send to backend
+    // Send to backend
     try {
-      console.log('[PLACE] Sending to backend:', { cellCount: cellsToPlace.length });
-      const t0 = performance.now();
       const result = await actor.place_cells(cellsToPlace);
-      console.log(`[UPDATE LATENCY] place_cells: ${(performance.now() - t0).toFixed(1)}ms`);
-      console.log('[PLACE] Backend response:', result);
 
       if ('Err' in result) {
-        // Backend rejected - next sync will correct the optimistic update
-        console.warn('[PLACE] Backend rejected:', result.Err);
+        // Backend rejected - REMOVE from confirmedPlacements
+        console.warn('[PLACE] Rejected:', result.Err);
         setPlacementError(result.Err);
+        setConfirmedPlacements(prev => prev.filter(p => p.id !== placementId));
       } else {
-        // v2 returns the count of cells placed
-        const cellsPlaced = result.Ok;
-        console.log('[PLACE] SUCCESS! Cells placed:', cellsPlaced);
         // Deduct cost from balance (placement cost goes to base treasury)
-        setMyBalance(prev => prev - cellsPlaced);
+        setMyBalance(prev => prev - result.Ok);
         setPlacementError(null);
+        // Placement stays in confirmedPlacements until graduation
       }
     } catch (err) {
-      // Network error - next sync will correct the optimistic update
+      // Network error - REMOVE from confirmedPlacements
       console.error('[PLACE] Network error:', err);
       setPlacementError('Network error. Try again.');
+      setConfirmedPlacements(prev => prev.filter(p => p.id !== placementId));
     } finally {
       setIsConfirmingPlacement(false);
     }

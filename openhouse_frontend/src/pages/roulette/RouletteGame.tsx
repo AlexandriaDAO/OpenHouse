@@ -17,6 +17,21 @@ import type { BetType, Bet, SpinResult } from '@/declarations/roulette_backend/r
 
 const ROULETTE_BACKEND_CANISTER_ID = 'wvrcw-3aaaa-aaaah-arm4a-cai';
 
+// Animation timing constants
+const TIMING = {
+  MIN_SPIN_DURATION: 2000,    // Minimum time ball spins before landing
+  LANDING_DURATION: 4000,     // Time for ball to decelerate to position
+  RESULT_DISPLAY: 6000,       // Time to show results before reset
+};
+
+// Animation state machine
+type AnimationState =
+  | 'idle'           // Ready to spin
+  | 'waiting'        // Ball spinning, awaiting backend
+  | 'landing'        // Got result, ball decelerating
+  | 'showing_result' // Ball stopped, highlights active
+  | 'resetting';     // Clearing for next spin
+
 export function RouletteGame() {
   const { actor } = useRouletteActor();
   const { actor: ledgerActor } = useLedgerActor();
@@ -34,12 +49,14 @@ export function RouletteGame() {
 
   // Game State
   const [bets, setBets] = useState<PlacedBet[]>([]);
-  const [chipBetAmount, setChipBetAmount] = useState(0); // Amount to place per click (built up in rail like other games)
-  const [isSpinning, setIsSpinning] = useState(false);
+  const [chipBetAmount, setChipBetAmount] = useState(0);
   const [winningNumber, setWinningNumber] = useState<number | null>(null);
   const [lastResult, setLastResult] = useState<SpinResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [maxBet] = useState(100); // Could be dynamic based on house balance
+  const [maxBet] = useState(100);
+
+  // Animation state machine
+  const [animationState, setAnimationState] = useState<AnimationState>('idle');
 
   // Balance management - periodic refresh and focus handler
   useBalanceRefresh({
@@ -51,34 +68,32 @@ export function RouletteGame() {
 
   // Calculate max potential payout (sum of all bet payouts if they hit)
   const getPayoutMultiplier = (betType: BetType): number => {
-    if ('Straight' in betType) return 36; // 35:1 + stake
-    if ('Split' in betType) return 18;     // 17:1 + stake
-    if ('Street' in betType) return 12;    // 11:1 + stake
-    if ('Corner' in betType) return 9;     // 8:1 + stake
-    if ('SixLine' in betType) return 6;    // 5:1 + stake
-    if ('Column' in betType) return 3;     // 2:1 + stake
-    if ('Dozen' in betType) return 3;      // 2:1 + stake
+    if ('Straight' in betType) return 36;
+    if ('Split' in betType) return 18;
+    if ('Street' in betType) return 12;
+    if ('Corner' in betType) return 9;
+    if ('SixLine' in betType) return 6;
+    if ('Column' in betType) return 3;
+    if ('Dozen' in betType) return 3;
     if ('Red' in betType || 'Black' in betType) return 2;
     if ('Odd' in betType || 'Even' in betType) return 2;
     if ('High' in betType || 'Low' in betType) return 2;
-    return 2; // Default for even money
+    return 2;
   };
 
   const maxPayout = bets.reduce((sum, bet) => sum + (bet.amount * getPayoutMultiplier(bet.betType)), 0);
 
   const handlePlaceBet = useCallback((newBet: PlacedBet) => {
-    if (isSpinning) return;
+    if (animationState !== 'idle') return;
 
     setBets(prevBets => {
-      // Check if bet already exists for these numbers
       const existingIndex = prevBets.findIndex(b => {
-        const bNumbers = b.numbers.sort().join(',');
-        const newNumbers = newBet.numbers.sort().join(',');
+        const bNumbers = [...b.numbers].sort().join(',');
+        const newNumbers = [...newBet.numbers].sort().join(',');
         return bNumbers === newNumbers;
       });
 
       if (existingIndex >= 0) {
-        // Add to existing bet
         const updated = [...prevBets];
         updated[existingIndex] = {
           ...updated[existingIndex],
@@ -86,19 +101,18 @@ export function RouletteGame() {
         };
         return updated;
       } else {
-        // New bet
         return [...prevBets, newBet];
       }
     });
-  }, [isSpinning]);
+  }, [animationState]);
 
   const handleRemoveBet = useCallback((betToRemove: PlacedBet) => {
-    if (isSpinning) return;
+    if (animationState !== 'idle') return;
 
     setBets(prevBets => {
       const existingIndex = prevBets.findIndex(b => {
-        const bNumbers = b.numbers.sort().join(',');
-        const removeNumbers = betToRemove.numbers.sort().join(',');
+        const bNumbers = [...b.numbers].sort().join(',');
+        const removeNumbers = [...betToRemove.numbers].sort().join(',');
         return bNumbers === removeNumbers;
       });
 
@@ -108,10 +122,8 @@ export function RouletteGame() {
         const removeAmount = chipBetAmount > 0 ? chipBetAmount : betToRemove.amount;
 
         if (currentAmount <= removeAmount) {
-          // Remove bet entirely
           updated.splice(existingIndex, 1);
         } else {
-          // Reduce bet amount
           updated[existingIndex] = {
             ...updated[existingIndex],
             amount: currentAmount - removeAmount
@@ -121,16 +133,33 @@ export function RouletteGame() {
       }
       return prevBets;
     });
-  }, [chipBetAmount, isSpinning]);
+  }, [chipBetAmount, animationState]);
 
   const handleClearBets = useCallback(() => {
-    if (!isSpinning) {
+    if (animationState === 'idle') {
       setBets([]);
     }
-  }, [isSpinning]);
+  }, [animationState]);
+
+  // Called when ball landing animation completes
+  const handleAnimationComplete = useCallback(() => {
+    setAnimationState('showing_result');
+
+    // Auto-reset after showing results
+    setTimeout(() => {
+      setAnimationState('resetting');
+      setTimeout(() => {
+        setBets([]);
+        setWinningNumber(null);
+        setLastResult(null);
+        setAnimationState('idle');
+        gameBalanceContext.refresh();
+      }, 500);
+    }, TIMING.RESULT_DISPLAY);
+  }, [gameBalanceContext]);
 
   const handleSpin = async () => {
-    if (!actor || !isAuthenticated || isSpinning || bets.length === 0) return;
+    if (!actor || !isAuthenticated || animationState !== 'idle' || bets.length === 0) return;
 
     const totalBet = BigInt(Math.floor(totalBetAmount * DECIMALS_PER_CKUSDT));
     if (totalBet > balance.game) {
@@ -138,9 +167,13 @@ export function RouletteGame() {
       return;
     }
 
-    setIsSpinning(true);
+    // Phase 1: Start spinning immediately!
+    setAnimationState('waiting');
     setError(null);
     setLastResult(null);
+    setWinningNumber(null);
+
+    const spinStartTime = Date.now();
 
     try {
       // Convert PlacedBet[] to Bet[] for backend
@@ -153,23 +186,47 @@ export function RouletteGame() {
 
       if ('Ok' in result) {
         const spinResult = result.Ok;
-        setWinningNumber(spinResult.winning_number);
-        setLastResult(spinResult);
 
-        // Clear bets after spin completes (10 seconds)
+        // Ensure minimum spin time has elapsed for visual effect
+        const elapsedTime = Date.now() - spinStartTime;
+        const remainingWaitTime = Math.max(0, TIMING.MIN_SPIN_DURATION - elapsedTime);
+
         setTimeout(() => {
-          setBets([]);
-          setIsSpinning(false);
-          gameBalanceContext.refresh();
-        }, 10000);
+          // Phase 2: Got result, transition to landing
+          setWinningNumber(spinResult.winning_number);
+          setLastResult(spinResult);
+          setAnimationState('landing');
+        }, remainingWaitTime);
 
       } else if ('Err' in result) {
         setError(result.Err);
-        setIsSpinning(false);
+        setAnimationState('idle');
       }
     } catch (err) {
       setError('Failed to spin: ' + String(err));
-      setIsSpinning(false);
+      setAnimationState('idle');
+    }
+  };
+
+  // Derived states for components
+  const isSpinning = animationState !== 'idle';
+  const isWaitingForResult = animationState === 'waiting';
+  const isLanding = animationState === 'landing';
+  const showResults = animationState === 'showing_result';
+
+  // Button text based on state
+  const getButtonText = () => {
+    switch (animationState) {
+      case 'waiting':
+        return 'SPINNING...';
+      case 'landing':
+        return 'LANDING...';
+      case 'showing_result':
+        return 'RESULT';
+      case 'resetting':
+        return 'CLEARING...';
+      default:
+        return `SPIN ($${totalBetAmount.toFixed(2)})`;
     }
   };
 
@@ -187,13 +244,18 @@ export function RouletteGame() {
         <div className="flex flex-col lg:flex-row items-center justify-center gap-4 lg:gap-8 mb-4">
           {/* Wheel */}
           <div className="flex-shrink-0">
-            <RouletteWheel winningNumber={winningNumber} isSpinning={isSpinning} />
+            <RouletteWheel
+              winningNumber={winningNumber}
+              isWaitingForResult={isWaitingForResult}
+              isLanding={isLanding}
+              onAnimationComplete={handleAnimationComplete}
+            />
           </div>
 
           {/* Controls & Info Panel */}
           <div className="flex flex-col items-center gap-3">
             {/* Result display */}
-            {lastResult && !isSpinning && (
+            {lastResult && showResults && (
               <div className="text-center animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <div className="text-2xl font-bold">
                   {Number(lastResult.net_result) > 0 ? (
@@ -242,9 +304,15 @@ export function RouletteGame() {
               <button
                 onClick={handleSpin}
                 disabled={isSpinning || !isAuthenticated || bets.length === 0}
-                className="px-8 py-2.5 bg-green-600 hover:bg-green-500 rounded-lg font-bold text-lg shadow-lg transform active:scale-95 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100"
+                className={`px-8 py-2.5 rounded-lg font-bold text-lg shadow-lg transform transition disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 ${
+                  isWaitingForResult || isLanding
+                    ? 'bg-yellow-600 animate-pulse'
+                    : showResults
+                    ? 'bg-blue-600'
+                    : 'bg-green-600 hover:bg-green-500 active:scale-95'
+                }`}
               >
-                {isSpinning ? 'SPINNING...' : `SPIN ($${totalBetAmount.toFixed(2)})`}
+                {getButtonText()}
               </button>
             </div>
 
@@ -265,6 +333,8 @@ export function RouletteGame() {
             onPlaceBet={handlePlaceBet}
             onRemoveBet={handleRemoveBet}
             disabled={isSpinning || chipBetAmount === 0}
+            winningNumber={winningNumber}
+            showResults={showResults}
           />
         </div>
       </div>

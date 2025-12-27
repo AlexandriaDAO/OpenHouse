@@ -17,6 +17,7 @@ export {
   arePatternsInitialized,
   renderTerritoryLayer,
   resetTerritoryPatterns,
+  TERRITORY_BRIGHTNESS,
 } from './territoryRenderer';
 
 // Re-export individual element renderers for customization

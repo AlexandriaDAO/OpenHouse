@@ -47,7 +47,7 @@ export const ENABLE_LOCAL_SIM = true;
 
 // Debug flag for sync verification (Part 1 of timer optimization)
 // Set to true during testing, false for production
-export const DEBUG_SYNC = true;
+export const DEBUG_SYNC = false;
 
 // Rendering constants
 export const GRID_COLOR = 'rgba(255, 255, 255, 0.08)';
@@ -84,13 +84,38 @@ export type ViewMode = 'overview' | 'quadrant';
 export type { PatternInfo, PatternCategory } from './life/patterns';
 export { PATTERNS, CATEGORY_INFO, getPatternsByCategory, getPatternByName } from './life/patterns';
 
-// Batch placement support
+// Batch placement support (preview before confirmation)
 export interface PendingPlacement {
   id: string;
   cells: [number, number][];
   patternName: string;
   centroid: [number, number]; // For display purposes
 }
+
+/**
+ * Confirmed placement awaiting backend sync.
+ *
+ * When a player places cells:
+ * 1. Cells are sent to backend and become ConfirmedPlacement
+ * 2. They render as static pulsing preview (not simulated locally)
+ * 3. Once backend generation catches up (placedAtGen + N), they "graduate" to live cells
+ * 4. This prevents snap-back when sync overwrites optimistic local state
+ */
+export interface ConfirmedPlacement {
+  id: string;                      // Unique ID for this placement
+  cells: [number, number][];       // Grid coordinates
+  owner: number;                   // Player who placed (slot number)
+  placedAtGen: bigint;             // Backend generation when placed
+  placedAtTime: number;            // Timestamp for timeout detection
+  patternName: string;             // For display/debugging
+}
+
+// How many generations past placedAtGen before a placement is "graduated" to live
+// At 8 gen/sec, 8 gens = 1 second buffer for backend to process
+export const PLACEMENT_GRADUATION_GENS = 8n;
+
+// Timeout for placement confirmation (if never graduates, show error)
+export const PLACEMENT_TIMEOUT_MS = 10000;
 
 // Region definitions - elemental themes for each player slot
 export interface RegionInfo {

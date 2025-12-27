@@ -85,11 +85,20 @@ let territoryStats = {
   totalCells: 0,
 };
 
+/** Brightness levels for territory rendering */
+export const TERRITORY_BRIGHTNESS = {
+  DEAD: 0.35,    // Dimmed dead territory
+  BASE: 1.0,     // Full brightness for base areas
+  ALIVE: 1.0,    // Full brightness for alive cells
+} as const;
+
 /**
  * Render territory layer using pattern fills
  *
  * This is the main optimization: instead of 100k individual fillRect calls,
  * we batch all cells of the same owner into ONE fill() call.
+ *
+ * Now supports brightness levels: dead territory is dimmed, bases are bright.
  *
  * @param ctx - Canvas context
  * @param getCellOwner - Function to get owner at (x, y)
@@ -99,6 +108,7 @@ let territoryStats = {
  * @param width - Number of cells wide
  * @param height - Number of cells tall
  * @param time - Animation time (for pattern drift)
+ * @param getCellBrightness - Optional function to get brightness (0-1) at (x, y). If not provided, uses full brightness.
  */
 export function renderTerritoryLayer(
   ctx: CanvasRenderingContext2D,
@@ -108,12 +118,14 @@ export function renderTerritoryLayer(
   startY: number,
   width: number,
   height: number,
-  time: number
+  time: number,
+  getCellBrightness?: (x: number, y: number) => number
 ): void {
   const t0 = performance.now();
 
-  // Group cells by owner
-  const cellsByOwner: Map<number, Array<[number, number]>> = new Map();
+  // Group cells by owner AND brightness level for efficient batching
+  // Key format: "owner-brightness" where brightness is rounded to avoid too many groups
+  const cellsByOwnerAndBrightness: Map<string, { owner: number; brightness: number; cells: Array<[number, number]> }> = new Map();
 
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
@@ -122,10 +134,16 @@ export function renderTerritoryLayer(
       const owner = getCellOwner(gridX, gridY);
 
       if (owner > 0) {
-        if (!cellsByOwner.has(owner)) {
-          cellsByOwner.set(owner, []);
+        // Get brightness, default to full if no function provided
+        const brightness = getCellBrightness ? getCellBrightness(gridX, gridY) : 1.0;
+        // Round brightness to 2 decimal places to batch similar values
+        const roundedBrightness = Math.round(brightness * 100) / 100;
+        const key = `${owner}-${roundedBrightness}`;
+
+        if (!cellsByOwnerAndBrightness.has(key)) {
+          cellsByOwnerAndBrightness.set(key, { owner, brightness: roundedBrightness, cells: [] });
         }
-        cellsByOwner.get(owner)!.push([col, row]);
+        cellsByOwnerAndBrightness.get(key)!.cells.push([col, row]);
       }
     }
   }
@@ -134,8 +152,8 @@ export function renderTerritoryLayer(
   territoryStats.groupMs += tGroup - t0;
   territoryStats.totalCells += width * height;
 
-  // Render each owner's territory with ONE fill call
-  for (const [owner, cells] of cellsByOwner) {
+  // Render each group with ONE fill call per brightness level
+  for (const [, { owner, brightness, cells }] of cellsByOwnerAndBrightness) {
     const pattern = territoryPatterns.get(owner);
     if (!pattern) continue;
 
@@ -146,9 +164,10 @@ export function renderTerritoryLayer(
 
     ctx.save();
     ctx.translate(offsetX, offsetY);
+    ctx.globalAlpha = brightness;
     ctx.fillStyle = pattern;
 
-    // Build path for ALL cells of this owner
+    // Build path for ALL cells of this owner+brightness
     ctx.beginPath();
     for (const [col, row] of cells) {
       ctx.rect(col * cellSize, row * cellSize, cellSize, cellSize);
@@ -162,15 +181,9 @@ export function renderTerritoryLayer(
   territoryStats.fillMs += tFill - tGroup;
   territoryStats.callCount++;
 
-  // Log every 5 seconds
+  // Reset stats periodically (logging disabled for production)
   const now = Date.now();
   if (now - territoryStats.lastLog > 5000) {
-    console.log('[PERF] Territory Render:', {
-      calls: territoryStats.callCount,
-      avgGroupMs: (territoryStats.groupMs / territoryStats.callCount).toFixed(1),
-      avgFillMs: (territoryStats.fillMs / territoryStats.callCount).toFixed(1),
-      avgCells: Math.round(territoryStats.totalCells / territoryStats.callCount),
-    });
     territoryStats = { groupMs: 0, fillMs: 0, callCount: 0, lastLog: now, totalCells: 0 };
   }
 }
