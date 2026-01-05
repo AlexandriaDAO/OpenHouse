@@ -1,5 +1,6 @@
 import React from 'react';
 import { BetType } from '@/declarations/roulette_backend/roulette_backend.did';
+import { MobileBettingBoard } from './BettingBoard/MobileBettingBoard';
 
 export interface PlacedBet {
   betType: BetType;
@@ -166,7 +167,28 @@ export const BettingBoard: React.FC<BettingBoardProps> = ({
     return bet ? isBetWinner(bet, winningNumber) : false;
   };
 
-  // Generate number blocks (1-36)
+  // Render Zero cell
+  const renderZero = () => {
+    const isZeroWinner = isWinningNumberCell(0);
+    return (
+      <div
+        className={`relative w-10 sm:w-12 h-[calc(3*2.5rem)] sm:h-[calc(3*3rem)] bg-green-600 border border-gray-700 flex items-center justify-center cursor-pointer hover:bg-green-500 transition text-white font-bold text-sm rounded-l self-start ${
+          isZeroWinner ? 'ring-2 ring-yellow-400 animate-pulse z-20 brightness-125' : ''
+        }`}
+        onClick={(e) => handleBetClick([0], { Straight: 0 }, '0', e)}
+        onContextMenu={(e) => handleBetClick([0], { Straight: 0 }, '0', e)}
+        style={{ writingMode: 'vertical-rl' }}
+      >
+        <span className="py-4">0</span>
+        {renderChip([0], { Straight: 0 })}
+        {isZeroWinner && (
+          <div className="absolute inset-0 bg-yellow-400/20 animate-pulse rounded pointer-events-none" />
+        )}
+      </div>
+    );
+  };
+
+  // Generate number blocks (1-36) with 2:1 column bets
   const renderNumberGrid = () => {
     const rows = [];
     for (let row = 0; row < 3; row++) {
@@ -206,7 +228,7 @@ export const BettingBoard: React.FC<BettingBoardProps> = ({
         <div key={`row-${row}`} className="flex">
           {cells}
           <div
-            className={`relative w-16 h-10 sm:h-12 bg-gray-800 border border-gray-700 flex items-center justify-center cursor-pointer hover:bg-gray-700 transition text-white font-bold text-xs ${
+            className={`relative w-10 h-10 sm:w-16 sm:h-12 bg-gray-800 border border-gray-700 flex items-center justify-center cursor-pointer hover:bg-gray-700 transition text-white font-bold text-xs ${
               columnWins ? 'ring-2 ring-green-400 animate-pulse' : ''
             }`}
             onClick={(e) => handleBetClick(columnNums, { Column: (3 - row) }, `Column ${3 - row}`, e)}
@@ -224,99 +246,159 @@ export const BettingBoard: React.FC<BettingBoardProps> = ({
     return rows;
   };
 
+  // Render dozen bets
+  const renderDozenBets = () => (
+    <div className="flex">
+      {[
+        { label: '1st 12', nums: Array.from({ length: 12 }, (_, i) => i + 1), variant: 1 },
+        { label: '2nd 12', nums: Array.from({ length: 12 }, (_, i) => i + 13), variant: 2 },
+        { label: '3rd 12', nums: Array.from({ length: 12 }, (_, i) => i + 25), variant: 3 },
+      ].map(({ label, nums, variant }) => {
+        const dozenWins = hasWinningBet(nums);
+        return (
+          <div
+            key={label}
+            className={`relative flex-1 h-12 bg-gray-800 border border-gray-700 flex items-center justify-center cursor-pointer hover:bg-gray-700 transition text-white font-bold text-sm ${
+              dozenWins ? 'ring-2 ring-green-400 animate-pulse' : ''
+            }`}
+            onClick={(e) => handleBetClick(nums, { Dozen: variant }, label, e)}
+            onContextMenu={(e) => handleBetClick(nums, { Dozen: variant }, label, e)}
+          >
+            {label}
+            {renderChip(nums, { Dozen: variant })}
+            {dozenWins && (
+              <div className="absolute inset-0 bg-green-400/20 animate-pulse rounded pointer-events-none" />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  // Render even money bets
+  const renderEvenMoneyBets = () => (
+    <div className="grid grid-cols-3 gap-1">
+      {[
+        { label: '1-18', nums: Array.from({ length: 18 }, (_, i) => i + 1), betType: { Low: null } as BetType, className: 'bg-gray-800' },
+        { label: 'EVEN', nums: Array.from({ length: 36 }, (_, i) => i + 1).filter(n => n % 2 === 0), betType: { Even: null } as BetType, className: 'bg-gray-800' },
+        { label: 'RED', nums: RED_NUMBERS, betType: { Red: null } as BetType, className: 'bg-red-700' },
+        { label: 'BLACK', nums: Array.from({ length: 36 }, (_, i) => i + 1).filter(n => !RED_NUMBERS.includes(n)), betType: { Black: null } as BetType, className: 'bg-black' },
+        { label: 'ODD', nums: Array.from({ length: 36 }, (_, i) => i + 1).filter(n => n % 2 === 1), betType: { Odd: null } as BetType, className: 'bg-gray-800' },
+        { label: '19-36', nums: Array.from({ length: 18 }, (_, i) => i + 19), betType: { High: null } as BetType, className: 'bg-gray-800' },
+      ].map(({ label, nums, betType, className }) => {
+        const outsideWins = hasWinningBet(nums);
+        return (
+          <div
+            key={label}
+            className={`relative h-12 ${className} border border-gray-700 flex items-center justify-center cursor-pointer hover:brightness-110 transition text-white font-bold text-sm ${
+              outsideWins ? 'ring-2 ring-green-400 animate-pulse' : ''
+            }`}
+            onClick={(e) => handleBetClick(nums, betType, label, e)}
+            onContextMenu={(e) => handleBetClick(nums, betType, label, e)}
+          >
+            {label}
+            {renderChip(nums, betType)}
+            {outsideWins && (
+              <div className="absolute inset-0 bg-green-400/20 animate-pulse rounded pointer-events-none" />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+
   return (
-    <div className="bg-gradient-to-b from-green-900 to-green-950 p-3 sm:p-4 rounded-lg border-4 border-yellow-700 shadow-2xl select-none">
-      {/* Main betting area */}
-      <div className="flex">
-        {/* Zero - spans only the number rows (3 rows × cell height) */}
-        {(() => {
-          const isZeroWinner = isWinningNumberCell(0);
-          return (
-            <div
-              className={`relative w-10 sm:w-12 h-[calc(3*2.5rem)] sm:h-[calc(3*3rem)] bg-green-600 border border-gray-700 flex items-center justify-center cursor-pointer hover:bg-green-500 transition text-white font-bold text-sm rounded-l self-start ${
-                isZeroWinner ? 'ring-2 ring-yellow-400 animate-pulse z-20 brightness-125' : ''
-              }`}
-              onClick={(e) => handleBetClick([0], { Straight: 0 }, '0', e)}
-              onContextMenu={(e) => handleBetClick([0], { Straight: 0 }, '0', e)}
-              style={{ writingMode: 'vertical-rl' }}
-            >
-              <span className="py-4">0</span>
-              {renderChip([0], { Straight: 0 })}
-              {isZeroWinner && (
-                <div className="absolute inset-0 bg-yellow-400/20 animate-pulse rounded pointer-events-none" />
-              )}
+    <>
+      {/* Mobile View - New scrollable layout */}
+      <div className="md:hidden">
+        <MobileBettingBoard
+          bets={bets}
+          chipValue={chipValue}
+          onPlaceBet={onPlaceBet}
+          onRemoveBet={onRemoveBet}
+          disabled={disabled}
+          winningNumber={winningNumber}
+          showResults={showResults}
+        />
+      </div>
+
+      {/* Desktop View - Full board */}
+      <div className="hidden md:block">
+        <div className="bg-gradient-to-b from-green-900 to-green-950 p-4 rounded-lg border-4 border-yellow-700 shadow-2xl select-none">
+          {/* Main betting area */}
+          <div className="flex">
+            {renderZero()}
+
+            {/* Right side: numbers + outside bets */}
+            <div className="flex flex-col">
+              {/* Numbers grid + 2:1 columns */}
+              {renderNumberGrid()}
+
+              {/* Dozen bets */}
+              <div className="flex mt-1">
+                {[
+                  { label: '1st 12', nums: Array.from({ length: 12 }, (_, i) => i + 1), variant: 1 },
+                  { label: '2nd 12', nums: Array.from({ length: 12 }, (_, i) => i + 13), variant: 2 },
+                  { label: '3rd 12', nums: Array.from({ length: 12 }, (_, i) => i + 25), variant: 3 },
+                ].map(({ label, nums, variant }) => {
+                  const dozenWins = hasWinningBet(nums);
+                  return (
+                    <div
+                      key={label}
+                      className={`relative w-[calc(4*3rem)] h-8 bg-gray-800 border border-gray-700 flex items-center justify-center cursor-pointer hover:bg-gray-700 transition text-white font-bold text-xs ${
+                        dozenWins ? 'ring-2 ring-green-400 animate-pulse' : ''
+                      }`}
+                      onClick={(e) => handleBetClick(nums, { Dozen: variant }, label, e)}
+                      onContextMenu={(e) => handleBetClick(nums, { Dozen: variant }, label, e)}
+                    >
+                      {label}
+                      {renderChip(nums, { Dozen: variant })}
+                      {dozenWins && (
+                        <div className="absolute inset-0 bg-green-400/20 animate-pulse rounded pointer-events-none" />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Even money bets */}
+              <div className="flex mt-1">
+                {[
+                  { label: '1-18', nums: Array.from({ length: 18 }, (_, i) => i + 1), betType: { Low: null } as BetType },
+                  { label: 'EVEN', nums: Array.from({ length: 36 }, (_, i) => i + 1).filter(n => n % 2 === 0), betType: { Even: null } as BetType },
+                  { label: 'RED', nums: RED_NUMBERS, betType: { Red: null } as BetType, className: 'bg-red-700' },
+                  { label: 'BLACK', nums: Array.from({ length: 36 }, (_, i) => i + 1).filter(n => !RED_NUMBERS.includes(n)), betType: { Black: null } as BetType, className: 'bg-black' },
+                  { label: 'ODD', nums: Array.from({ length: 36 }, (_, i) => i + 1).filter(n => n % 2 === 1), betType: { Odd: null } as BetType },
+                  { label: '19-36', nums: Array.from({ length: 18 }, (_, i) => i + 19), betType: { High: null } as BetType },
+                ].map(({ label, nums, betType, className = 'bg-gray-800' }) => {
+                  const outsideWins = hasWinningBet(nums);
+                  return (
+                    <div
+                      key={label}
+                      className={`relative w-[calc(2*3rem)] h-8 ${className} border border-gray-700 flex items-center justify-center cursor-pointer hover:brightness-110 transition text-white font-bold text-[10px] ${
+                        outsideWins ? 'ring-2 ring-green-400 animate-pulse' : ''
+                      }`}
+                      onClick={(e) => handleBetClick(nums, betType, label, e)}
+                      onContextMenu={(e) => handleBetClick(nums, betType, label, e)}
+                    >
+                      {label}
+                      {renderChip(nums, betType)}
+                      {outsideWins && (
+                        <div className="absolute inset-0 bg-green-400/20 animate-pulse rounded pointer-events-none" />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          );
-        })()}
-
-        {/* Right side: numbers + outside bets */}
-        <div className="flex flex-col">
-          {/* Numbers grid + 2:1 columns */}
-          {renderNumberGrid()}
-
-          {/* Dozen bets - use same 12-column grid as numbers */}
-          <div className="flex mt-1">
-            {[
-              { label: '1st 12', nums: Array.from({ length: 12 }, (_, i) => i + 1), variant: 1 },
-              { label: '2nd 12', nums: Array.from({ length: 12 }, (_, i) => i + 13), variant: 2 },
-              { label: '3rd 12', nums: Array.from({ length: 12 }, (_, i) => i + 25), variant: 3 },
-            ].map(({ label, nums, variant }) => {
-              const dozenWins = hasWinningBet(nums);
-              return (
-                <div
-                  key={label}
-                  className={`relative w-[calc(4*2.5rem)] sm:w-[calc(4*3rem)] h-8 bg-gray-800 border border-gray-700 flex items-center justify-center cursor-pointer hover:bg-gray-700 transition text-white font-bold text-xs ${
-                    dozenWins ? 'ring-2 ring-green-400 animate-pulse' : ''
-                  }`}
-                  onClick={(e) => handleBetClick(nums, { Dozen: variant }, label, e)}
-                  onContextMenu={(e) => handleBetClick(nums, { Dozen: variant }, label, e)}
-                >
-                  {label}
-                  {renderChip(nums, { Dozen: variant })}
-                  {dozenWins && (
-                    <div className="absolute inset-0 bg-green-400/20 animate-pulse rounded pointer-events-none" />
-                  )}
-                </div>
-              );
-            })}
           </div>
 
-          {/* Even money bets - single row of 6, each spans 2 number columns */}
-          <div className="flex mt-1">
-            {[
-              { label: '1-18', nums: Array.from({ length: 18 }, (_, i) => i + 1), betType: { Low: null } as BetType },
-              { label: 'EVEN', nums: Array.from({ length: 36 }, (_, i) => i + 1).filter(n => n % 2 === 0), betType: { Even: null } as BetType },
-              { label: 'RED', nums: RED_NUMBERS, betType: { Red: null } as BetType, className: 'bg-red-700' },
-              { label: 'BLACK', nums: Array.from({ length: 36 }, (_, i) => i + 1).filter(n => !RED_NUMBERS.includes(n)), betType: { Black: null } as BetType, className: 'bg-black' },
-              { label: 'ODD', nums: Array.from({ length: 36 }, (_, i) => i + 1).filter(n => n % 2 === 1), betType: { Odd: null } as BetType },
-              { label: '19-36', nums: Array.from({ length: 18 }, (_, i) => i + 19), betType: { High: null } as BetType },
-            ].map(({ label, nums, betType, className = 'bg-gray-800' }) => {
-              const outsideWins = hasWinningBet(nums);
-              return (
-                <div
-                  key={label}
-                  className={`relative w-[calc(2*2.5rem)] sm:w-[calc(2*3rem)] h-8 ${className} border border-gray-700 flex items-center justify-center cursor-pointer hover:brightness-110 transition text-white font-bold text-[10px] ${
-                    outsideWins ? 'ring-2 ring-green-400 animate-pulse' : ''
-                  }`}
-                  onClick={(e) => handleBetClick(nums, betType, label, e)}
-                  onContextMenu={(e) => handleBetClick(nums, betType, label, e)}
-                >
-                  {label}
-                  {renderChip(nums, betType)}
-                  {outsideWins && (
-                    <div className="absolute inset-0 bg-green-400/20 animate-pulse rounded pointer-events-none" />
-                  )}
-                </div>
-              );
-            })}
+          {/* Instructions */}
+          <div className="mt-2 text-xs text-gray-400 text-center">
+            Click to bet • Right-click to remove
           </div>
         </div>
       </div>
-
-      {/* Instructions */}
-      <div className="mt-2 text-xs text-gray-400 text-center">
-        Click to bet • Right-click to remove
-      </div>
-    </div>
+    </>
   );
 };

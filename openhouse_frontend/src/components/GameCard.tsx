@@ -43,7 +43,7 @@ export const GameCard: React.FC<GameCardProps> = ({ game }) => {
       <div className="space-y-2 text-sm">
         <div className="flex justify-between">
           <span className="text-gray-400">Min Bet:</span>
-          <span className="font-semibold">{game.minBet} USDT</span>
+          <span className="font-semibold">${game.minBet}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-gray-400">Max Win:</span>

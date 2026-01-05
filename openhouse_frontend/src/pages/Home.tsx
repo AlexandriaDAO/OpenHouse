@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GameCard } from '../components/GameCard';
 import { OnboardingBanner } from '../components/OnboardingBanner';
+import { PortfolioCard } from '../components/PortfolioCard';
 import { getHomeGamesInfo, getLiquidityGames } from '../config/gameRegistry';
 
 export const Home: React.FC = () => {
@@ -13,6 +14,7 @@ export const Home: React.FC = () => {
     <div>
       <OnboardingBanner context="home" />
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <PortfolioCard />
         {games.map((game) => (
           <GameCard key={game.id} game={game} />
         ))}

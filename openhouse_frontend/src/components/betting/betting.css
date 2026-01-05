@@ -9,7 +9,7 @@
   --rail-text-muted: #9ca3af;
   --rail-text-highlight: #ffffff;
   --rail-accent: #22c55e;
-  --rail-height: 140px;
+  --rail-height: 100px;
 }
 
 /* ==========================================================================
@@ -64,6 +64,178 @@
   align-items: center;
   justify-content: flex-end;
   padding-right: 30px;
+}
+
+/* ==========================================================================
+   SLIM DESKTOP LAYOUT (mirrors mobile structure)
+   ========================================================================== */
+
+.rail-desktop-content-slim {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  height: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 0 24px 16px;
+  gap: 24px;
+}
+
+/* LEFT: Balances column */
+.rail-left-slim {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.desktop-balance-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.desktop-refresh-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 6px;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+}
+
+.desktop-refresh-btn:hover {
+  color: var(--rail-accent);
+  border-color: var(--rail-accent);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.desktop-balance-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: 'Roboto Mono', monospace;
+}
+
+.desktop-balance-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.desktop-balance-icon {
+  font-size: 14px;
+  font-weight: 700;
+  width: 28px;
+  text-align: center;
+}
+
+.desktop-balance-icon--plusminus {
+  color: var(--rail-accent);
+}
+
+.desktop-balance-icon--house {
+  color: #9ca3af;
+  font-size: 16px;
+}
+
+.desktop-balance-btn:hover .desktop-balance-icon--house {
+  color: #fff;
+}
+
+.desktop-balance-label {
+  font-size: 11px;
+  color: var(--rail-text-muted);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  width: 50px;
+  text-align: left;
+}
+
+.desktop-balance-value {
+  font-size: 13px;
+  color: #d1d5db;
+}
+
+/* CENTER: Pot with controls */
+.rail-center-slim {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 1;
+}
+
+.desktop-pot-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+}
+
+.desktop-pot-btn {
+  background: none;
+  border: none;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  border-radius: 4px;
+  opacity: 0.7;
+}
+
+.desktop-pot-btn:hover:not(:disabled) {
+  opacity: 1;
+}
+
+.desktop-pot-btn:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
+.desktop-pot-btn--clr {
+  color: #ef4444;
+}
+
+.desktop-pot-btn--clr:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.desktop-pot-btn--max {
+  color: var(--rail-accent);
+}
+
+.desktop-pot-btn--max:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.15);
+}
+
+.desktop-pot-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 80px;
+}
+
+.desktop-pot-amount {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+}
+
+/* RIGHT: Speed dial */
+.rail-right-slim {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
 }
 
 /* ==========================================================================
@@ -258,6 +430,12 @@
   display: flex;
   gap: 4px;
   z-index: 20;
+}
+
+/* Desktop speed dial - positioned to allow left expansion */
+.chip-speeddial-desktop {
+  position: relative;
+  z-index: 30;
 }
 
 /* ==========================================================================

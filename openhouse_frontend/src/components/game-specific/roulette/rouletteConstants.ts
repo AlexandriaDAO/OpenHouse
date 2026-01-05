@@ -16,8 +16,10 @@ export const ANIMATION = {
   BALL_SPEED: 720,        // degrees/sec during fast spin
   WHEEL_SPEED: 120,       // degrees/sec during fast spin
   LANDING_DURATION: 3500, // ms for ball to settle
-  WHEEL_DRIFT: 40,        // degrees wheel drifts during landing
   EXTRA_SPINS: 3,         // full rotations during landing for drama
+  // Note: Wheel drift is calculated dynamically in useRouletteAnimation.ts
+  // as WHEEL_SPEED * (LANDING_DURATION/1000) / 2 for uniform deceleration
+  // Ball easing exponent is also dynamic to match spinning velocity
 } as const;
 
 // SVG dimensions (viewBox is 400x400, center at 200,200)
@@ -56,8 +58,8 @@ export const getPocketColor = (num: number): string => {
 // Helper to check if number is red
 export const isRed = (num: number): boolean => RED_NUMBERS.has(num);
 
-// Get angle for a specific number on the wheel
+// Get angle for a specific number on the wheel (center of segment)
 export const getNumberAngle = (num: number): number => {
   const index = WHEEL_NUMBERS.indexOf(num);
-  return index * SEGMENT_ANGLE;
+  return index * SEGMENT_ANGLE + SEGMENT_ANGLE / 2;  // Center of segment, not edge
 };

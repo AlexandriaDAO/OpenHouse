@@ -28,6 +28,8 @@ export function useRouletteAnimation({
   const startBallAngleRef = useRef(0);
   const targetBallAngleRef = useRef(0);
   const frozenWheelRef = useRef(0);
+  const finalWheelRef = useRef(0);
+  const ballEasingExponentRef = useRef(3);
   const completedRef = useRef(false);
   const frameRef = useRef<number | null>(null);
 
@@ -40,13 +42,20 @@ export function useRouletteAnimation({
   });
 
   // Calculate target position for ball to land on winning number
+  // Key insight: Ball uses rotate(-ballAngle), so it appears at (360 - ballAngle) on screen
+  // Wheel uses rotate(wheelAngle), so slot at slotAngle appears at (slotAngle + wheelAngle)
+  // For ball to visually land on slot: (360 - ballAngle) = (slotAngle + wheelAngle)
+  // Therefore: ballAngle = 360 - (slotAngle + wheelAngle)
   const calculateTarget = useCallback((num: number, currentBall: number, finalWheel: number) => {
-    const slotAngle = getNumberAngle(num);
-    const screenTarget = (slotAngle + finalWheel) % 360;
-    const currentNormalized = currentBall % 360;
+    const slotAngle = getNumberAngle(num);  // Center of the pocket
+    const slotScreenPosition = (slotAngle + finalWheel) % 360;  // Where slot appears on screen
 
-    let diff = screenTarget - currentNormalized;
-    if (diff < 0) diff += 360;
+    // Account for ball's inverted rotation: ballAngle = 360 - screenPosition
+    const ballTargetAngle = (360 - slotScreenPosition + 360) % 360;
+
+    const currentNormalized = ((currentBall % 360) + 360) % 360;
+    let diff = ballTargetAngle - currentNormalized;
+    if (diff <= 0) diff += 360;  // Always continue spinning forward
 
     return currentBall + (ANIMATION.EXTRA_SPINS * 360) + diff;
   }, []);
@@ -61,13 +70,13 @@ export function useRouletteAnimation({
       lastTime = timestamp;
 
       if (isSpinning) {
-        // Fast spin phase
+        // Fast spin phase - continuous rotation at constant velocity
         ballAngleRef.current += ANIMATION.BALL_SPEED * dt;
         wheelAngleRef.current += ANIMATION.WHEEL_SPEED * dt;
 
         setState({
-          ballAngle: ballAngleRef.current % 360,
-          wheelAngle: wheelAngleRef.current % 360,
+          ballAngle: ballAngleRef.current,
+          wheelAngle: wheelAngleRef.current,
           ballRadius: 100,
           showResult: false,
         });
@@ -75,37 +84,59 @@ export function useRouletteAnimation({
         frameRef.current = requestAnimationFrame(animate);
 
       } else if (isLanding && winningNumber !== null) {
-        // Initialize landing phase
+        // Initialize landing phase - calculate velocities for smooth transition
         if (landingStartRef.current === null) {
           landingStartRef.current = timestamp;
           startBallAngleRef.current = ballAngleRef.current;
           frozenWheelRef.current = wheelAngleRef.current;
 
-          const finalWheel = frozenWheelRef.current + ANIMATION.WHEEL_DRIFT;
+          const durationSec = ANIMATION.LANDING_DURATION / 1000;
+
+          // Calculate wheel drift for uniform deceleration from current velocity to zero
+          // With uniform deceleration: distance = v0 * t / 2
+          // This ensures the wheel smoothly decelerates from WHEEL_SPEED to 0
+          const wheelDrift = ANIMATION.WHEEL_SPEED * durationSec / 2;
+          finalWheelRef.current = frozenWheelRef.current + wheelDrift;
+
+          // Calculate ball target based on where wheel will end up
           targetBallAngleRef.current = calculateTarget(
             winningNumber,
             startBallAngleRef.current,
-            finalWheel
+            finalWheelRef.current
+          );
+
+          // Calculate ball easing exponent for velocity continuity
+          // For ease-out curve 1 - (1-t)^n, derivative at t=0 is n
+          // So: n = (spinning_velocity * duration) / total_distance
+          // This ensures the ball starts at BALL_SPEED and smoothly decelerates to 0
+          const ballDistance = targetBallAngleRef.current - startBallAngleRef.current;
+          ballEasingExponentRef.current = Math.max(
+            1.5, // Minimum exponent for proper ease-out
+            (ANIMATION.BALL_SPEED * durationSec) / ballDistance
           );
         }
 
         const elapsed = timestamp - landingStartRef.current;
         const progress = Math.min(elapsed / ANIMATION.LANDING_DURATION, 1);
 
-        // Cubic ease-out for natural deceleration
-        const eased = 1 - Math.pow(1 - progress, 3);
+        // Use dynamic easing exponents for perfectly smooth velocity transitions
+        // Ball: starts at BALL_SPEED, smoothly decelerates to 0
+        const ballEased = 1 - Math.pow(1 - progress, ballEasingExponentRef.current);
+        // Wheel: uniform deceleration (exponent 2) from WHEEL_SPEED to 0
+        const wheelEased = 1 - Math.pow(1 - progress, 2);
 
-        // Interpolate ball position
+        // Interpolate positions
         const newBall = startBallAngleRef.current +
-          (targetBallAngleRef.current - startBallAngleRef.current) * eased;
+          (targetBallAngleRef.current - startBallAngleRef.current) * ballEased;
         ballAngleRef.current = newBall;
 
-        // Wheel drifts slowly to stop
-        const newWheel = frozenWheelRef.current + (ANIMATION.WHEEL_DRIFT * eased);
+        const newWheel = frozenWheelRef.current +
+          (finalWheelRef.current - frozenWheelRef.current) * wheelEased;
         wheelAngleRef.current = newWheel;
 
-        // Ball moves inward as it settles
-        const radius = 100 - (eased * 15);
+        // Ball moves inward as it settles (using quadratic ease for natural feel)
+        const radiusEased = 1 - Math.pow(1 - progress, 2);
+        const radius = 100 - radiusEased * 15;
 
         setState({
           ballAngle: newBall,

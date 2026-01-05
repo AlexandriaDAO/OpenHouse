@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useBettingState } from './hooks/useBettingState';
 import { useDepositFlow } from './hooks/useDepositFlow';
 import { ChipStack } from './ChipStack';
-import { ChipSelector } from './ChipSelector';
+import { ChipSpeedDial } from './ChipSpeedDial';
 import { DepositModal } from './DepositModal';
 import { RAIL_STYLES } from './types';
 import { formatUSDT } from '../../types/balance';
@@ -56,76 +56,6 @@ export function BettingRail(props: any) {
     await deposit.handleWithdrawAll();
   };
 
-  // ==========================================================================
-  // Compact Sub-components
-  // ==========================================================================
-
-  const CompactBalances = () => (
-    <div className="compact-balances">
-      <button onClick={onBalanceRefresh} className="refresh-btn-top" title="Refresh Balances">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-          <path d="M4 12c0-4.4 3.6-8 8-8 3.1 0 5.8 1.8 7.1 4.4M20 12c0 4.4-3.6 8-8 8-3.1 0-5.8-1.8-7.1-4.4"/>
-          <path d="M20 4v4h-4M4 20v-4h4"/>
-        </svg>
-      </button>
-      <div className="balance-row">
-        <span className="balance-label">CHIPS</span>
-        <span className="balance-value text-highlight">{formatUSDT(gameBalance)}</span>
-      </div>
-      <div className="balance-row">
-        <span className="balance-label">HOUSE</span>
-        <span className="balance-value">{formatUSDT(houseBalance)}</span>
-      </div>
-    </div>
-  );
-
-  const ActionPill = () => (
-    <div className="action-pill">
-      <button
-        onClick={handleCashOutClick}
-        disabled={deposit.isWithdrawing || gameBalance === 0n}
-        className="action-pill-btn action-pill-btn--withdraw"
-        title="Cash Out"
-      >
-        -
-      </button>
-      <button
-        onClick={() => navigate('/liquidity')}
-        className="action-pill-btn action-pill-btn--house"
-        title="Be The House"
-      >
-        ⌂
-      </button>
-      <button
-        onClick={deposit.openModal}
-        className={`action-pill-btn action-pill-btn--deposit ${showDepositAnimation ? 'deposit-pulse' : ''}`}
-        title="Buy Chips"
-      >
-        +
-      </button>
-    </div>
-  );
-
-  const BetDisplay = () => (
-    <div className="bet-display-pill">
-      <button
-        onClick={clearBet}
-        disabled={disabled || betAmount === 0}
-        className="clear-text-btn"
-      >
-        CLR
-      </button>
-      <span className="bet-amount-text">${betAmount.toFixed(2)}</span>
-      <button
-        onClick={setMaxBet}
-        disabled={disabled || atMax}
-        className="max-text-btn"
-      >
-        MAX
-      </button>
-    </div>
-  );
-
   // Cash Out Confirmation Modal
   const CashOutModal = () => (
     <div className="modal-overlay" onClick={() => setShowCashOutModal(false)}>
@@ -149,41 +79,76 @@ export function BettingRail(props: any) {
       {/* DESKTOP LAYOUT */}
       <div className="hidden md:block fixed bottom-0 left-0 right-0 z-40">
         <div className="betting-rail-desktop rail-theme--neon">
-          <div className="rail-desktop-content">
+          <div className="rail-desktop-content-slim">
 
-            {/* LEFT: Balances */}
-            <div className="rail-left">
-              <CompactBalances />
+            {/* LEFT: Balances (tappable like mobile) */}
+            <div className="rail-left-slim">
+              <div className="desktop-balance-row">
+                <button
+                  onClick={deposit.openModal}
+                  className={`desktop-balance-btn ${showDepositAnimation ? 'deposit-pulse' : ''}`}
+                  title="Deposit / Withdraw"
+                >
+                  <span className="desktop-balance-icon desktop-balance-icon--plusminus">+/-</span>
+                  <span className="desktop-balance-label">CHIPS</span>
+                  <span className="desktop-balance-value text-highlight">{formatUSDT(gameBalance)}</span>
+                </button>
+                <button onClick={onBalanceRefresh} className="desktop-refresh-btn" title="Refresh Balances">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="M4 12c0-4.4 3.6-8 8-8 3.1 0 5.8 1.8 7.1 4.4M20 12c0 4.4-3.6 8-8 8-3.1 0-5.8-1.8-7.1-4.4"/>
+                    <path d="M20 4v4h-4M4 20v-4h4"/>
+                  </svg>
+                </button>
+              </div>
+              <button
+                onClick={() => navigate('/liquidity')}
+                className="desktop-balance-btn"
+                title="Be The House"
+              >
+                <span className="desktop-balance-icon desktop-balance-icon--house">⌂</span>
+                <span className="desktop-balance-label">HOUSE</span>
+                <span className="desktop-balance-value">{formatUSDT(houseBalance)}</span>
+              </button>
             </div>
 
-            {/* CENTER: Chip Stack + Selectors */}
-            <div className="rail-center">
-              <div className="rail-center-content">
-                <div className="desktop-stack-wrapper">
+            {/* CENTER: Pot with CLR/MAX controls */}
+            <div className="rail-center-slim">
+              <div className="desktop-pot-controls">
+                <button
+                  onClick={clearBet}
+                  disabled={disabled || betAmount === 0}
+                  className="desktop-pot-btn desktop-pot-btn--clr"
+                >
+                  CLR
+                </button>
+                <div className="desktop-pot-stack">
                   <ChipStack
                     amount={betAmount}
                     onRemoveChip={removeChip}
                     disabled={disabled}
                     maxChipsPerPile={8}
                   />
+                  <span className="desktop-pot-amount">${betAmount.toFixed(2)}</span>
                 </div>
-                <div className="chip-selector-row">
-                  <ChipSelector
-                    onAddChip={addChip}
-                    canAddChip={canAddChip}
-                    disabled={disabled}
-                    size="md"
-                  />
-                </div>
+                <button
+                  onClick={setMaxBet}
+                  disabled={disabled || atMax}
+                  className="desktop-pot-btn desktop-pot-btn--max"
+                >
+                  MAX
+                </button>
               </div>
             </div>
 
-            {/* RIGHT: Bet Display + Action Pill */}
-            <div className="rail-right">
-              <div className="rail-right-stack">
-                <BetDisplay />
-                <ActionPill />
-              </div>
+            {/* RIGHT: Chip Speed Dial (expands up) */}
+            <div className="rail-right-slim">
+              <ChipSpeedDial
+                onAddChip={addChip}
+                canAddChip={canAddChip}
+                disabled={disabled}
+                expandDirection="up"
+                size="md"
+              />
             </div>
 
           </div>
@@ -255,15 +220,12 @@ export function BettingRail(props: any) {
                 />
               </div>
 
-              {/* RIGHT: Chip selector vertical */}
-              <div className="mobile-col-chips">
-                <ChipSelector
+              {/* RIGHT: Chip Speed Dial */}
+              <div className="mobile-col-chips flex items-center justify-center">
+                <ChipSpeedDial
                   onAddChip={addChip}
                   canAddChip={canAddChip}
                   disabled={disabled}
-                  size="sm"
-                  variant="compact"
-                  layout="vertical"
                 />
               </div>
             </div>
