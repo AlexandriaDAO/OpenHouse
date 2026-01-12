@@ -1,6 +1,6 @@
 #!/bin/bash
-# OpenHouse Multi-Game Casino Deployment Script - Mainnet Only
-# Usage: ./deploy.sh [--roulette-only|--life-only|--life2-only|--life3-only|--frontend-only] [--test]
+# OpenHouse Frontend Deployment Script - Mainnet Only
+# Usage: ./deploy.sh [--test]
 
 set -e
 
@@ -8,57 +8,32 @@ set -e
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # Parse arguments
-DEPLOY_TARGET="all"
 RUN_TESTS=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --roulette-only)
-            DEPLOY_TARGET="roulette"
-            shift
-            ;;
-        --life-only)
-            DEPLOY_TARGET="life"
-            shift
-            ;;
-        --life2-only)
-            DEPLOY_TARGET="life2"
-            shift
-            ;;
-        --life3-only)
-            DEPLOY_TARGET="life3"
-            shift
-            ;;
-        --frontend-only)
-            DEPLOY_TARGET="frontend"
-            shift
-            ;;
         --test)
             RUN_TESTS=true
             shift
             ;;
         --help)
-            echo "OpenHouse Casino Deployment Script - Mainnet Only"
+            echo "OpenHouse Frontend Deployment Script - Mainnet Only"
             echo ""
             echo "Usage: ./deploy.sh [options]"
             echo ""
             echo "Options:"
-            echo "  --roulette-only    Deploy only roulette backend"
-            echo "  --life-only        Deploy only life1 backend (Game of Life - Server 1)"
-            echo "  --life2-only       Deploy only life2 backend (Game of Life - Server 2)"
-            echo "  --life3-only       Deploy only life3 backend (Life Server 3)"
-            echo "  --frontend-only    Deploy only the frontend"
             echo "  --test             Run post-deployment tests"
             echo "  --help             Show this help message"
             echo ""
             echo "Examples:"
-            echo "  ./deploy.sh                    # Deploy everything to mainnet"
-            echo "  ./deploy.sh --roulette-only    # Deploy only roulette backend"
-            echo "  ./deploy.sh --life-only        # Deploy only life1 backend"
+            echo "  ./deploy.sh                    # Deploy frontend to mainnet"
             echo "  ./deploy.sh --test             # Deploy and run tests"
             echo ""
             echo "IMPORTANT: This script ALWAYS deploys to MAINNET"
             echo "There is no local testing environment - all testing happens on mainnet"
+            echo ""
+            echo "NOTE: Backend canisters are deployed separately from the OpenHouse-backend repo"
+            echo "      https://github.com/AlexandriaDAO/OpenHouse-backend"
             exit 0
             ;;
         *)
@@ -71,18 +46,13 @@ done
 
 # Display deployment configuration
 echo "================================================"
-echo "OpenHouse Casino Deployment - MAINNET ONLY"
+echo "OpenHouse Frontend Deployment - MAINNET ONLY"
 echo "================================================"
 echo "Network: IC (Mainnet)"
-echo "Target: $DEPLOY_TARGET"
 echo "Working from: $SCRIPT_DIR"
 echo ""
-echo "Mainnet Canister IDs:"
-echo "  Roulette Backend:  wvrcw-3aaaa-aaaah-arm4a-cai"
-echo "  Life1 Backend:     pijnb-7yaaa-aaaae-qgcuq-cai"
-echo "  Life2 Backend:     qoski-4yaaa-aaaai-q4g4a-cai"
-echo "  Life3 Backend:     66p3s-uaaaa-aaaad-ac47a-cai"
-echo "  Frontend:          pezw3-laaaa-aaaal-qssoa-cai"
+echo "Canister ID:"
+echo "  Frontend:  pezw3-laaaa-aaaal-qssoa-cai"
 echo "================================================"
 echo ""
 
@@ -107,117 +77,11 @@ use_daopad_identity() {
     echo ""
 }
 
-# Function to deploy roulette backend
-deploy_roulette() {
-    echo "================================================"
-    echo "Deploying Roulette Backend Canister"
-    echo "=================================================="
-    echo "Deploying Roulette Backend Canister"
-    echo "=================================================="
-
-    # Build the backend canister
-    echo "Building roulette backend canister..."
-    cargo build --release --target wasm32-unknown-unknown --package roulette_backend
-
-    # Skip candid extraction - using manually created .did file
-    echo "Using pre-defined candid interface..."
-
-    # Deploy to mainnet
-    echo "Deploying roulette backend to mainnet..."
-    dfx deploy roulette_backend --network ic
-
-    echo "Roulette backend deployment completed!"
-    echo ""
-}
-
-# Function to deploy life1 backend (Game of Life - Server 1)
-deploy_life() {
-    echo "================================================"
-    echo "Deploying Life1 Backend Canister"
-    echo "================================================"
-
-    # Build the backend canister
-    echo "Building life1 backend canister..."
-    cargo build --release --target wasm32-unknown-unknown --package life1_backend
-
-    # Skip candid extraction - using manually created .did file
-    echo "Using pre-defined candid interface..."
-
-    # Deploy to mainnet
-    echo "Deploying life1 backend to mainnet..."
-    dfx deploy life1_backend --network ic
-
-    echo "Life1 backend deployment completed!"
-    echo "Life1 Canister ID: pijnb-7yaaa-aaaae-qgcuq-cai"
-    echo ""
-}
-
-# Function to deploy life2 backend (Game of Life - Server 2)
-deploy_life2() {
-    echo "================================================"
-    echo "Deploying Life2 Backend Canister"
-    echo "================================================"
-
-    # Build the backend canister
-    echo "Building life2 backend canister..."
-    cargo build --release --target wasm32-unknown-unknown --package life2_backend
-
-    # Skip candid extraction - using manually created .did file
-    echo "Using pre-defined candid interface..."
-
-    # Deploy to mainnet
-    echo "Deploying life2 backend to mainnet..."
-    dfx deploy life2_backend --network ic
-
-    echo "Life2 backend deployment completed!"
-    echo "Life2 Canister ID: qoski-4yaaa-aaaai-q4g4a-cai"
-    echo ""
-}
-
-# Function to deploy life3 backend (Life Server 3)
-deploy_life3() {
-    echo "================================================"
-    echo "Deploying Life3 Backend Canister"
-    echo "================================================"
-
-    # Build the backend canister
-    echo "Building life3 backend canister..."
-    cargo build --release --target wasm32-unknown-unknown --package life3_backend
-
-    # Skip candid extraction - using manually created .did file
-    echo "Using pre-defined candid interface..."
-
-    # Deploy to mainnet
-    echo "Deploying life3 backend to mainnet..."
-    dfx deploy life3_backend --network ic
-
-    echo "Life3 backend deployment completed!"
-    echo "Life3 Canister ID: 66p3s-uaaaa-aaaad-ac47a-cai"
-    echo ""
-}
-
 # Function to deploy frontend
 deploy_frontend() {
     echo "=================================================="
     echo "Deploying OpenHouse Frontend Canister"
     echo "=================================================="
-
-    # CRITICAL: Regenerate declarations from Candid interfaces
-    echo "Regenerating backend declarations from Candid interfaces..."
-    dfx generate roulette_backend 2>/dev/null || echo "Warning: Could not generate roulette_backend declarations"
-    dfx generate life1_backend 2>/dev/null || echo "Warning: Could not generate life1_backend declarations"
-    dfx generate life2_backend 2>/dev/null || echo "Warning: Could not generate life2_backend declarations"
-    dfx generate life3_backend 2>/dev/null || echo "Warning: Could not generate life3_backend declarations"
-
-    # Sync declarations
-    echo "Copying fresh declarations to frontend..."
-    if [ -d "src/declarations" ]; then
-        mkdir -p openhouse_frontend/src/declarations
-        cp -r src/declarations/* openhouse_frontend/src/declarations/ 2>/dev/null || true
-        echo "✅ Declarations synced successfully"
-    else
-        echo "⚠️  Warning: src/declarations directory not found"
-    fi
 
     # Build frontend
     echo "Building frontend..."
@@ -252,10 +116,6 @@ run_tests() {
     echo "Running Post-Deployment Tests"
     echo "=================================================="
 
-    # Test roulette backend
-    echo "Testing roulette backend canister..."
-    dfx canister --network ic call roulette_backend greet '("Tester")' 2>/dev/null || echo "Roulette backend test method not yet implemented"
-
     # Check frontend is accessible
     echo "Checking frontend accessibility..."
     curl -s -o /dev/null -w "Frontend HTTP Status: %{http_code}\n" https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io
@@ -268,31 +128,7 @@ run_tests() {
 main() {
     check_dfx
     use_daopad_identity
-
-    case $DEPLOY_TARGET in
-        roulette)
-            deploy_roulette
-            ;;
-        life)
-            deploy_life
-            ;;
-        life2)
-            deploy_life2
-            ;;
-        life3)
-            deploy_life3
-            ;;
-        frontend)
-            deploy_frontend
-            ;;
-        all)
-            deploy_roulette
-            deploy_life
-            deploy_life2
-            deploy_life3
-            deploy_frontend
-            ;;
-    esac
+    deploy_frontend
 
     if [ "$RUN_TESTS" = true ]; then
         run_tests
@@ -301,13 +137,12 @@ main() {
     echo "=================================================="
     echo "Deployment Complete!"
     echo "=================================================="
-    echo "Roulette Backend:  https://dashboard.internetcomputer.org/canister/wvrcw-3aaaa-aaaah-arm4a-cai"
-    echo "Life1 Backend:     https://dashboard.internetcomputer.org/canister/pijnb-7yaaa-aaaae-qgcuq-cai"
-    echo "Life2 Backend:     https://dashboard.internetcomputer.org/canister/qoski-4yaaa-aaaai-q4g4a-cai"
-    echo "Life3 Backend:     https://dashboard.internetcomputer.org/canister/66p3s-uaaaa-aaaad-ac47a-cai"
-    echo "Frontend:          https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io"
+    echo "Frontend: https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io"
     echo ""
     echo "Remember: All changes are live on mainnet immediately!"
+    echo ""
+    echo "NOTE: Backend canisters are deployed separately from:"
+    echo "      https://github.com/AlexandriaDAO/OpenHouse-backend"
 }
 
 # Run main function

@@ -1,0 +1,9 @@
+# Code Owners for OpenHouse Casino
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Frozen backends - these canisters have been verified and controllers removed.
+# Changes require approval from @ghost (impossible), effectively locking these folders.
+# See VERIFICATION.md for deployed hashes.
+/plinko_backend/ @ghost
+/crash_backend/ @ghost
+/dice_backend/ @ghost

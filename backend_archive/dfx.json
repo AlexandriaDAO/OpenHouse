@@ -1,0 +1,65 @@
+{
+  "canisters": {
+    "crash_backend": {
+      "type": "rust",
+      "package": "crash_backend",
+      "candid": "crash_backend/crash_backend.did",
+      "specified_id": "fws6k-tyaaa-aaaap-qqc7q-cai"
+    },
+    "plinko_backend": {
+      "type": "rust",
+      "package": "plinko_backend",
+      "candid": "plinko_backend/plinko_backend.did",
+      "specified_id": "weupr-2qaaa-aaaap-abl3q-cai"
+    },
+    "roulette_backend": {
+      "type": "rust",
+      "package": "roulette_backend",
+      "candid": "roulette_backend/roulette_backend.did",
+      "specified_id": "wvrcw-3aaaa-aaaah-arm4a-cai"
+    },
+    "dice_backend": {
+      "type": "rust",
+      "package": "dice_backend",
+      "candid": "dice_backend/dice_backend.did",
+      "specified_id": "whchi-hyaaa-aaaao-a4ruq-cai",
+      "metadata": [
+        {
+          "name": "candid:service"
+        }
+      ]
+    },
+    "life1_backend": {
+      "type": "rust",
+      "package": "life1_backend",
+      "candid": "life1_backend/life1_backend.did",
+      "specified_id": "pijnb-7yaaa-aaaae-qgcuq-cai"
+    },
+    "life2_backend": {
+      "type": "rust",
+      "package": "life2_backend",
+      "candid": "life2_backend/life2_backend.did",
+      "specified_id": "qoski-4yaaa-aaaai-q4g4a-cai"
+    },
+    "life3_backend": {
+      "type": "rust",
+      "package": "life3_backend",
+      "candid": "life3_backend/life3_backend.did",
+      "specified_id": "66p3s-uaaaa-aaaad-ac47a-cai"
+    }
+  },
+  "defaults": {
+    "build": {
+      "args": "",
+      "packtool": ""
+    }
+  },
+  "networks": {
+    "ic": {
+      "providers": [
+        "https://icp0.io"
+      ]
+    }
+  },
+  "version": 1
+}

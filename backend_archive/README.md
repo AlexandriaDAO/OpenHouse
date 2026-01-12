@@ -1,10 +1,10 @@
-# 🎰 OpenHouse Casino
+# 🎰 OpenHouse Backend
 
-**The first casino where YOU can be the house**
+**Backend canisters for OpenHouse Casino - The first casino where YOU can be the house**
 
 Built by [Alexandria](https://alexandria.xyz) - an open-source gaming studio on the Internet Computer.
 
-> **Note**: This repository contains only the **frontend**. Backend canisters are maintained separately in the [OpenHouse-backend](https://github.com/AlexandriaDAO/OpenHouse-backend) repository.
+> **Note**: This repository contains only the **backend canisters**. The frontend is maintained separately in the [OpenHouse](https://github.com/AlexandriaDAO/OpenHouse) repository.
 
 ## 🎯 What Makes OpenHouse Different
 
@@ -39,9 +39,8 @@ The name "OpenHouse" is a triple play on words:
 |------|-------------|------------|---------|----------|
 | **Crash** | Multiplier rises until crash - cash out before it's too late | 1% | 1000x | [Play](https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/crash) |
 | **Plinko** | Drop a ball through pegs into multiplier slots | 1% | 1000x | [Play](https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/plinko) |
-| **Roulette** | European roulette with single zero | 2.7% | 35x | [Play](https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/roulette) |
+| **Roulette** | Beat the dealer to 21 | ~1% | 2.5x | [Play](https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/roulette) |
 | **Dice** | Roll over or under your target number | 1% | 100x | [Play](https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/dice) |
-| **Life** | Conway's Game of Life simulation | - | - | [Play](https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/life) |
 
 **Frontend**: https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io
 
@@ -77,45 +76,44 @@ OpenHouse is created by [Alexandria](https://alexandria.xyz), an open-source gam
 
 ## 🏗️ Architecture
 
-OpenHouse is split into two repositories:
+OpenHouse backend is built as a modular system where each game runs in its own Internet Computer canister:
 
-### This Repository (Frontend)
 ```
-openhouse/
-├── openhouse_frontend/     # React/TypeScript UI
-│   ├── src/                # Source code
-│   └── dist/               # Built assets
-├── deploy.sh               # Frontend deployment script
-├── dfx.json                # IC configuration
-└── CLAUDE.md               # Developer guide
+openhouse-backend/
+├── crash_backend/          # Crash game canister (fws6k-tyaaa-aaaap-qqc7q-cai)
+├── plinko_backend/         # Plinko game canister (weupr-2qaaa-aaaap-abl3q-cai)
+├── roulette_backend/       # Roulette game canister (wvrcw-3aaaa-aaaah-arm4a-cai)
+├── dice_backend/           # Dice game canister (whchi-hyaaa-aaaao-a4ruq-cai)
+├── life1_backend/          # Game of Life - Server 1 (pijnb-7yaaa-aaaae-qgcuq-cai)
+├── life2_backend/          # Game of Life - Server 2 (qoski-4yaaa-aaaai-q4g4a-cai)
+└── life3_backend/          # Game of Life - Server 3 (66p3s-uaaaa-aaaad-ac47a-cai)
 ```
 
-### Backend Repository
-Backend canisters are maintained in [OpenHouse-backend](https://github.com/AlexandriaDAO/OpenHouse-backend):
-
-| Canister | ID | Purpose |
-|----------|-----|---------|
-| Crash | `fws6k-tyaaa-aaaap-qqc7q-cai` | Crash game logic |
-| Plinko | `weupr-2qaaa-aaaap-abl3q-cai` | Plinko game logic |
-| Roulette | `wvrcw-3aaaa-aaaah-arm4a-cai` | Roulette game logic |
-| Dice | `whchi-hyaaa-aaaao-a4ruq-cai` | Dice game logic |
-| Life1 | `pijnb-7yaaa-aaaae-qgcuq-cai` | Game of Life - Server 1 |
-| Life2 | `qoski-4yaaa-aaaai-q4g4a-cai` | Game of Life - Server 2 |
-| Life3 | `66p3s-uaaaa-aaaad-ac47a-cai` | Game of Life - Server 3 |
+Each game backend is written in Rust and independently manages:
+- Game logic and rules
+- Random number generation via IC VRF
+- Bet placement and payout calculation using ckUSDT
+- Game history and statistics
 
 ## 🚀 Quick Start
 
 **⚠️ Important**: OpenHouse runs entirely on IC mainnet. There is no local testing environment - all development and testing happens in production.
 
 ```bash
-# Deploy frontend to mainnet
+# Deploy all backend canisters
 ./deploy.sh
+
+# Deploy specific backend
+./deploy.sh --roulette-only
+./deploy.sh --life-only
+./deploy.sh --life2-only
+./deploy.sh --life3-only
 
 # Deploy with tests
 ./deploy.sh --test
 ```
 
-**Note**: Backend canisters are deployed separately from the [OpenHouse-backend](https://github.com/AlexandriaDAO/OpenHouse-backend) repository.
+**Note**: Frontend is deployed separately from the [OpenHouse](https://github.com/AlexandriaDAO/OpenHouse) repository.
 
 ## 🔬 How Provable Fairness Works
 
@@ -126,7 +124,17 @@ Every game uses the Internet Computer's `raw_rand()` function, which provides cr
 - Can be verified by anyone on-chain
 
 ### 2. Transparent House Edge
-The house edge is hardcoded in the backend game logic and visible in the source code (see [OpenHouse-backend](https://github.com/AlexandriaDAO/OpenHouse-backend)).
+The house edge is hardcoded in the game logic and visible in the source code:
+
+```rust
+// Example from Plinko
+const HOUSE_EDGE: f64 = 0.01; // 1% house edge
+
+fn calculate_payout(multiplier: f64, bet: u64) -> u64 {
+    let payout = (bet as f64) * multiplier * (1.0 - HOUSE_EDGE);
+    payout as u64
+}
+```
 
 ### 3. Open Source Verification
 Anyone can:
@@ -150,9 +158,10 @@ Anyone can:
 - Min bet: 0.01 USDT | Max win: 1000x
 
 ### Roulette
-- European roulette (single zero)
-- Multiple bet types: straight, split, street, corner, etc.
-- Min bet: 0.01 USDT | Max win: 35x (straight bet)
+- Classic Roulette rules
+- Dealer stands on 17
+- Roulette pays 3:2
+- Min bet: 0.01 USDT | Max win: 10 USDT
 
 ### Dice
 - Roll a number from 0-100
@@ -164,41 +173,73 @@ Anyone can:
 
 ### Prerequisites
 - [dfx](https://internetcomputer.org/docs/current/developer-docs/setup/install) (IC SDK)
-- Node.js and npm
+- Rust and Cargo
 - Git
 
 ### Project Structure
 ```
-openhouse/
-├── openhouse_frontend/
-│   ├── src/                # React/TypeScript source
-│   ├── public/             # Static assets
-│   ├── package.json        # Dependencies
-│   └── vite.config.ts      # Build configuration
-├── deploy.sh               # Deployment script
-├── dfx.json                # IC configuration
-└── CLAUDE.md               # Developer guide
+openhouse-backend/
+├── crash_backend/
+│   ├── src/lib.rs           # Crash game logic
+│   └── crash_backend.did    # Candid interface
+├── plinko_backend/
+│   ├── src/lib.rs           # Plinko game logic
+│   └── plinko_backend.did   # Candid interface
+├── roulette_backend/
+│   ├── src/lib.rs           # Roulette game logic
+│   └── roulette_backend.did # Candid interface
+├── dice_backend/
+│   ├── src/lib.rs           # Dice game logic
+│   └── dice_backend.did     # Candid interface
+├── life1_backend/
+│   ├── src/lib.rs           # Game of Life - Server 1
+│   └── life1_backend.did    # Candid interface
+├── life2_backend/
+│   ├── src/lib.rs           # Game of Life - Server 2
+│   └── life2_backend.did    # Candid interface
+├── life3_backend/
+│   ├── src/lib.rs           # Game of Life - Server 3
+│   └── life3_backend.did    # Candid interface
+├── deploy.sh                # Deployment script
+├── dfx.json                 # IC configuration
+└── CLAUDE.md                # Detailed developer guide
 ```
 
-### Local Development
+### Testing on Mainnet
 ```bash
-cd openhouse_frontend
-npm install
-npm run dev
-```
-
-### Deploy to Mainnet
-```bash
+# Deploy changes
 ./deploy.sh
+
+# Test Crash backend
+dfx canister --network ic call crash_backend get_game_state
+
+# Test Plinko backend
+dfx canister --network ic call plinko_backend get_stats
+dfx canister --network ic call plinko_backend get_multipliers '(16, variant { High })'
+
+# Test Roulette backend
+dfx canister --network ic call roulette_backend get_stats
+
+# Test Dice backend
+dfx canister --network ic call dice_backend get_stats
+dfx canister --network ic call dice_backend calculate_payout_info '(50 : nat8, variant { Over })'
+
+# Test Life backends
+dfx canister --network ic call life1_backend greet '("Tester")'
 ```
 
-### Testing
-```bash
-# Deploy with automated tests
-./deploy.sh --test
+## 📊 Monitoring
 
-# Or manually check
-open https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io
+Check canister status and health:
+```bash
+# View canister cycles
+dfx canister --network ic status crash_backend
+dfx canister --network ic status plinko_backend
+dfx canister --network ic status roulette_backend
+dfx canister --network ic status dice_backend
+
+# View on IC Dashboard
+open https://dashboard.internetcomputer.org/canister/fws6k-tyaaa-aaaap-qqc7q-cai
 ```
 
 ## 🤝 Contributing
@@ -211,17 +252,17 @@ OpenHouse is open-source and welcomes contributions:
 4. Deploy and test on mainnet
 5. Submit a pull request
 
-### Frontend vs Backend Changes
-- **Frontend changes**: Submit PRs to this repository
-- **Backend changes**: Submit PRs to [OpenHouse-backend](https://github.com/AlexandriaDAO/OpenHouse-backend)
+### Adding New Games
+See `CLAUDE.md` for detailed instructions on adding new games to the platform.
 
 ## 📚 Resources
 
+- **Frontend Repo**: https://github.com/AlexandriaDAO/OpenHouse
 - **Live Frontend**: https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io
-- **Backend Repo**: https://github.com/AlexandriaDAO/OpenHouse-backend
 - **Developer Guide**: [CLAUDE.md](./CLAUDE.md)
 - **IC Documentation**: https://internetcomputer.org/docs
 - **VRF Spec**: https://internetcomputer.org/docs/current/references/ic-interface-spec#ic-raw_rand
+- **Candid Guide**: https://internetcomputer.org/docs/current/developer-docs/backend/candid/
 
 ## 🔐 Security
 
