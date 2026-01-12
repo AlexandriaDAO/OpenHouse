@@ -1,4 +1,5 @@
 import React from 'react';
+import { motion } from 'framer-motion';
 
 interface GameButtonProps {
   onClick: () => void;
@@ -45,11 +46,16 @@ export const GameButton: React.FC<GameButtonProps> = ({
     }
   };
 
+  const isDisabled = disabled || loading;
+
   return (
-    <button
+    <motion.button
       onClick={onClick}
-      disabled={disabled || loading}
+      disabled={isDisabled}
       className={getButtonStyles()}
+      whileHover={isDisabled ? undefined : { scale: 1.02 }}
+      whileTap={isDisabled ? undefined : { scale: 0.97 }}
+      transition={{ type: 'spring', stiffness: 400, damping: 25 }}
     >
       {loading ? (
         <>
@@ -62,6 +68,6 @@ export const GameButton: React.FC<GameButtonProps> = ({
           {label}
         </>
       )}
-    </button>
+    </motion.button>
   );
 };
