@@ -125,6 +125,123 @@ export function stepGeneration(
 }
 
 /**
+ * Run one generation of Conway's Game of Life on a single 128x128 quadrant.
+ *
+ * This is a performance-optimized version that only simulates the active quadrant.
+ * Edge cells read from the full grid snapshot (no border buffer - as per user requirement).
+ *
+ * @param quadrantCells - Dense 128x128 array (QUADRANT_SIZE * QUADRANT_SIZE = 16,384 cells)
+ * @param fullGrid - Full 512x512 snapshot for edge neighbor lookups
+ * @param quadrantX - Start X coordinate (0, 128, 256, or 384)
+ * @param quadrantY - Start Y coordinate (0, 128, 256, or 384)
+ * @param bases - Map of player bases for siege checking
+ * @param quadrantSize - Quadrant dimension (default 128)
+ * @param fullGridSize - Full grid dimension (default 512)
+ * @returns New cell array for the quadrant after one generation
+ */
+export function stepQuadrantGeneration(
+  quadrantCells: Cell[],
+  fullGrid: Cell[],
+  quadrantX: number,
+  quadrantY: number,
+  bases: Map<number, BaseInfo>,
+  quadrantSize: number = 128,
+  fullGridSize: number = 512
+): Cell[] {
+  if (quadrantCells.length === 0) return quadrantCells;
+
+  const newCells: Cell[] = new Array(quadrantSize * quadrantSize);
+
+  for (let localRow = 0; localRow < quadrantSize; localRow++) {
+    for (let localCol = 0; localCol < quadrantSize; localCol++) {
+      const localIdx = localRow * quadrantSize + localCol;
+      const current = quadrantCells[localIdx];
+
+      // Global coordinates for this cell
+      const globalRow = quadrantY + localRow;
+      const globalCol = quadrantX + localCol;
+
+      // Count neighbors and track owner counts
+      let neighborCount = 0;
+      const ownerCounts: number[] = new Array(11).fill(0); // 0-10 players
+
+      for (let di = -1; di <= 1; di++) {
+        for (let dj = -1; dj <= 1; dj++) {
+          if (di === 0 && dj === 0) continue;
+
+          const neighborLocalRow = localRow + di;
+          const neighborLocalCol = localCol + dj;
+
+          let neighbor: Cell;
+
+          // Check if neighbor is within the quadrant
+          if (
+            neighborLocalRow >= 0 && neighborLocalRow < quadrantSize &&
+            neighborLocalCol >= 0 && neighborLocalCol < quadrantSize
+          ) {
+            // Neighbor is within quadrant - use local simulation state
+            neighbor = quadrantCells[neighborLocalRow * quadrantSize + neighborLocalCol];
+          } else {
+            // Neighbor is outside quadrant - use full grid snapshot with toroidal wrap
+            const nGlobalRow = (globalRow + di + fullGridSize) % fullGridSize;
+            const nGlobalCol = (globalCol + dj + fullGridSize) % fullGridSize;
+            neighbor = fullGrid[nGlobalRow * fullGridSize + nGlobalCol];
+          }
+
+          if (neighbor && neighbor.alive) {
+            neighborCount++;
+            if (neighbor.owner > 0 && neighbor.owner <= 10) {
+              ownerCounts[neighbor.owner]++;
+            }
+          }
+        }
+      }
+
+      // Apply Conway's rules (identical logic to stepGeneration)
+      let newAlive = false;
+      let newOwner = current ? current.owner : 0;
+
+      if (current && current.alive) {
+        // Living cell survives with 2-3 neighbors
+        newAlive = neighborCount === 2 || neighborCount === 3;
+      } else {
+        // Dead cell born with exactly 3 neighbors
+        if (neighborCount === 3) {
+          newAlive = true;
+
+          // New owner = majority owner among parents
+          let maxCount = 0;
+          let majorityOwner = 1;
+          for (let o = 1; o <= 10; o++) {
+            if (ownerCounts[o] > maxCount) {
+              maxCount = ownerCounts[o];
+              majorityOwner = o;
+            }
+          }
+          newOwner = majorityOwner;
+
+          // SIEGE MECHANIC: Births blocked in enemy base protection zones
+          const protectionOwner = findProtectionZoneOwner(globalCol, globalRow, bases);
+          if (protectionOwner !== null && protectionOwner !== newOwner) {
+            // Birth blocked - enemy base's protection zone prevents birth
+            newAlive = false;
+            newOwner = current ? current.owner : 0; // Preserve existing owner/territory
+          }
+        }
+      }
+
+      // Preserve owner (territory) - persists even when cells die
+      newCells[localIdx] = {
+        owner: newOwner,
+        alive: newAlive,
+      };
+    }
+  }
+
+  return newCells;
+}
+
+/**
  * Count alive cells in a grid.
  */
 export function countAlive(cells: Cell[]): number {

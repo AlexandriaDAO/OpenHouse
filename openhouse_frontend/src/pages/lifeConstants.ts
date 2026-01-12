@@ -5,6 +5,12 @@ export const QUADRANTS_PER_ROW = 4;
 export const TOTAL_QUADRANTS = 16;
 export const TOTAL_CELLS = GRID_SIZE * GRID_SIZE; // 262,144 cells
 
+// View-mode-specific timing constants
+export const OVERVIEW_SYNC_MS = 1000;    // Backend refresh in overview mode (no local sim)
+export const QUADRANT_SYNC_MS = 500;     // Backend sync in quadrant mode (with local sim)
+export const QUADRANT_TICK_MS = 125;     // Local sim tick in quadrant mode only
+export const QUADRANT_CELLS = QUADRANT_SIZE * QUADRANT_SIZE;  // 16,384 cells per quadrant
+
 // Base dimensions (v2 base-centric system)
 export const BASE_SIZE = 8;           // Total base footprint (8x8)
 export const BASE_COST = 100;         // Cost to place a base

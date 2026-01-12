@@ -44,6 +44,11 @@ import {
   PLACEMENT_TIMEOUT_MS,
   type RiskServer,
   type RegionInfo,
+  // View-mode-specific timing constants
+  OVERVIEW_SYNC_MS,
+  QUADRANT_SYNC_MS,
+  QUADRANT_TICK_MS,
+  QUADRANT_CELLS,
 } from './lifeConstants';
 
 // Import utility functions from separate file
@@ -71,7 +76,7 @@ import { AuthMethodSelector } from '../components/AuthMethodSelector';
 import { type IdentityProviderConfig } from '../lib/ic-use-identity/config/identityProviders';
 
 // Import optimistic simulation engine
-import { stepGeneration, type Cell } from './life/engine';
+import { stepGeneration, stepQuadrantGeneration, type Cell } from './life/engine';
 
 // Import extracted modal components
 import { EliminationModal } from './life/components';
@@ -239,6 +244,11 @@ export const Risk: React.FC = () => {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   // Local cells for optimistic simulation (dense grid, runs independently, synced from backend periodically)
   const [localCells, setLocalCells] = useState<Cell[]>([]);
+  // Quadrant-specific simulation state (only used in quadrant view mode)
+  const [quadrantCells, setQuadrantCells] = useState<Cell[]>([]);
+  // Full grid snapshot from backend (used for overview display and quadrant edge lookups)
+  const [fullGridSnapshot, setFullGridSnapshot] = useState<Cell[]>([]);
+  const fullGridSnapshotRef = useRef<Cell[]>([]);
   const [myPlayerNum, setMyPlayerNum] = useState<number | null>(null);
   const [myBalance, setMyBalance] = useState(0);
   const [placementError, setPlacementError] = useState<string | null>(null);
@@ -271,6 +281,11 @@ export const Risk: React.FC = () => {
 
   // Tutorial modal state
   const [showTutorial, setShowTutorial] = useState(false);
+
+  // Early access warning - show once per session (localStorage tracks dismissal)
+  const [showEarlyAccessWarning, setShowEarlyAccessWarning] = useState(() => {
+    return !localStorage.getItem('life_early_access_dismissed');
+  });
 
   // Auth provider selector state (for proper II 1.0/2.0 selection)
   const [showProviderSelector, setShowProviderSelector] = useState(false);
@@ -327,6 +342,32 @@ export const Risk: React.FC = () => {
   useEffect(() => { lastSyncedGenerationRef.current = lastSyncedGeneration; }, [lastSyncedGeneration]);
   useEffect(() => { lastSyncTimeRef.current = lastSyncTime; }, [lastSyncTime]);
   useEffect(() => { basesRef.current = bases; }, [bases]);
+  useEffect(() => { fullGridSnapshotRef.current = fullGridSnapshot; }, [fullGridSnapshot]);
+
+  // Initialize quadrantCells when switching to quadrant view
+  useEffect(() => {
+    if (viewMode === 'quadrant' && fullGridSnapshot.length > 0 && quadrantCells.length === 0) {
+      // Extract current quadrant from snapshot
+      const quadrant: Cell[] = new Array(QUADRANT_CELLS);
+      for (let localRow = 0; localRow < QUADRANT_SIZE; localRow++) {
+        for (let localCol = 0; localCol < QUADRANT_SIZE; localCol++) {
+          const globalRow = viewY + localRow;
+          const globalCol = viewX + localCol;
+          const globalIdx = globalRow * GRID_SIZE + globalCol;
+          const localIdx = localRow * QUADRANT_SIZE + localCol;
+          quadrant[localIdx] = fullGridSnapshot[globalIdx] || { owner: 0, alive: false };
+        }
+      }
+      setQuadrantCells(quadrant);
+    }
+  }, [viewMode, viewX, viewY, fullGridSnapshot, quadrantCells.length]);
+
+  // Reset quadrantCells when navigating to a different quadrant
+  useEffect(() => {
+    if (viewMode === 'quadrant') {
+      setQuadrantCells([]);  // Clear, will be repopulated by next sync
+    }
+  }, [viewX, viewY]);
 
   // Sidebar collapsed state with localStorage persistence
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -747,6 +788,99 @@ export const Risk: React.FC = () => {
     return dense;
   }, []);
 
+  // Convert bitmap-based state from backend to dense grid for a single 128x128 quadrant
+  // Much faster than full grid conversion - only processes cells in the target quadrant
+  const sparseToQuadrant = useCallback((
+    state: GameState,
+    qX: number,  // quadrantX: 0, 128, 256, or 384
+    qY: number   // quadrantY: 0, 128, 256, or 384
+  ): Cell[] => {
+    const dense: Cell[] = new Array(QUADRANT_CELLS).fill(null).map(() => ({ owner: 0, alive: false }));
+
+    // Decode alive_bitmap - only for cells within this quadrant
+    const bitmap = Array.from(state.alive_bitmap);
+    for (let localRow = 0; localRow < QUADRANT_SIZE; localRow++) {
+      for (let localCol = 0; localCol < QUADRANT_SIZE; localCol++) {
+        const globalRow = qY + localRow;
+        const globalCol = qX + localCol;
+        const globalIdx = globalRow * GRID_SIZE + globalCol;
+
+        const wordIdx = Math.floor(globalIdx / 64);
+        const bitIdx = globalIdx % 64;
+
+        if (wordIdx < bitmap.length) {
+          const word = BigInt(bitmap[wordIdx]);
+          if ((word >> BigInt(bitIdx)) & BigInt(1)) {
+            const localIdx = localRow * QUADRANT_SIZE + localCol;
+            dense[localIdx].alive = true;
+          }
+        }
+      }
+    }
+
+    // Decode territories - only process chunks that overlap this quadrant
+    // Quadrant spans from (qX, qY) to (qX+127, qY+127)
+    // Chunks are 64x64, so we need chunks where:
+    //   chunkCol * 64 <= qX + 127 AND (chunkCol + 1) * 64 > qX
+    //   chunkRow * 64 <= qY + 127 AND (chunkRow + 1) * 64 > qY
+    const minChunkCol = Math.floor(qX / 64);
+    const maxChunkCol = Math.floor((qX + QUADRANT_SIZE - 1) / 64);
+    const minChunkRow = Math.floor(qY / 64);
+    const maxChunkRow = Math.floor((qY + QUADRANT_SIZE - 1) / 64);
+
+    for (let slotIdx = 0; slotIdx < state.territories.length; slotIdx++) {
+      const territory = state.territories[slotIdx];
+      const playerNum = slotIdx + 1;  // Slots are 1-indexed
+
+      const chunkMask = BigInt(territory.chunk_mask);
+      let chunkDataIdx = 0;
+
+      for (let chunkIdx = 0; chunkIdx < 64; chunkIdx++) {
+        const hasData = (chunkMask >> BigInt(chunkIdx)) & BigInt(1);
+
+        if (!hasData) continue;
+
+        const chunkRow = Math.floor(chunkIdx / 8);
+        const chunkCol = chunkIdx % 8;
+
+        // Check if this chunk overlaps our quadrant
+        const overlaps = chunkCol >= minChunkCol && chunkCol <= maxChunkCol &&
+                         chunkRow >= minChunkRow && chunkRow <= maxChunkRow;
+
+        const chunkData = territory.chunks[chunkDataIdx];
+        chunkDataIdx++;
+
+        if (!overlaps || !chunkData) continue;
+
+        // Process this chunk's cells that fall within our quadrant
+        const words = Array.from(chunkData);
+        for (let wordIdx = 0; wordIdx < words.length; wordIdx++) {
+          const word = BigInt(words[wordIdx]);
+          for (let bit = 0; bit < 64; bit++) {
+            if ((word >> BigInt(bit)) & BigInt(1)) {
+              const localY = wordIdx;  // Row within chunk (0-63)
+              const localX = bit;       // Col within chunk (0-63)
+
+              const globalY = chunkRow * 64 + localY;
+              const globalX = chunkCol * 64 + localX;
+
+              // Check if this cell is within our quadrant
+              if (globalX >= qX && globalX < qX + QUADRANT_SIZE &&
+                  globalY >= qY && globalY < qY + QUADRANT_SIZE) {
+                const quadrantLocalY = globalY - qY;
+                const quadrantLocalX = globalX - qX;
+                const cellIdx = quadrantLocalY * QUADRANT_SIZE + quadrantLocalX;
+                dense[cellIdx].owner = playerNum;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return dense;
+  }, []);
+
   // Canvas sizing - re-run when region/slot selection closes (canvas mounts)
   // Uses polling to handle race condition where refs aren't attached yet
   useEffect(() => {
@@ -819,6 +953,21 @@ export const Risk: React.FC = () => {
       window.removeEventListener('load', setupCanvas);
     };
   }, [isAuthenticated, showRegionSelection, showSlotSelection]);
+
+  // Timeout fallback for stuck "Loading Grid" state
+  // If initial loading takes more than 15 seconds, force completion to prevent permanent stuck state
+  useEffect(() => {
+    if (!isInitialLoading) return;
+
+    const timeout = setTimeout(() => {
+      if (isInitialLoading) {
+        console.warn('[Life] Initial loading timeout - forcing completion');
+        setIsInitialLoading(false);
+      }
+    }, 15000);  // 15 second timeout
+
+    return () => clearTimeout(timeout);
+  }, [isInitialLoading]);
 
   // Backend sync - fetch authoritative state every 5 seconds
   useEffect(() => {
@@ -944,6 +1093,10 @@ export const Risk: React.FC = () => {
           // This allows us to check if cells are already in backend state for graduation
           const newCells = sparseToDense(state);
 
+          // ALWAYS update full grid snapshot (needed for overview display and quadrant edge lookups)
+          setFullGridSnapshot(newCells);
+          fullGridSnapshotRef.current = newCells;
+
           // Graduate confirmed placements using multiple criteria:
           // 1. Generation-based: backend gen >= placedAtGen + 8
           // 2. Content-based: all cells are already alive in backend state
@@ -982,6 +1135,12 @@ export const Risk: React.FC = () => {
           // NOTE: Confirmed placement cells are rendered as OVERLAY only (via drawConfirmedCells)
           // We do NOT force them into localCells - that would create duplicates and mess up simulation
           setLocalCells(newCells);
+
+          // For quadrant mode, also extract the active quadrant for local simulation
+          if (viewMode === 'quadrant') {
+            const quadrant = sparseToQuadrant(state, viewX, viewY);
+            setQuadrantCells(quadrant);
+          }
 
           // Extract base info from slots (v2 format)
           const newBases = new Map<number, BaseInfo>();
@@ -1070,29 +1229,49 @@ export const Risk: React.FC = () => {
     // Initial sync
     syncFromBackend();
 
-    // Periodic sync every 5 seconds
-    const syncInterval = setInterval(syncFromBackend, BACKEND_SYNC_MS);
+    // Different sync intervals based on view mode
+    // Overview: 1s interval (no local sim, need fresh display)
+    // Quadrant: 500ms interval (with local sim for smooth animation)
+    const syncIntervalMs = viewMode === 'overview' ? OVERVIEW_SYNC_MS : QUADRANT_SYNC_MS;
+    const syncInterval = setInterval(syncFromBackend, syncIntervalMs);
 
     return () => {
       cancelled = true;
       clearInterval(syncInterval);
     };
-  }, [actor, principal, isAuthenticated, sparseToDense]);
+  }, [actor, principal, isAuthenticated, sparseToDense, sparseToQuadrant, viewMode, viewX, viewY]);
 
-  // Local simulation - runs every 125ms for smooth visuals (8 gen/sec)
-  // Uses extracted stepGeneration from engine module
-  // When disabled, we display backend state directly via frequent syncs
-  // When frozen, stop local sim to prevent constant drift/correction churn
+  // View-mode-aware local simulation
+  // Overview mode: NO local simulation - just display backend state
+  // Quadrant mode: Simulate only the active 128x128 quadrant (16x faster)
   useEffect(() => {
-    if (!ENABLE_LOCAL_SIM || !isRunning || isFrozen || localCells.length === 0) return;
+    // Overview mode: no local simulation at all
+    if (viewMode === 'overview') {
+      return;
+    }
+
+    // Quadrant mode: simulate only the active quadrant
+    if (!ENABLE_LOCAL_SIM || !isRunning || isFrozen || quadrantCells.length === 0) {
+      return;
+    }
 
     const localTick = setInterval(() => {
-      setLocalCells(cells => stepGeneration(cells, basesRef.current, GRID_SIZE));
-      setLocalGeneration(g => g + 1n);  // Track generation for sync verification
-    }, LOCAL_TICK_MS);
+      setQuadrantCells(cells =>
+        stepQuadrantGeneration(
+          cells,
+          fullGridSnapshotRef.current,
+          viewX,
+          viewY,
+          basesRef.current,
+          QUADRANT_SIZE,
+          GRID_SIZE
+        )
+      );
+      setLocalGeneration(g => g + 1n);
+    }, QUADRANT_TICK_MS);
 
     return () => clearInterval(localTick);
-  }, [isRunning, isFrozen, localCells.length > 0]);
+  }, [viewMode, viewX, viewY, isRunning, isFrozen, quadrantCells.length > 0]);
 
   // Helper to draw cells within a region (v2: no coins on cells, draw bases)
   const drawCells = useCallback((
@@ -1103,7 +1282,10 @@ export const Risk: React.FC = () => {
     height: number,
     cellSize: number
   ) => {
-    const cells = localCells;
+    // Choose data source based on view mode
+    // Overview: use full grid snapshot (backend state)
+    // Quadrant: use localCells for base data, quadrantCells for active quadrant
+    const cells = viewMode === 'overview' ? fullGridSnapshot : localCells;
     const gap = cellSize > 2 ? 1 : 0;
 
     // Initialize territory patterns on first draw (requires canvas context)
@@ -1119,6 +1301,20 @@ export const Risk: React.FC = () => {
     // Instead of 100k individual fillRect calls, this batches by owner into ~8 fill() calls
     const getCellOwner = (gridX: number, gridY: number): number => {
       if (gridX < 0 || gridX >= GRID_SIZE || gridY < 0 || gridY >= GRID_SIZE) return 0;
+
+      // In quadrant mode, check if this cell is in the active quadrant
+      if (viewMode === 'quadrant') {
+        const inActiveQuadrant = gridX >= viewX && gridX < viewX + QUADRANT_SIZE &&
+                                  gridY >= viewY && gridY < viewY + QUADRANT_SIZE;
+        if (inActiveQuadrant && quadrantCells.length > 0) {
+          const localX = gridX - viewX;
+          const localY = gridY - viewY;
+          const localIdx = localY * QUADRANT_SIZE + localX;
+          return quadrantCells[localIdx]?.owner || 0;
+        }
+      }
+
+      // Fall back to full grid (overview mode or outside active quadrant)
       const idx = gridY * GRID_SIZE + gridX;
       return cells[idx]?.owner || 0;
     };
@@ -1137,8 +1333,27 @@ export const Risk: React.FC = () => {
     // Brightness function: base cells and alive cells are bright, dead territory is dim
     const getCellBrightness = (gridX: number, gridY: number): number => {
       if (gridX < 0 || gridX >= GRID_SIZE || gridY < 0 || gridY >= GRID_SIZE) return TERRITORY_BRIGHTNESS.DEAD;
+
+      let cell: Cell | undefined;
       const idx = gridY * GRID_SIZE + gridX;
-      const cell = cells[idx];
+
+      // In quadrant mode, check if this cell is in the active quadrant
+      if (viewMode === 'quadrant') {
+        const inActiveQuadrant = gridX >= viewX && gridX < viewX + QUADRANT_SIZE &&
+                                  gridY >= viewY && gridY < viewY + QUADRANT_SIZE;
+        if (inActiveQuadrant && quadrantCells.length > 0) {
+          const localX = gridX - viewX;
+          const localY = gridY - viewY;
+          const localIdx = localY * QUADRANT_SIZE + localX;
+          cell = quadrantCells[localIdx];
+        }
+      }
+
+      // Fall back to full grid
+      if (!cell) {
+        cell = cells[idx];
+      }
+
       if (!cell || cell.owner === 0) return TERRITORY_BRIGHTNESS.DEAD;
       // Base cells are always bright
       if (baseCellSet.has(idx)) return TERRITORY_BRIGHTNESS.BASE;
@@ -1165,8 +1380,26 @@ export const Risk: React.FC = () => {
       for (let col = 0; col < width; col++) {
         const gridRow = startY + row;
         const gridCol = startX + col;
-        const idx = gridRow * GRID_SIZE + gridCol;
-        const cell = cells[idx];
+
+        let cell: Cell | undefined;
+
+        // In quadrant mode, check if this cell is in the active quadrant
+        if (viewMode === 'quadrant') {
+          const inActiveQuadrant = gridCol >= viewX && gridCol < viewX + QUADRANT_SIZE &&
+                                    gridRow >= viewY && gridRow < viewY + QUADRANT_SIZE;
+          if (inActiveQuadrant && quadrantCells.length > 0) {
+            const localX = gridCol - viewX;
+            const localY = gridRow - viewY;
+            const localIdx = localY * QUADRANT_SIZE + localX;
+            cell = quadrantCells[localIdx];
+          }
+        }
+
+        // Fall back to full grid
+        if (!cell) {
+          const idx = gridRow * GRID_SIZE + gridCol;
+          cell = cells[idx];
+        }
 
         if (cell && cell.alive && cell.owner > 0) {
           const x = col * cellSize;
@@ -1302,7 +1535,7 @@ export const Risk: React.FC = () => {
 
       ctx.restore();
     }
-  }, [localCells, bases, coinParticles]);
+  }, [localCells, fullGridSnapshot, quadrantCells, viewMode, viewX, viewY, bases, coinParticles]);
 
   // Draw 4x4 quadrant grid lines (overview mode)
   const drawQuadrantGrid = useCallback((ctx: CanvasRenderingContext2D, cellSize: number) => {
@@ -2543,6 +2776,11 @@ export const Risk: React.FC = () => {
   // Game view - all JSX inlined to prevent component remounting
   return (
     <div className="flex flex-col h-[calc(100vh-80px)]">
+      {/* Mobile warning banner */}
+      <div className="lg:hidden p-3 bg-yellow-500/20 border-b border-yellow-500/50 text-yellow-300 text-sm text-center">
+        <span className="font-bold">Best on Desktop:</span> Game of Life is optimized for larger screens. Some features may be limited on mobile.
+      </div>
+
       {/* Error display */}
       {error && (
         <div className="p-2 bg-red-500/20 border border-red-500/50 text-red-400 text-sm">
@@ -3387,6 +3625,62 @@ export const Risk: React.FC = () => {
         isOpen={showTutorial}
         onClose={() => setShowTutorial(false)}
       />
+
+      {/* Early Access Warning Modal */}
+      {showEarlyAccessWarning && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm">
+          <div className="bg-black border border-purple-500/50 rounded-lg p-6 max-w-md mx-4 shadow-2xl shadow-purple-500/20">
+            {/* Header */}
+            <h2 className="text-2xl font-bold text-purple-400 mb-4">
+              Early Access
+            </h2>
+
+            {/* Warning content */}
+            <div className="space-y-4 text-gray-300">
+              <p>
+                Game of Life is in <span className="text-purple-400 font-semibold">early development</span>.
+                It will be actively iterated on if there's interest from the community.
+              </p>
+
+              <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg p-4">
+                <p className="text-sm">
+                  <span className="text-purple-400 font-semibold">Found a bug?</span> Help us improve!
+                </p>
+                <a
+                  href="https://x.com/alexandria_lbry"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 mt-2 text-purple-400 hover:text-purple-300 transition-colors"
+                >
+                  <span>Report to</span>
+                  <span className="font-mono font-bold">@alexandria_lbry</span>
+                  <span>on X</span>
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                  </svg>
+                </a>
+              </div>
+
+              <p className="text-sm text-gray-500">
+                No money at stake - just for fun.
+              </p>
+            </div>
+
+            {/* Action button */}
+            <div className="mt-6">
+              <button
+                onClick={() => {
+                  localStorage.setItem('life_early_access_dismissed', 'true');
+                  setShowEarlyAccessWarning(false);
+                }}
+                className="w-full px-4 py-3 bg-purple-600 hover:bg-purple-500 text-white font-semibold rounded-lg transition-colors"
+              >
+                Got it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -83,7 +83,7 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
     <div className="relative flex items-center justify-center">
       <svg
         viewBox={`0 0 ${D.VIEW_SIZE} ${D.VIEW_SIZE}`}
-        className="w-72 h-72 sm:w-80 sm:h-80 md:w-96 md:h-96"
+        className="aspect-square h-[35vh] md:h-[32vh] w-auto"
       >
         <defs>
           {/* Gradients */}
@@ -243,14 +243,15 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
           />
         </g>
 
-        {/* Ball - rotates independently */}
+        {/* Ball - rotates independently around the wheel */}
         <g transform={`rotate(${-ballAngle} ${D.CENTER} ${D.CENTER})`}>
           <circle
             cx={D.CENTER}
             cy={ballY}
-            r={D.BALL_RADIUS}
-            fill="url(#ballGradient)"
-            filter={(isWaitingForResult || isLanding || showResult) ? 'url(#ballGlow)' : undefined}
+            r={D.BALL_RADIUS + 2}
+            fill="#FFFFFF"
+            stroke="#333333"
+            strokeWidth="1"
           />
         </g>
       </svg>
@@ -273,35 +274,6 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
         </div>
       )}
 
-      {/* Status indicator */}
-      {(isWaitingForResult || isLanding) && (
-        <div className="absolute -bottom-8 left-1/2 -translate-x-1/2">
-          <div className="flex items-center gap-2 text-yellow-400 text-sm">
-            {isWaitingForResult ? (
-              <>
-                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                  />
-                </svg>
-                <span className="animate-pulse">Spinning...</span>
-              </>
-            ) : (
-              <span className="text-white animate-pulse">Ball landing...</span>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 };

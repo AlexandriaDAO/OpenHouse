@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { GameCard } from '../components/GameCard';
 import { OnboardingBanner } from '../components/OnboardingBanner';
 import { PortfolioCard } from '../components/PortfolioCard';
+import { LifeGameCard } from '../components/LifeGameCard';
 import { getHomeGamesInfo, getLiquidityGames } from '../config/gameRegistry';
 
 export const Home: React.FC = () => {
@@ -18,6 +19,7 @@ export const Home: React.FC = () => {
         {games.map((game) => (
           <GameCard key={game.id} game={game} />
         ))}
+        <LifeGameCard />
       </div>
 
       {/* Be The House CTA */}

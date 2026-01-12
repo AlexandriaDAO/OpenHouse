@@ -74,9 +74,10 @@ export function useRouletteAnimation({
         ballAngleRef.current += ANIMATION.BALL_SPEED * dt;
         wheelAngleRef.current += ANIMATION.WHEEL_SPEED * dt;
 
+        // Normalize angles for rendering to avoid browser issues with large values
         setState({
-          ballAngle: ballAngleRef.current,
-          wheelAngle: wheelAngleRef.current,
+          ballAngle: ballAngleRef.current % 360,
+          wheelAngle: wheelAngleRef.current % 360,
           ballRadius: 100,
           showResult: false,
         });

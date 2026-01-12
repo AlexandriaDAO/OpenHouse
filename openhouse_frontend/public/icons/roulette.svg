@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <!-- Outer ring -->
+  <circle cx="24" cy="24" r="22" fill="#1a1a1a" stroke="#fbbf24" stroke-width="1.5"/>
+  <!-- Wheel base -->
+  <circle cx="24" cy="24" r="19" fill="#2a2a2a"/>
+  <!-- Slots - alternating red/black with green zero -->
+  <path d="M24 24 L24 5 A19 19 0 0 1 33.5 7.5 Z" fill="#16a34a"/> <!-- 0 green -->
+  <path d="M24 24 L33.5 7.5 A19 19 0 0 1 40 14 Z" fill="#dc2626"/>
+  <path d="M24 24 L40 14 A19 19 0 0 1 43 24 Z" fill="#1a1a1a"/>
+  <path d="M24 24 L43 24 A19 19 0 0 1 40 34 Z" fill="#dc2626"/>
+  <path d="M24 24 L40 34 A19 19 0 0 1 33.5 40.5 Z" fill="#1a1a1a"/>
+  <path d="M24 24 L33.5 40.5 A19 19 0 0 1 24 43 Z" fill="#dc2626"/>
+  <path d="M24 24 L24 43 A19 19 0 0 1 14.5 40.5 Z" fill="#1a1a1a"/>
+  <path d="M24 24 L14.5 40.5 A19 19 0 0 1 8 34 Z" fill="#dc2626"/>
+  <path d="M24 24 L8 34 A19 19 0 0 1 5 24 Z" fill="#1a1a1a"/>
+  <path d="M24 24 L5 24 A19 19 0 0 1 8 14 Z" fill="#dc2626"/>
+  <path d="M24 24 L8 14 A19 19 0 0 1 14.5 7.5 Z" fill="#1a1a1a"/>
+  <path d="M24 24 L14.5 7.5 A19 19 0 0 1 24 5 Z" fill="#dc2626"/>
+  <!-- Inner decorative ring -->
+  <circle cx="24" cy="24" r="10" fill="#1a1a1a" stroke="#fbbf24" stroke-width="1"/>
+  <!-- Center hub -->
+  <circle cx="24" cy="24" r="5" fill="#2a2a2a" stroke="#fbbf24" stroke-width="1"/>
+  <!-- Spokes -->
+  <line x1="24" y1="14" x2="24" y2="5" stroke="#fbbf24" stroke-width="0.5" opacity="0.5"/>
+  <line x1="34" y1="24" x2="43" y2="24" stroke="#fbbf24" stroke-width="0.5" opacity="0.5"/>
+  <line x1="24" y1="34" x2="24" y2="43" stroke="#fbbf24" stroke-width="0.5" opacity="0.5"/>
+  <line x1="14" y1="24" x2="5" y2="24" stroke="#fbbf24" stroke-width="0.5" opacity="0.5"/>
+  <!-- Ball -->
+  <circle cx="30" cy="8" r="3" fill="#ffffff" stroke="#e5e5e5" stroke-width="0.5"/>
+</svg>

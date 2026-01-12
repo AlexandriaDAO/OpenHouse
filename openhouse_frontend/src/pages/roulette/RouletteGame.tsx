@@ -27,6 +27,9 @@ type AnimationState = 'idle' | 'waiting' | 'landing' | 'showing_result' | 'reset
 
 const RED_NUMBERS = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
 
+// Round to 2 decimal places to avoid floating point precision issues
+const roundCents = (amount: number): number => Math.round(amount * 100) / 100;
+
 export function RouletteGame() {
   const { actor } = useRouletteActor();
   const { actor: ledgerActor } = useLedgerActor();
@@ -36,11 +39,7 @@ export function RouletteGame() {
   const gameBalanceContext = useGameBalance('roulette');
   const balance = gameBalanceContext.balance;
 
-  const handleBalanceRefresh = useCallback(() => {
-    refreshWalletBalance();
-    gameBalanceContext.refresh();
-  }, [refreshWalletBalance, gameBalanceContext]);
-
+  // State declarations - must come before callbacks that reference them
   const [bets, setBets] = useState<PlacedBet[]>([]);
   const [chipBetAmount, setChipBetAmount] = useState(0.01);
   const [winningNumber, setWinningNumber] = useState<number | null>(null);
@@ -50,6 +49,11 @@ export function RouletteGame() {
   const [animationState, setAnimationState] = useState<AnimationState>('idle');
   const [recentResults, setRecentResults] = useState<number[]>([]);
   const [boardTab, setBoardTab] = useState<'low' | 'high'>('low');
+
+  const handleBalanceRefresh = useCallback(() => {
+    refreshWalletBalance();
+    gameBalanceContext.refresh();
+  }, [refreshWalletBalance, gameBalanceContext]);
 
   useBalanceRefresh({ actor, refresh: gameBalanceContext.refresh });
 
@@ -68,6 +72,11 @@ export function RouletteGame() {
 
   const maxPayout = bets.reduce((sum, bet) => sum + (bet.amount * getPayoutMultiplier(bet.betType)), 0);
 
+  // House limit is 15% of pool, we use 10% for safety margin
+  const houseBalanceUSD = Number(balance.house) / DECIMALS_PER_CKUSDT;
+  const maxAllowedPayout = houseBalanceUSD * 0.10;
+  const exceedsHouseLimit = maxPayout > maxAllowedPayout && maxAllowedPayout > 0;
+
   const handlePlaceBet = useCallback((newBet: PlacedBet) => {
     if (animationState !== 'idle') return;
     setBets(prevBets => {
@@ -76,7 +85,7 @@ export function RouletteGame() {
       );
       if (existingIndex >= 0) {
         const updated = [...prevBets];
-        updated[existingIndex] = { ...updated[existingIndex], amount: updated[existingIndex].amount + newBet.amount };
+        updated[existingIndex] = { ...updated[existingIndex], amount: roundCents(updated[existingIndex].amount + newBet.amount) };
         return updated;
       }
       return [...prevBets, newBet];
@@ -96,7 +105,7 @@ export function RouletteGame() {
         if (currentAmount <= removeAmount) {
           updated.splice(existingIndex, 1);
         } else {
-          updated[existingIndex] = { ...updated[existingIndex], amount: currentAmount - removeAmount };
+          updated[existingIndex] = { ...updated[existingIndex], amount: roundCents(currentAmount - removeAmount) };
         }
         return updated;
       }
@@ -176,7 +185,9 @@ export function RouletteGame() {
       case 'landing': return 'LANDING...';
       case 'showing_result': return 'RESULT';
       case 'resetting': return 'CLEARING...';
-      default: return bets.length > 0 ? `SPIN $${totalBetAmount.toFixed(2)}` : 'PLACE BETS';
+      default:
+        if (exceedsHouseLimit) return 'PAYOUT TOO HIGH';
+        return bets.length > 0 ? `SPIN $${totalBetAmount.toFixed(2)}` : 'PLACE BETS';
     }
   };
 
@@ -193,37 +204,53 @@ export function RouletteGame() {
       <div className="md:hidden flex flex-col h-full">
         {/* Wheel section */}
         <div className="flex-shrink-0 flex flex-col items-center py-2">
-          <div className="transform scale-[0.6] origin-center -my-10">
-            <RouletteWheel
-              winningNumber={winningNumber}
-              isWaitingForResult={isWaitingForResult}
-              isLanding={isLanding}
-              onAnimationComplete={handleAnimationComplete}
-            />
-          </div>
+          <RouletteWheel
+            winningNumber={winningNumber}
+            isWaitingForResult={isWaitingForResult}
+            isLanding={isLanding}
+            onAnimationComplete={handleAnimationComplete}
+          />
 
           {/* Result or stats */}
-          <div className="text-center mt-1">
+          <div className="text-center">
             {lastResult && showResults ? (
-              <div className="text-lg font-bold">
+              <div className="flex flex-col items-center">
                 {Number(lastResult.net_result) > 0 ? (
-                  <span className="text-green-400">+${formatUSDT(lastResult.total_payout)}</span>
+                  <>
+                    <span className="text-green-400 text-xl font-black tracking-wider">WIN</span>
+                    <span className="text-green-400 text-lg font-bold">+{formatUSDT(lastResult.total_payout)}</span>
+                  </>
                 ) : (
-                  <span className="text-red-400">-${formatUSDT(lastResult.total_bet)}</span>
+                  <>
+                    <span className="text-red-400 text-xl font-black tracking-wider">LOSE</span>
+                    <span className="text-red-400 text-lg font-bold">-{formatUSDT(lastResult.total_bet)}</span>
+                  </>
                 )}
               </div>
             ) : (
-              <div className="flex items-center justify-center gap-4 text-sm">
-                <span><span className="text-yellow-400 font-bold">{bets.length}</span> bets</span>
-                <span className="text-white font-bold">${totalBetAmount.toFixed(2)}</span>
+              <div className="flex flex-col items-center gap-1">
+                <div className="flex items-center justify-center gap-3 text-sm">
+                  <span><span className="text-yellow-400 font-bold">{bets.length}</span> bets</span>
+                  <span className="text-white font-bold">${totalBetAmount.toFixed(2)}</span>
+                  {(isWaitingForResult || isLanding) && (
+                    <span className="text-yellow-400 animate-pulse">
+                      {isWaitingForResult ? 'Spinning...' : 'Landing...'}
+                    </span>
+                  )}
+                </div>
+                {exceedsHouseLimit && (
+                  <span className="text-red-400 text-xs">
+                    Max payout ${maxPayout.toFixed(2)} exceeds limit ${maxAllowedPayout.toFixed(2)}
+                  </span>
+                )}
               </div>
             )}
           </div>
-          {error && <p className="text-red-400 text-xs mt-1">{error}</p>}
+          {error && <p className="text-red-400 text-xs">{error}</p>}
         </div>
 
         {/* Betting table */}
-        <div className="flex-1 flex flex-col px-2">
+        <div className="flex-shrink flex-grow-0 flex flex-col px-2 overflow-y-auto min-h-0">
           {/* Tab buttons */}
           <div className="flex gap-1 mb-1">
             <button
@@ -257,7 +284,7 @@ export function RouletteGame() {
                 0
                 {(bets.find(b => b.numbers.length === 1 && b.numbers[0] === 0)?.amount || 0) > 0 && (
                   <span className="absolute top-1 right-1 bg-yellow-500 text-black text-[8px] px-1 rounded-full">
-                    ${bets.find(b => b.numbers.length === 1 && b.numbers[0] === 0)?.amount}
+                    ${(bets.find(b => b.numbers.length === 1 && b.numbers[0] === 0)?.amount || 0).toFixed(2)}
                   </span>
                 )}
               </button>
@@ -283,7 +310,7 @@ export function RouletteGame() {
                         disabled={isSpinning || chipBetAmount === 0}
                       >
                         {num}
-                        {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-[8px] px-1 rounded-full">${amount}</span>}
+                        {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-[8px] px-1 rounded-full">${amount.toFixed(2)}</span>}
                       </button>
                     );
                   })}
@@ -306,7 +333,7 @@ export function RouletteGame() {
                       disabled={isSpinning || chipBetAmount === 0}
                     >
                       2:1
-                      {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-[8px] px-0.5 rounded-full">${amount}</span>}
+                      {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-[8px] px-0.5 rounded-full">${amount.toFixed(2)}</span>}
                     </button>
                   );
                 })}
@@ -331,7 +358,7 @@ export function RouletteGame() {
                   disabled={isSpinning || chipBetAmount === 0}
                 >
                   {label}
-                  {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-[8px] px-1 rounded-full">${amount}</span>}
+                  {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-[8px] px-1 rounded-full">${amount.toFixed(2)}</span>}
                 </button>
               );
             })}
@@ -357,7 +384,7 @@ export function RouletteGame() {
                   disabled={isSpinning || chipBetAmount === 0}
                 >
                   {label}
-                  {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-[8px] px-1 rounded-full">${amount}</span>}
+                  {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-[8px] px-1 rounded-full">${amount.toFixed(2)}</span>}
                 </button>
               );
             })}
@@ -376,7 +403,7 @@ export function RouletteGame() {
             )}
             <button
               onClick={handleSpin}
-              disabled={isSpinning || !isAuthenticated || bets.length === 0}
+              disabled={isSpinning || !isAuthenticated || bets.length === 0 || exceedsHouseLimit}
               className={`flex-1 py-3 rounded-lg font-bold text-lg ${
                 isSpinning ? 'bg-yellow-600 animate-pulse' : 'bg-green-600 active:bg-green-500'
               } disabled:opacity-50`}
@@ -408,33 +435,49 @@ export function RouletteGame() {
       </div>
 
       {/* ===== DESKTOP LAYOUT ===== */}
-      <div className="hidden md:flex flex-col h-full">
+      <div className="hidden md:flex flex-col h-full overflow-y-auto pb-28">
         {/* Wheel section */}
-        <div className="flex-shrink-0 flex flex-col items-center py-4">
-          <div className="transform scale-[0.75] origin-center -my-8">
-            <RouletteWheel
-              winningNumber={winningNumber}
-              isWaitingForResult={isWaitingForResult}
-              isLanding={isLanding}
-              onAnimationComplete={handleAnimationComplete}
-            />
-          </div>
+        <div className="flex-shrink-0 flex flex-col items-center py-2">
+          <RouletteWheel
+            winningNumber={winningNumber}
+            isWaitingForResult={isWaitingForResult}
+            isLanding={isLanding}
+            onAnimationComplete={handleAnimationComplete}
+          />
 
           {/* Result or stats */}
           <div className="text-center mt-2">
             {lastResult && showResults ? (
-              <div className="text-2xl font-bold">
+              <div className="flex flex-col items-center">
                 {Number(lastResult.net_result) > 0 ? (
-                  <span className="text-green-400">+${formatUSDT(lastResult.total_payout)}</span>
+                  <>
+                    <span className="text-green-400 text-3xl font-black tracking-wider">WIN</span>
+                    <span className="text-green-400 text-2xl font-bold">+{formatUSDT(lastResult.total_payout)}</span>
+                  </>
                 ) : (
-                  <span className="text-red-400">-${formatUSDT(lastResult.total_bet)}</span>
+                  <>
+                    <span className="text-red-400 text-3xl font-black tracking-wider">LOSE</span>
+                    <span className="text-red-400 text-2xl font-bold">-{formatUSDT(lastResult.total_bet)}</span>
+                  </>
                 )}
               </div>
             ) : (
-              <div className="flex items-center justify-center gap-6 text-base">
-                <span><span className="text-yellow-400 font-bold">{bets.length}</span> bets</span>
-                <span className="text-white font-bold">${totalBetAmount.toFixed(2)}</span>
-                <span className="text-zinc-500">Max win: <span className="text-cyan-400">${maxPayout.toFixed(2)}</span></span>
+              <div className="flex flex-col items-center gap-1">
+                <div className="flex items-center justify-center gap-6 text-base">
+                  <span><span className="text-yellow-400 font-bold">{bets.length}</span> bets</span>
+                  <span className="text-white font-bold">${totalBetAmount.toFixed(2)}</span>
+                  <span className="text-zinc-500">Max win: <span className={exceedsHouseLimit ? 'text-red-400' : 'text-cyan-400'}>${maxPayout.toFixed(2)}</span></span>
+                  {(isWaitingForResult || isLanding) && (
+                    <span className="text-yellow-400 animate-pulse">
+                      {isWaitingForResult ? 'Spinning...' : 'Landing...'}
+                    </span>
+                  )}
+                </div>
+                {exceedsHouseLimit && (
+                  <span className="text-red-400 text-sm">
+                    Exceeds house limit of ${maxAllowedPayout.toFixed(2)}
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -476,7 +519,7 @@ export function RouletteGame() {
                 0
                 {(bets.find(b => b.numbers.length === 1 && b.numbers[0] === 0)?.amount || 0) > 0 && (
                   <span className="absolute top-2 right-2 bg-yellow-500 text-black text-xs px-1.5 rounded-full">
-                    ${bets.find(b => b.numbers.length === 1 && b.numbers[0] === 0)?.amount}
+                    ${(bets.find(b => b.numbers.length === 1 && b.numbers[0] === 0)?.amount || 0).toFixed(2)}
                   </span>
                 )}
               </button>
@@ -502,7 +545,7 @@ export function RouletteGame() {
                         disabled={isSpinning || chipBetAmount === 0}
                       >
                         {num}
-                        {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-xs px-1.5 rounded-full">${amount}</span>}
+                        {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-xs px-1.5 rounded-full">${amount.toFixed(2)}</span>}
                       </button>
                     );
                   })}
@@ -525,7 +568,7 @@ export function RouletteGame() {
                       disabled={isSpinning || chipBetAmount === 0}
                     >
                       2:1
-                      {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-xs px-1 rounded-full">${amount}</span>}
+                      {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-xs px-1 rounded-full">${amount.toFixed(2)}</span>}
                     </button>
                   );
                 })}
@@ -550,7 +593,7 @@ export function RouletteGame() {
                   disabled={isSpinning || chipBetAmount === 0}
                 >
                   {label}
-                  {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-xs px-1.5 rounded-full">${amount}</span>}
+                  {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-xs px-1.5 rounded-full">${amount.toFixed(2)}</span>}
                 </button>
               );
             })}
@@ -576,7 +619,7 @@ export function RouletteGame() {
                   disabled={isSpinning || chipBetAmount === 0}
                 >
                   {label}
-                  {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-xs px-1.5 rounded-full">${amount}</span>}
+                  {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-xs px-1.5 rounded-full">${amount.toFixed(2)}</span>}
                 </button>
               );
             })}
@@ -595,7 +638,7 @@ export function RouletteGame() {
             )}
             <button
               onClick={handleSpin}
-              disabled={isSpinning || !isAuthenticated || bets.length === 0}
+              disabled={isSpinning || !isAuthenticated || bets.length === 0 || exceedsHouseLimit}
               className={`flex-1 py-3 rounded-lg font-bold text-xl transition ${
                 isSpinning ? 'bg-yellow-600 animate-pulse' : 'bg-green-600 hover:bg-green-500'
               } disabled:opacity-50`}

@@ -56,7 +56,7 @@ export const GAME_REGISTRY: Record<string, GameConfig> = {
   dice: {
     id: 'dice',
     name: 'Dice',
-    icon: '🎲',
+    icon: '/icons/dice.svg',
     canisterId: 'whchi-hyaaa-aaaao-a4ruq-cai',
     routes: { base: '/dice' },
     pages: { home: true, admin: true, liquidity: true },
@@ -77,7 +77,7 @@ export const GAME_REGISTRY: Record<string, GameConfig> = {
   plinko: {
     id: 'plinko',
     name: 'Plinko',
-    icon: '🎯',
+    icon: '/icons/plinko.svg',
     canisterId: 'weupr-2qaaa-aaaap-abl3q-cai',
     routes: { base: '/plinko' },
     pages: { home: true, admin: true, liquidity: true },
@@ -98,7 +98,7 @@ export const GAME_REGISTRY: Record<string, GameConfig> = {
   crash: {
     id: 'crash',
     name: 'Crash',
-    icon: '🚀',
+    icon: '/icons/crash.svg',
     canisterId: 'fws6k-tyaaa-aaaap-qqc7q-cai',
     routes: { base: '/crash' },
     pages: { home: true, admin: true, liquidity: true },
@@ -119,7 +119,7 @@ export const GAME_REGISTRY: Record<string, GameConfig> = {
   roulette: {
     id: 'roulette',
     name: 'Roulette',
-    icon: '🎰',
+    icon: '/icons/roulette.svg',
     canisterId: 'wvrcw-3aaaa-aaaah-arm4a-cai',
     routes: { base: '/roulette' },
     pages: { home: true, admin: true, liquidity: true },

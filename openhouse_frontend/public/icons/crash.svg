@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <!-- Rising line/chart -->
+  <path d="M4 40 L16 32 L28 28 L36 16 L44 4" stroke="#a855f7" stroke-width="3" stroke-linecap="round" fill="none"/>
+  <!-- Rocket at end -->
+  <path d="M42 8 L46 4 L48 8 L44 10 Z" fill="#a855f7"/>
+  <circle cx="44" cy="6" r="3" fill="#a855f7"/>
+  <!-- Flame trail -->
+  <path d="M40 12 L38 16 L36 14 L34 18" stroke="#ec4899" stroke-width="2" stroke-linecap="round" fill="none"/>
+  <!-- Grid lines -->
+  <line x1="4" y1="44" x2="44" y2="44" stroke="#a855f7" stroke-width="1" opacity="0.3"/>
+  <line x1="4" y1="36" x2="44" y2="36" stroke="#a855f7" stroke-width="1" opacity="0.2"/>
+  <line x1="4" y1="28" x2="44" y2="28" stroke="#a855f7" stroke-width="1" opacity="0.1"/>
+</svg>

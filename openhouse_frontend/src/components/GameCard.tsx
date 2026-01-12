@@ -30,11 +30,15 @@ export const GameCard: React.FC<GameCardProps> = ({ game }) => {
           COMING SOON
         </div>
       )}
-      <div className="text-4xl mb-4">{game.icon}</div>
-      <div className="flex items-center justify-center gap-2 mb-2">
-        <h2 className="text-2xl font-bold">{game.name}</h2>
+      <div className="flex items-center gap-3 mb-2">
+        {game.icon.startsWith('/') ? (
+          <img src={game.icon} alt={game.name} className="w-12 h-12 flex-shrink-0" />
+        ) : (
+          <span className="text-5xl flex-shrink-0">{game.icon}</span>
+        )}
+        <h2 className="text-2xl font-bold whitespace-nowrap">{game.name}</h2>
         {game.badge && !game.comingSoon && (
-          <span className="bg-purple-600 text-white px-2 py-1 rounded text-xs font-semibold">
+          <span className="bg-purple-600 text-white px-2 py-1 rounded text-xs font-semibold whitespace-nowrap">
             {game.badge}
           </span>
         )}

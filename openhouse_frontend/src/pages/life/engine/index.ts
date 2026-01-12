@@ -12,7 +12,7 @@ export { OptimisticSimulation } from './OptimisticSimulation';
 export { useOptimisticSimulation } from './useOptimisticSimulation';
 
 // Pure functions (testable)
-export { stepGeneration, findProtectionZoneOwner, countAlive, countByOwner } from './ConwayRules';
+export { stepGeneration, stepQuadrantGeneration, findProtectionZoneOwner, countAlive, countByOwner } from './ConwayRules';
 
 // Types
 export type {
