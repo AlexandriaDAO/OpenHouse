@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 
 export const LifeGameCard: React.FC = () => {
   const navigate = useNavigate();
@@ -9,7 +10,7 @@ export const LifeGameCard: React.FC = () => {
   };
 
   return (
-    <div
+    <motion.div
       className="game-card relative overflow-hidden group"
       onClick={handleClick}
       role="button"
@@ -17,6 +18,9 @@ export const LifeGameCard: React.FC = () => {
       onKeyPress={(e) => {
         if (e.key === 'Enter') navigate('/life');
       }}
+      whileHover={{ y: -4, boxShadow: "0 10px 40px rgba(147, 51, 234, 0.2)" }}
+      whileTap={{ scale: 0.98 }}
+      transition={{ type: "spring", stiffness: 400, damping: 25 }}
     >
       {/* Subtle gradient background */}
       <div
@@ -31,8 +35,8 @@ export const LifeGameCard: React.FC = () => {
         <div className="bg-purple-500 text-white px-3 py-1 rounded-full text-xs font-bold">
           EARLY ACCESS
         </div>
-        <div className="bg-gray-700 text-gray-300 px-2 py-0.5 rounded-full text-xs font-medium flex items-center gap-1">
-          <span>Desktop Only</span>
+        <div className="bg-cyan-700/80 text-cyan-200 px-2 py-0.5 rounded-full text-xs font-medium flex items-center gap-1">
+          <span>Mobile Ready</span>
         </div>
       </div>
 
@@ -63,6 +67,6 @@ export const LifeGameCard: React.FC = () => {
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 };

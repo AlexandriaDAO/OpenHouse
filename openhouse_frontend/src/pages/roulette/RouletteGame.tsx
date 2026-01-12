@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import useRouletteActor from '@/hooks/actors/useRouletteActor';
 import useLedgerActor from '@/hooks/actors/useLedgerActor';
 import { GameLayout } from '@/components/game-ui';
@@ -8,6 +9,7 @@ import {
   BettingBoard,
   PlacedBet
 } from '@/components/game-specific/roulette';
+import { BettingCell, ZeroCell, OutsideBetCell } from '@/components/game-specific/roulette/BettingCell';
 import { useGameBalance } from '@/providers/GameBalanceProvider';
 import { useBalance } from '@/providers/BalanceProvider';
 import { useAuth } from '@/providers/AuthProvider';
@@ -29,6 +31,140 @@ const RED_NUMBERS = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 
 
 // Round to 2 decimal places to avoid floating point precision issues
 const roundCents = (amount: number): number => Math.round(amount * 100) / 100;
+
+// Recent Results History Strip Component
+interface RecentResultsProps {
+  results: number[];
+  maxDisplay?: number;
+}
+
+function RecentResults({ results, maxDisplay = 12 }: RecentResultsProps) {
+  if (results.length === 0) return null;
+
+  const getNumberColor = (num: number) => {
+    if (num === 0) return 'bg-green-600';
+    return RED_NUMBERS.has(num) ? 'bg-red-600' : 'bg-zinc-800';
+  };
+
+  const getBorderColor = (num: number) => {
+    if (num === 0) return 'ring-green-400';
+    return RED_NUMBERS.has(num) ? 'ring-red-400' : 'ring-zinc-500';
+  };
+
+  const displayResults = results.slice(0, maxDisplay);
+
+  return (
+    <div className="flex items-center justify-center gap-1 px-2 py-1.5 bg-zinc-900/60 rounded-lg backdrop-blur-sm">
+      <span className="text-zinc-500 text-[10px] font-medium mr-1 hidden sm:inline">HISTORY</span>
+      <div className="flex items-center gap-1 overflow-hidden">
+        {displayResults.map((num, index) => (
+          <motion.div
+            key={`${num}-${index}-${results.length}`}
+            initial={index === 0 ? { scale: 0, opacity: 0, x: -10 } : false}
+            animate={{ scale: 1, opacity: 1, x: 0 }}
+            transition={{
+              type: 'spring',
+              stiffness: 500,
+              damping: 25,
+              delay: index === 0 ? 0 : 0,
+            }}
+            className={`
+              w-6 h-6 sm:w-7 sm:h-7 rounded-full flex items-center justify-center
+              ${getNumberColor(num)} ring-1 ${getBorderColor(num)}
+              text-white text-[10px] sm:text-xs font-bold
+              ${index === 0 ? 'shadow-lg' : 'opacity-80'}
+              transition-opacity duration-200
+            `}
+            style={{
+              opacity: index === 0 ? 1 : Math.max(0.4, 1 - (index * 0.06)),
+            }}
+          >
+            {num}
+          </motion.div>
+        ))}
+      </div>
+      {results.length > maxDisplay && (
+        <span className="text-zinc-500 text-[10px] ml-1">+{results.length - maxDisplay}</span>
+      )}
+    </div>
+  );
+}
+
+// "NO MORE BETS" Overlay Component
+interface NoMoreBetsOverlayProps {
+  show: boolean;
+}
+
+function NoMoreBetsOverlay({ show }: NoMoreBetsOverlayProps) {
+  return (
+    <AnimatePresence>
+      {show && (
+        <motion.div
+          className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.3 }}
+        >
+          <motion.div
+            className="bg-black/70 backdrop-blur-sm px-6 py-3 rounded-lg border border-yellow-500/50"
+            initial={{ scale: 0.8, y: 20 }}
+            animate={{ scale: 1, y: 0 }}
+            exit={{ scale: 0.8, y: -20, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+          >
+            <motion.span
+              className="text-yellow-400 font-black text-lg sm:text-xl tracking-widest"
+              animate={{
+                textShadow: [
+                  '0 0 10px rgba(250, 204, 21, 0.5)',
+                  '0 0 20px rgba(250, 204, 21, 0.8)',
+                  '0 0 10px rgba(250, 204, 21, 0.5)',
+                ],
+              }}
+              transition={{ duration: 1, repeat: Infinity }}
+            >
+              NO MORE BETS
+            </motion.span>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+// Anticipation pulse overlay during landing phase
+interface AnticipationOverlayProps {
+  show: boolean;
+}
+
+function AnticipationOverlay({ show }: AnticipationOverlayProps) {
+  return (
+    <AnimatePresence>
+      {show && (
+        <motion.div
+          className="absolute inset-0 z-10 pointer-events-none rounded-lg"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.5 }}
+        >
+          <motion.div
+            className="absolute inset-0 border-2 border-yellow-500/30 rounded-lg"
+            animate={{
+              boxShadow: [
+                'inset 0 0 20px rgba(250, 204, 21, 0.1)',
+                'inset 0 0 40px rgba(250, 204, 21, 0.2)',
+                'inset 0 0 20px rgba(250, 204, 21, 0.1)',
+              ],
+            }}
+            transition={{ duration: 0.8, repeat: Infinity }}
+          />
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
 
 export function RouletteGame() {
   const { actor } = useRouletteActor();
@@ -204,6 +340,9 @@ export function RouletteGame() {
       <div className="md:hidden flex flex-col h-full">
         {/* Wheel section */}
         <div className="flex-shrink-0 flex flex-col items-center py-2">
+          {/* Recent Results History */}
+          <RecentResults results={recentResults} maxDisplay={10} />
+
           <RouletteWheel
             winningNumber={winningNumber}
             isWaitingForResult={isWaitingForResult}
@@ -214,19 +353,52 @@ export function RouletteGame() {
           {/* Result or stats */}
           <div className="text-center">
             {lastResult && showResults ? (
-              <div className="flex flex-col items-center">
+              <motion.div
+                className="flex flex-col items-center"
+                initial={{ scale: 0.8, opacity: 0, y: 10 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                transition={{ type: "spring", stiffness: 300, damping: 20 }}
+              >
                 {Number(lastResult.net_result) > 0 ? (
                   <>
-                    <span className="text-green-400 text-xl font-black tracking-wider">WIN</span>
-                    <span className="text-green-400 text-lg font-bold">+{formatUSDT(lastResult.total_payout)}</span>
+                    <motion.span
+                      className="text-green-400 text-xl font-black tracking-wider"
+                      initial={{ scale: 0.5 }}
+                      animate={{ scale: [0.5, 1.2, 1] }}
+                      transition={{ duration: 0.3, delay: 0.1 }}
+                    >
+                      WIN
+                    </motion.span>
+                    <motion.span
+                      className="text-green-400 text-lg font-bold"
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.25, delay: 0.2 }}
+                    >
+                      +{formatUSDT(lastResult.total_payout)}
+                    </motion.span>
                   </>
                 ) : (
                   <>
-                    <span className="text-red-400 text-xl font-black tracking-wider">LOSE</span>
-                    <span className="text-red-400 text-lg font-bold">-{formatUSDT(lastResult.total_bet)}</span>
+                    <motion.span
+                      className="text-red-400 text-xl font-black tracking-wider"
+                      initial={{ scale: 0.5 }}
+                      animate={{ scale: [0.5, 1.1, 1] }}
+                      transition={{ duration: 0.3, delay: 0.1 }}
+                    >
+                      LOSE
+                    </motion.span>
+                    <motion.span
+                      className="text-red-400 text-lg font-bold"
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.25, delay: 0.2 }}
+                    >
+                      -{formatUSDT(lastResult.total_bet)}
+                    </motion.span>
                   </>
                 )}
-              </div>
+              </motion.div>
             ) : (
               <div className="flex flex-col items-center gap-1">
                 <div className="flex items-center justify-center gap-3 text-sm">
@@ -250,7 +422,20 @@ export function RouletteGame() {
         </div>
 
         {/* Betting table */}
-        <div className="flex-shrink flex-grow-0 flex flex-col px-2 overflow-y-auto min-h-0">
+        <motion.div
+          className="flex-shrink flex-grow-0 flex flex-col px-2 overflow-y-auto min-h-0 relative"
+          animate={{
+            opacity: isSpinning && !showResults ? 0.5 : 1,
+            filter: isSpinning && !showResults ? 'grayscale(0.3)' : 'grayscale(0)',
+          }}
+          transition={{ duration: 0.4, ease: 'easeInOut' }}
+        >
+          {/* NO MORE BETS overlay */}
+          <NoMoreBetsOverlay show={isWaitingForResult} />
+
+          {/* Anticipation overlay during landing */}
+          <AnticipationOverlay show={isLanding} />
+
           {/* Tab buttons */}
           <div className="flex gap-1 mb-1">
             <button
@@ -275,19 +460,13 @@ export function RouletteGame() {
           <div className="flex gap-1 mb-1">
             {/* Zero - only on low tab */}
             {boardTab === 'low' && (
-              <button
-                className={`w-12 bg-green-600 rounded text-white font-bold text-lg flex items-center justify-center relative ${showResults && winningNumber === 0 ? 'ring-2 ring-yellow-400' : ''} ${isSpinning || chipBetAmount === 0 ? 'opacity-50' : 'active:brightness-125'}`}
-                style={{ height: '132px' }}
-                onClick={() => handlePlaceBet({ betType: { Straight: 0 }, amount: chipBetAmount, numbers: [0], displayText: '0' })}
+              <ZeroCell
+                amount={bets.find(b => b.numbers.length === 1 && b.numbers[0] === 0)?.amount || 0}
+                isWinner={showResults && winningNumber === 0}
                 disabled={isSpinning || chipBetAmount === 0}
-              >
-                0
-                {(bets.find(b => b.numbers.length === 1 && b.numbers[0] === 0)?.amount || 0) > 0 && (
-                  <span className="absolute top-1 right-1 bg-yellow-500 text-black text-[8px] px-1 rounded-full">
-                    ${(bets.find(b => b.numbers.length === 1 && b.numbers[0] === 0)?.amount || 0).toFixed(2)}
-                  </span>
-                )}
-              </button>
+                onClick={() => handlePlaceBet({ betType: { Straight: 0 }, amount: chipBetAmount, numbers: [0], displayText: '0' })}
+                isMobile={true}
+              />
             )}
 
             {/* Numbers 6 columns */}
@@ -303,15 +482,17 @@ export function RouletteGame() {
                     const amount = bets.find(b => b.numbers.length === 1 && b.numbers[0] === num)?.amount || 0;
                     const isWinner = showResults && winningNumber === num;
                     return (
-                      <button
+                      <BettingCell
                         key={num}
-                        className={`flex-1 h-11 ${isRed ? 'bg-red-700' : 'bg-zinc-900'} rounded text-white font-bold flex items-center justify-center relative ${isWinner ? 'ring-2 ring-yellow-400' : ''} ${isSpinning || chipBetAmount === 0 ? 'opacity-50' : 'active:brightness-125'}`}
-                        onClick={() => handlePlaceBet({ betType: { Straight: num }, amount: chipBetAmount, numbers: [num], displayText: `${num}` })}
+                        label={`${num}`}
+                        bgColor={isRed ? 'bg-red-700' : 'bg-zinc-900'}
+                        amount={amount}
+                        isWinner={isWinner}
                         disabled={isSpinning || chipBetAmount === 0}
-                      >
-                        {num}
-                        {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-[8px] px-1 rounded-full">${amount.toFixed(2)}</span>}
-                      </button>
+                        onClick={() => handlePlaceBet({ betType: { Straight: num }, amount: chipBetAmount, numbers: [num], displayText: `${num}` })}
+                        heightClass="h-11"
+                        isMobile={true}
+                      />
                     );
                   })}
                 </div>
@@ -326,15 +507,18 @@ export function RouletteGame() {
                   const amount = bets.find(b => [...b.numbers].sort().join(',') === [...nums].sort().join(','))?.amount || 0;
                   const isWinner = showResults && winningNumber !== null && nums.includes(winningNumber);
                   return (
-                    <button
+                    <OutsideBetCell
                       key={col}
-                      className={`w-10 h-11 bg-zinc-800 rounded text-white font-bold text-xs relative ${isWinner ? 'ring-2 ring-green-400' : ''} ${isSpinning || chipBetAmount === 0 ? 'opacity-50' : 'active:brightness-125'}`}
-                      onClick={() => handlePlaceBet({ betType: { Column: col }, amount: chipBetAmount, numbers: nums, displayText: `Col ${col}` })}
+                      label="2:1"
+                      bgColor="bg-zinc-800"
+                      amount={amount}
+                      isWinner={isWinner}
                       disabled={isSpinning || chipBetAmount === 0}
-                    >
-                      2:1
-                      {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-[8px] px-0.5 rounded-full">${amount.toFixed(2)}</span>}
-                    </button>
+                      onClick={() => handlePlaceBet({ betType: { Column: col }, amount: chipBetAmount, numbers: nums, displayText: `Col ${col}` })}
+                      isMobile={true}
+                      heightClass="h-11"
+                      widthClass="w-10"
+                    />
                   );
                 })}
               </div>
@@ -351,15 +535,17 @@ export function RouletteGame() {
               const amount = bets.find(b => [...b.numbers].sort().join(',') === [...nums].sort().join(','))?.amount || 0;
               const isWinner = showResults && winningNumber !== null && nums.includes(winningNumber);
               return (
-                <button
+                <OutsideBetCell
                   key={label}
-                  className={`flex-1 h-10 bg-zinc-800 rounded text-white font-bold text-xs relative ${isWinner ? 'ring-2 ring-green-400' : ''} ${isSpinning || chipBetAmount === 0 ? 'opacity-50' : 'active:brightness-125'}`}
-                  onClick={() => handlePlaceBet({ betType: { Dozen: v }, amount: chipBetAmount, numbers: nums, displayText: label })}
+                  label={label}
+                  bgColor="bg-zinc-800"
+                  amount={amount}
+                  isWinner={isWinner}
                   disabled={isSpinning || chipBetAmount === 0}
-                >
-                  {label}
-                  {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-[8px] px-1 rounded-full">${amount.toFixed(2)}</span>}
-                </button>
+                  onClick={() => handlePlaceBet({ betType: { Dozen: v }, amount: chipBetAmount, numbers: nums, displayText: label })}
+                  isMobile={true}
+                  heightClass="h-10"
+                />
               );
             })}
           </div>
@@ -377,15 +563,17 @@ export function RouletteGame() {
               const amount = bets.find(b => [...b.numbers].sort().join(',') === [...nums].sort().join(','))?.amount || 0;
               const isWinner = showResults && winningNumber !== null && nums.includes(winningNumber);
               return (
-                <button
+                <OutsideBetCell
                   key={label}
-                  className={`h-10 ${bg} rounded text-white font-bold text-[10px] relative ${isWinner ? 'ring-2 ring-green-400' : ''} ${isSpinning || chipBetAmount === 0 ? 'opacity-50' : 'active:brightness-125'}`}
-                  onClick={() => handlePlaceBet({ betType: bt, amount: chipBetAmount, numbers: nums, displayText: label })}
+                  label={label}
+                  bgColor={bg}
+                  amount={amount}
+                  isWinner={isWinner}
                   disabled={isSpinning || chipBetAmount === 0}
-                >
-                  {label}
-                  {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-[8px] px-1 rounded-full">${amount.toFixed(2)}</span>}
-                </button>
+                  onClick={() => handlePlaceBet({ betType: bt, amount: chipBetAmount, numbers: nums, displayText: label })}
+                  isMobile={true}
+                  heightClass="h-10"
+                />
               );
             })}
           </div>
@@ -401,17 +589,20 @@ export function RouletteGame() {
                 CLEAR
               </button>
             )}
-            <button
+            <motion.button
               onClick={handleSpin}
               disabled={isSpinning || !isAuthenticated || bets.length === 0 || exceedsHouseLimit}
               className={`flex-1 py-3 rounded-lg font-bold text-lg ${
-                isSpinning ? 'bg-yellow-600 animate-pulse' : 'bg-green-600 active:bg-green-500'
+                isSpinning ? 'bg-yellow-600 animate-pulse' : 'bg-green-600'
               } disabled:opacity-50`}
+              whileHover={(isSpinning || !isAuthenticated || bets.length === 0 || exceedsHouseLimit) ? {} : { scale: 1.02 }}
+              whileTap={(isSpinning || !isAuthenticated || bets.length === 0 || exceedsHouseLimit) ? {} : { scale: 0.97 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
             >
               {getButtonText()}
-            </button>
+            </motion.button>
           </div>
-        </div>
+        </motion.div>
 
         {/* Betting Rail */}
         <div className="flex-shrink-0">
@@ -438,6 +629,9 @@ export function RouletteGame() {
       <div className="hidden md:flex flex-col h-full overflow-y-auto pb-28">
         {/* Wheel section */}
         <div className="flex-shrink-0 flex flex-col items-center py-2">
+          {/* Recent Results History */}
+          <RecentResults results={recentResults} maxDisplay={15} />
+
           <RouletteWheel
             winningNumber={winningNumber}
             isWaitingForResult={isWaitingForResult}
@@ -448,19 +642,52 @@ export function RouletteGame() {
           {/* Result or stats */}
           <div className="text-center mt-2">
             {lastResult && showResults ? (
-              <div className="flex flex-col items-center">
+              <motion.div
+                className="flex flex-col items-center"
+                initial={{ scale: 0.8, opacity: 0, y: 10 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                transition={{ type: "spring", stiffness: 300, damping: 20 }}
+              >
                 {Number(lastResult.net_result) > 0 ? (
                   <>
-                    <span className="text-green-400 text-3xl font-black tracking-wider">WIN</span>
-                    <span className="text-green-400 text-2xl font-bold">+{formatUSDT(lastResult.total_payout)}</span>
+                    <motion.span
+                      className="text-green-400 text-3xl font-black tracking-wider"
+                      initial={{ scale: 0.5 }}
+                      animate={{ scale: [0.5, 1.2, 1] }}
+                      transition={{ duration: 0.3, delay: 0.1 }}
+                    >
+                      WIN
+                    </motion.span>
+                    <motion.span
+                      className="text-green-400 text-2xl font-bold"
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.25, delay: 0.2 }}
+                    >
+                      +{formatUSDT(lastResult.total_payout)}
+                    </motion.span>
                   </>
                 ) : (
                   <>
-                    <span className="text-red-400 text-3xl font-black tracking-wider">LOSE</span>
-                    <span className="text-red-400 text-2xl font-bold">-{formatUSDT(lastResult.total_bet)}</span>
+                    <motion.span
+                      className="text-red-400 text-3xl font-black tracking-wider"
+                      initial={{ scale: 0.5 }}
+                      animate={{ scale: [0.5, 1.1, 1] }}
+                      transition={{ duration: 0.3, delay: 0.1 }}
+                    >
+                      LOSE
+                    </motion.span>
+                    <motion.span
+                      className="text-red-400 text-2xl font-bold"
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.25, delay: 0.2 }}
+                    >
+                      -{formatUSDT(lastResult.total_bet)}
+                    </motion.span>
                   </>
                 )}
-              </div>
+              </motion.div>
             ) : (
               <div className="flex flex-col items-center gap-1">
                 <div className="flex items-center justify-center gap-6 text-base">
@@ -485,7 +712,20 @@ export function RouletteGame() {
         </div>
 
         {/* Betting table */}
-        <div className="flex-1 flex flex-col items-center px-4 max-w-2xl mx-auto w-full">
+        <motion.div
+          className="flex-1 flex flex-col items-center px-4 max-w-2xl mx-auto w-full relative"
+          animate={{
+            opacity: isSpinning && !showResults ? 0.5 : 1,
+            filter: isSpinning && !showResults ? 'grayscale(0.3)' : 'grayscale(0)',
+          }}
+          transition={{ duration: 0.4, ease: 'easeInOut' }}
+        >
+          {/* NO MORE BETS overlay */}
+          <NoMoreBetsOverlay show={isWaitingForResult} />
+
+          {/* Anticipation overlay during landing */}
+          <AnticipationOverlay show={isLanding} />
+
           {/* Tab buttons */}
           <div className="flex gap-2 mb-2 w-full">
             <button
@@ -510,19 +750,13 @@ export function RouletteGame() {
           <div className="flex gap-2 mb-2 w-full">
             {/* Zero - only on low tab */}
             {boardTab === 'low' && (
-              <button
-                className={`w-16 bg-green-600 rounded-lg text-white font-bold text-xl flex items-center justify-center relative transition hover:brightness-110 ${showResults && winningNumber === 0 ? 'ring-2 ring-yellow-400' : ''} ${isSpinning || chipBetAmount === 0 ? 'opacity-50' : ''}`}
-                style={{ height: '156px' }}
-                onClick={() => handlePlaceBet({ betType: { Straight: 0 }, amount: chipBetAmount, numbers: [0], displayText: '0' })}
+              <ZeroCell
+                amount={bets.find(b => b.numbers.length === 1 && b.numbers[0] === 0)?.amount || 0}
+                isWinner={showResults && winningNumber === 0}
                 disabled={isSpinning || chipBetAmount === 0}
-              >
-                0
-                {(bets.find(b => b.numbers.length === 1 && b.numbers[0] === 0)?.amount || 0) > 0 && (
-                  <span className="absolute top-2 right-2 bg-yellow-500 text-black text-xs px-1.5 rounded-full">
-                    ${(bets.find(b => b.numbers.length === 1 && b.numbers[0] === 0)?.amount || 0).toFixed(2)}
-                  </span>
-                )}
-              </button>
+                onClick={() => handlePlaceBet({ betType: { Straight: 0 }, amount: chipBetAmount, numbers: [0], displayText: '0' })}
+                isMobile={false}
+              />
             )}
 
             {/* Numbers 6 columns */}
@@ -538,15 +772,17 @@ export function RouletteGame() {
                     const amount = bets.find(b => b.numbers.length === 1 && b.numbers[0] === num)?.amount || 0;
                     const isWinner = showResults && winningNumber === num;
                     return (
-                      <button
+                      <BettingCell
                         key={num}
-                        className={`flex-1 h-12 ${isRed ? 'bg-red-700 hover:bg-red-600' : 'bg-zinc-900 hover:bg-zinc-800'} rounded-lg text-white font-bold text-lg flex items-center justify-center relative transition ${isWinner ? 'ring-2 ring-yellow-400' : ''} ${isSpinning || chipBetAmount === 0 ? 'opacity-50' : ''}`}
-                        onClick={() => handlePlaceBet({ betType: { Straight: num }, amount: chipBetAmount, numbers: [num], displayText: `${num}` })}
+                        label={`${num}`}
+                        bgColor={isRed ? 'bg-red-700' : 'bg-zinc-900'}
+                        amount={amount}
+                        isWinner={isWinner}
                         disabled={isSpinning || chipBetAmount === 0}
-                      >
-                        {num}
-                        {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-xs px-1.5 rounded-full">${amount.toFixed(2)}</span>}
-                      </button>
+                        onClick={() => handlePlaceBet({ betType: { Straight: num }, amount: chipBetAmount, numbers: [num], displayText: `${num}` })}
+                        heightClass="h-12"
+                        isMobile={false}
+                      />
                     );
                   })}
                 </div>
@@ -561,15 +797,18 @@ export function RouletteGame() {
                   const amount = bets.find(b => [...b.numbers].sort().join(',') === [...nums].sort().join(','))?.amount || 0;
                   const isWinner = showResults && winningNumber !== null && nums.includes(winningNumber);
                   return (
-                    <button
+                    <OutsideBetCell
                       key={col}
-                      className={`w-14 h-12 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-white font-bold text-sm relative transition ${isWinner ? 'ring-2 ring-green-400' : ''} ${isSpinning || chipBetAmount === 0 ? 'opacity-50' : ''}`}
-                      onClick={() => handlePlaceBet({ betType: { Column: col }, amount: chipBetAmount, numbers: nums, displayText: `Col ${col}` })}
+                      label="2:1"
+                      bgColor="bg-zinc-800"
+                      amount={amount}
+                      isWinner={isWinner}
                       disabled={isSpinning || chipBetAmount === 0}
-                    >
-                      2:1
-                      {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-xs px-1 rounded-full">${amount.toFixed(2)}</span>}
-                    </button>
+                      onClick={() => handlePlaceBet({ betType: { Column: col }, amount: chipBetAmount, numbers: nums, displayText: `Col ${col}` })}
+                      isMobile={false}
+                      heightClass="h-12"
+                      widthClass="w-14"
+                    />
                   );
                 })}
               </div>
@@ -586,15 +825,17 @@ export function RouletteGame() {
               const amount = bets.find(b => [...b.numbers].sort().join(',') === [...nums].sort().join(','))?.amount || 0;
               const isWinner = showResults && winningNumber !== null && nums.includes(winningNumber);
               return (
-                <button
+                <OutsideBetCell
                   key={label}
-                  className={`flex-1 h-12 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-white font-bold text-sm relative transition ${isWinner ? 'ring-2 ring-green-400' : ''} ${isSpinning || chipBetAmount === 0 ? 'opacity-50' : ''}`}
-                  onClick={() => handlePlaceBet({ betType: { Dozen: v }, amount: chipBetAmount, numbers: nums, displayText: label })}
+                  label={label}
+                  bgColor="bg-zinc-800"
+                  amount={amount}
+                  isWinner={isWinner}
                   disabled={isSpinning || chipBetAmount === 0}
-                >
-                  {label}
-                  {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-xs px-1.5 rounded-full">${amount.toFixed(2)}</span>}
-                </button>
+                  onClick={() => handlePlaceBet({ betType: { Dozen: v }, amount: chipBetAmount, numbers: nums, displayText: label })}
+                  isMobile={false}
+                  heightClass="h-12"
+                />
               );
             })}
           </div>
@@ -602,25 +843,27 @@ export function RouletteGame() {
           {/* Outside bets - Even money */}
           <div className="grid grid-cols-6 gap-2 mb-3 w-full">
             {[
-              { label: '1-18', nums: Array.from({length: 18}, (_, i) => i + 1), bt: { Low: null } as BetType, bg: 'bg-zinc-800 hover:bg-zinc-700' },
-              { label: 'EVEN', nums: Array.from({length: 36}, (_, i) => i + 1).filter(n => n % 2 === 0), bt: { Even: null } as BetType, bg: 'bg-zinc-800 hover:bg-zinc-700' },
-              { label: 'RED', nums: [...RED_NUMBERS], bt: { Red: null } as BetType, bg: 'bg-red-700 hover:bg-red-600' },
-              { label: 'BLACK', nums: Array.from({length: 36}, (_, i) => i + 1).filter(n => !RED_NUMBERS.has(n)), bt: { Black: null } as BetType, bg: 'bg-zinc-900 hover:bg-zinc-800' },
-              { label: 'ODD', nums: Array.from({length: 36}, (_, i) => i + 1).filter(n => n % 2 === 1), bt: { Odd: null } as BetType, bg: 'bg-zinc-800 hover:bg-zinc-700' },
-              { label: '19-36', nums: Array.from({length: 18}, (_, i) => i + 19), bt: { High: null } as BetType, bg: 'bg-zinc-800 hover:bg-zinc-700' },
+              { label: '1-18', nums: Array.from({length: 18}, (_, i) => i + 1), bt: { Low: null } as BetType, bg: 'bg-zinc-800' },
+              { label: 'EVEN', nums: Array.from({length: 36}, (_, i) => i + 1).filter(n => n % 2 === 0), bt: { Even: null } as BetType, bg: 'bg-zinc-800' },
+              { label: 'RED', nums: [...RED_NUMBERS], bt: { Red: null } as BetType, bg: 'bg-red-700' },
+              { label: 'BLACK', nums: Array.from({length: 36}, (_, i) => i + 1).filter(n => !RED_NUMBERS.has(n)), bt: { Black: null } as BetType, bg: 'bg-zinc-900' },
+              { label: 'ODD', nums: Array.from({length: 36}, (_, i) => i + 1).filter(n => n % 2 === 1), bt: { Odd: null } as BetType, bg: 'bg-zinc-800' },
+              { label: '19-36', nums: Array.from({length: 18}, (_, i) => i + 19), bt: { High: null } as BetType, bg: 'bg-zinc-800' },
             ].map(({ label, nums, bt, bg }) => {
               const amount = bets.find(b => [...b.numbers].sort().join(',') === [...nums].sort().join(','))?.amount || 0;
               const isWinner = showResults && winningNumber !== null && nums.includes(winningNumber);
               return (
-                <button
+                <OutsideBetCell
                   key={label}
-                  className={`h-12 ${bg} rounded-lg text-white font-bold text-sm relative transition ${isWinner ? 'ring-2 ring-green-400' : ''} ${isSpinning || chipBetAmount === 0 ? 'opacity-50' : ''}`}
-                  onClick={() => handlePlaceBet({ betType: bt, amount: chipBetAmount, numbers: nums, displayText: label })}
+                  label={label}
+                  bgColor={bg}
+                  amount={amount}
+                  isWinner={isWinner}
                   disabled={isSpinning || chipBetAmount === 0}
-                >
-                  {label}
-                  {amount > 0 && <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-xs px-1.5 rounded-full">${amount.toFixed(2)}</span>}
-                </button>
+                  onClick={() => handlePlaceBet({ betType: bt, amount: chipBetAmount, numbers: nums, displayText: label })}
+                  isMobile={false}
+                  heightClass="h-12"
+                />
               );
             })}
           </div>
@@ -636,17 +879,20 @@ export function RouletteGame() {
                 CLEAR
               </button>
             )}
-            <button
+            <motion.button
               onClick={handleSpin}
               disabled={isSpinning || !isAuthenticated || bets.length === 0 || exceedsHouseLimit}
-              className={`flex-1 py-3 rounded-lg font-bold text-xl transition ${
-                isSpinning ? 'bg-yellow-600 animate-pulse' : 'bg-green-600 hover:bg-green-500'
+              className={`flex-1 py-3 rounded-lg font-bold text-xl ${
+                isSpinning ? 'bg-yellow-600 animate-pulse' : 'bg-green-600'
               } disabled:opacity-50`}
+              whileHover={(isSpinning || !isAuthenticated || bets.length === 0 || exceedsHouseLimit) ? {} : { scale: 1.02 }}
+              whileTap={(isSpinning || !isAuthenticated || bets.length === 0 || exceedsHouseLimit) ? {} : { scale: 0.97 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
             >
               {getButtonText()}
-            </button>
+            </motion.button>
           </div>
-        </div>
+        </motion.div>
 
         {/* Betting Rail */}
         <div className="flex-shrink-0">

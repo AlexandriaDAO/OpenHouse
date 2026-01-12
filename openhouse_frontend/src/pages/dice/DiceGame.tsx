@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { motion } from 'framer-motion';
 import useDiceActor from '../../hooks/actors/useDiceActor';
 import useLedgerActor from '../../hooks/actors/useLedgerActor';
 import { GameLayout } from '../../components/game-ui';
@@ -212,29 +213,54 @@ export function DiceGame() {
         {/* Result display - Shows net result for multi-dice */}
         <div className="h-14 flex items-center justify-center flex-shrink-0">
           {lastResult && !isPlaying ? (
-            <div className={`text-center animate-in fade-in slide-in-from-bottom-2 duration-300`}>
+            <motion.div
+              className="text-center"
+              initial={{ scale: 0.8, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              transition={{ type: "spring", stiffness: 300, damping: 20 }}
+            >
               {/* Win count for multi-dice */}
               {lastResult.dice_count > 1 && (
-                <span className={`font-black text-lg mr-2 ${lastResult.total_wins > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                <motion.span
+                  className={`font-black text-lg mr-2 ${lastResult.total_wins > 0 ? 'text-green-400' : 'text-red-400'}`}
+                  initial={{ scale: 0.5 }}
+                  animate={{ scale: [0.5, 1.2, 1] }}
+                  transition={{ duration: 0.3, delay: 0.1 }}
+                >
                   {lastResult.total_wins}/{lastResult.dice_count}
-                </span>
+                </motion.span>
               )}
               {/* Net result */}
-              <span className={`font-black text-xl mr-2 ${Number(lastResult.net_result) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              <motion.span
+                className={`font-black text-xl mr-2 ${Number(lastResult.net_result) >= 0 ? 'text-green-400' : 'text-red-400'}`}
+                initial={{ scale: 0.5 }}
+                animate={{ scale: [0.5, 1.15, 1] }}
+                transition={{ duration: 0.3, delay: 0.15 }}
+              >
                 {Number(lastResult.net_result) >= 0 ? 'WON' : 'LOST'}
-              </span>
+              </motion.span>
               {Number(lastResult.net_result) > 0 && (
-                <span className="text-dfinity-turquoise font-mono font-bold text-lg">
+                <motion.span
+                  className="text-dfinity-turquoise font-mono font-bold text-lg"
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.25, delay: 0.25 }}
+                >
                   +{formatUSDT(lastResult.total_payout)}
-                </span>
+                </motion.span>
               )}
               {/* Rolled numbers for single dice */}
               {lastResult.dice_count === 1 && lastResult.dice_results[0] && (
-                <span className="text-gray-600 text-xs ml-3 border-l border-gray-700 pl-3">
+                <motion.span
+                  className="text-gray-600 text-xs ml-3 border-l border-gray-700 pl-3"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.2, delay: 0.3 }}
+                >
                   Rolled {lastResult.dice_results[0].rolled_number}
-                </span>
+                </motion.span>
               )}
-            </div>
+            </motion.div>
           ) : (
             /* Placeholder to prevent layout jump */
             <div className="h-full w-full"></div>
@@ -243,7 +269,7 @@ export function DiceGame() {
 
         {/* Direction buttons row - Underneath Dice */}
         <div className="flex gap-2 sm:gap-4 justify-center mb-2 flex-shrink-0">
-          <button
+          <motion.button
             onClick={() => setDirection('Under')}
             className={`flex-1 md:flex-none md:w-32 px-3 sm:px-4 py-2.5 sm:py-3 text-xs sm:text-sm font-bold rounded-xl transition ${
               direction === 'Under'
@@ -251,11 +277,15 @@ export function DiceGame() {
                 : 'border border-gray-700 text-gray-500 hover:text-gray-300 bg-black/20'
             }`}
             disabled={isPlaying}
+            whileHover={isPlaying ? undefined : { scale: 1.03 }}
+            whileTap={isPlaying ? undefined : { scale: 0.96 }}
+            animate={direction === 'Under' ? { scale: 1 } : { scale: 1 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 25 }}
           >
             UNDER
-          </button>
+          </motion.button>
 
-          <button
+          <motion.button
             onClick={() => setDirection('Over')}
             className={`flex-1 md:flex-none md:w-32 px-3 sm:px-4 py-2.5 sm:py-3 text-xs sm:text-sm font-bold rounded-xl transition ${
               direction === 'Over'
@@ -263,9 +293,13 @@ export function DiceGame() {
                 : 'border border-gray-700 text-gray-500 hover:text-gray-300 bg-black/20'
             }`}
             disabled={isPlaying}
+            whileHover={isPlaying ? undefined : { scale: 1.03 }}
+            whileTap={isPlaying ? undefined : { scale: 0.96 }}
+            animate={direction === 'Over' ? { scale: 1 } : { scale: 1 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 25 }}
           >
             OVER
-          </button>
+          </motion.button>
         </div>
 
         {/* Controls Section */}

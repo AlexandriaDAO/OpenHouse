@@ -66,6 +66,7 @@ import {
   renderTerritoryLayer,
   arePatternsInitialized,
   TERRITORY_BRIGHTNESS,
+  renderElementEffects,
 } from './life/rendering';
 
 // Import tutorial component
@@ -79,8 +80,22 @@ import { type IdentityProviderConfig } from '../lib/ic-use-identity/config/ident
 import { stepGeneration, stepQuadrantGeneration, type Cell } from './life/engine';
 
 // Import extracted modal components
-import { EliminationModal } from './life/components';
+import {
+  EliminationModal,
+  GameHUD,
+  Minimap,
+  PatternLibrary,
+  GameStateWrapper,
+  AnimatedModal,
+  AnimatedGridItem,
+  staggerContainerVariants,
+  staggerItemVariants,
+  fadeSlideVariants,
+} from './life/components';
 import type { EliminationStats as EliminationStatsType } from './life/state/types';
+
+// Import Framer Motion for state transitions
+import { motion, AnimatePresence } from 'framer-motion';
 
 // Coin particle for Mario-style animation when bases lose coins
 interface CoinParticle {
@@ -194,7 +209,6 @@ export const Risk: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasSizeRef = useRef({ width: 0, height: 0 });
-  const minimapRef = useRef<HTMLCanvasElement>(null);
 
   // Territory pattern rendering refs
   const territoryAnimTimeRef = useRef<number>(0);
@@ -211,8 +225,10 @@ export const Risk: React.FC = () => {
   const [viewX, setViewX] = useState(0);     // 0, 128, 256, or 384
   const [viewY, setViewY] = useState(0);     // 0, 128, 256, or 384
 
-  // Touch handling for swipe navigation
+  // Touch handling for swipe navigation and pinch-to-zoom
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const pinchStartRef = useRef<{ distance: number; midpoint: { x: number; y: number } } | null>(null);
+  const lastTapTimeRef = useRef<number>(0);
 
   // Derived: current quadrant number (0-15)
   const currentQuadrant = (viewY / QUADRANT_SIZE) * QUADRANTS_PER_ROW + (viewX / QUADRANT_SIZE);
@@ -547,37 +563,132 @@ export const Risk: React.FC = () => {
     setViewMode(mode => mode === 'overview' ? 'quadrant' : 'overview');
   }, []);
 
-  // Touch/Swipe navigation for mobile
+  // Helper to calculate distance between two touches
+  const getTouchDistance = useCallback((t1: React.Touch, t2: React.Touch): number => {
+    const dx = t2.clientX - t1.clientX;
+    const dy = t2.clientY - t1.clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }, []);
+
+  // Touch/Swipe navigation for mobile with pinch-to-zoom and double-tap support
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     // Unfreeze the backend when touching while frozen (permanent for this session)
     if (isFrozen && actor) {
       setIsFrozen(false);
       actor.resume_game().catch(() => {});
     }
+
+    // Handle pinch start (two fingers)
+    if (e.touches.length === 2) {
+      const distance = getTouchDistance(e.touches[0], e.touches[1]);
+      const midpoint = {
+        x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+        y: (e.touches[0].clientY + e.touches[1].clientY) / 2,
+      };
+      pinchStartRef.current = { distance, midpoint };
+      touchStartRef.current = null; // Cancel single-touch tracking
+      return;
+    }
+
+    // Single touch
     const touch = e.touches[0];
     touchStartRef.current = { x: touch.clientX, y: touch.clientY };
-  }, [isFrozen, actor]);
+    pinchStartRef.current = null;
+  }, [isFrozen, actor, getTouchDistance]);
+
+  // Handle pinch zoom during touch move
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    // Pinch zoom: two fingers, zoom in = quadrant view, zoom out = overview
+    if (e.touches.length === 2 && pinchStartRef.current) {
+      const currentDistance = getTouchDistance(e.touches[0], e.touches[1]);
+      const startDistance = pinchStartRef.current.distance;
+      const ratio = currentDistance / startDistance;
+
+      // Pinch out (zoom in) - enter quadrant view
+      if (ratio > 1.3 && viewMode === 'overview') {
+        // Calculate which quadrant the pinch midpoint is over
+        const canvas = canvasRef.current;
+        if (canvas) {
+          const rect = canvas.getBoundingClientRect();
+          const midX = pinchStartRef.current.midpoint.x - rect.left;
+          const midY = pinchStartRef.current.midpoint.y - rect.top;
+          const cellSize = rect.width / GRID_SIZE;
+          const gridX = Math.floor(midX / cellSize);
+          const gridY = Math.floor(midY / cellSize);
+          const qCol = Math.floor(gridX / QUADRANT_SIZE);
+          const qRow = Math.floor(gridY / QUADRANT_SIZE);
+          const quadrant = Math.max(0, Math.min(15, qRow * QUADRANTS_PER_ROW + qCol));
+          jumpToQuadrant(quadrant);
+        } else {
+          setViewMode('quadrant');
+        }
+        pinchStartRef.current = null;
+      }
+      // Pinch in (zoom out) - return to overview
+      else if (ratio < 0.7 && viewMode === 'quadrant') {
+        setViewMode('overview');
+        pinchStartRef.current = null;
+      }
+    }
+  }, [getTouchDistance, viewMode, jumpToQuadrant]);
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
-    if (!touchStartRef.current || viewMode !== 'quadrant') return;
+    // Handle pinch end
+    if (pinchStartRef.current) {
+      pinchStartRef.current = null;
+      return;
+    }
+
+    if (!touchStartRef.current) return;
 
     const touch = e.changedTouches[0];
     const deltaX = touch.clientX - touchStartRef.current.x;
     const deltaY = touch.clientY - touchStartRef.current.y;
+    const totalDelta = Math.abs(deltaX) + Math.abs(deltaY);
 
-    // Determine swipe direction (if significant)
-    if (Math.abs(deltaX) > SWIPE_THRESHOLD || Math.abs(deltaY) > SWIPE_THRESHOLD) {
-      if (Math.abs(deltaX) > Math.abs(deltaY)) {
-        // Horizontal swipe - swipe left means go right (reveal content to the right)
-        navigateQuadrant(deltaX < 0 ? 'right' : 'left');
+    // Check for double-tap (toggle view mode)
+    const now = Date.now();
+    if (totalDelta < 20 && now - lastTapTimeRef.current < 300) {
+      // Double tap detected - toggle view mode
+      if (viewMode === 'overview') {
+        // Zoom into the tapped quadrant
+        const canvas = canvasRef.current;
+        if (canvas) {
+          const rect = canvas.getBoundingClientRect();
+          const tapX = touch.clientX - rect.left;
+          const tapY = touch.clientY - rect.top;
+          const cellSize = rect.width / GRID_SIZE;
+          const gridX = Math.floor(tapX / cellSize);
+          const gridY = Math.floor(tapY / cellSize);
+          const qCol = Math.floor(gridX / QUADRANT_SIZE);
+          const qRow = Math.floor(gridY / QUADRANT_SIZE);
+          const quadrant = Math.max(0, Math.min(15, qRow * QUADRANTS_PER_ROW + qCol));
+          jumpToQuadrant(quadrant);
+        }
       } else {
-        // Vertical swipe - swipe up means go down
-        navigateQuadrant(deltaY < 0 ? 'down' : 'up');
+        setViewMode('overview');
+      }
+      lastTapTimeRef.current = 0;
+      touchStartRef.current = null;
+      return;
+    }
+    lastTapTimeRef.current = now;
+
+    // Swipe navigation in quadrant view
+    if (viewMode === 'quadrant') {
+      if (Math.abs(deltaX) > SWIPE_THRESHOLD || Math.abs(deltaY) > SWIPE_THRESHOLD) {
+        if (Math.abs(deltaX) > Math.abs(deltaY)) {
+          // Horizontal swipe - swipe left means go right (reveal content to the right)
+          navigateQuadrant(deltaX < 0 ? 'right' : 'left');
+        } else {
+          // Vertical swipe - swipe up means go down
+          navigateQuadrant(deltaY < 0 ? 'down' : 'up');
+        }
       }
     }
 
     touchStartRef.current = null;
-  }, [viewMode, navigateQuadrant]);
+  }, [viewMode, navigateQuadrant, jumpToQuadrant]);
 
   // Handle auth provider selection (II 1.0 vs 2.0)
   const handleProviderSelect = useCallback((provider: IdentityProviderConfig) => {
@@ -1375,6 +1486,16 @@ export const Risk: React.FC = () => {
       getCellBrightness
     );
 
+    // Collect alive cells for element effects rendering
+    const aliveCellsForEffects: Array<{
+      screenX: number;
+      screenY: number;
+      size: number;
+      owner: number;
+      gridX: number;
+      gridY: number;
+    }> = [];
+
     // Draw living cells with glowing borders
     for (let row = 0; row < height; row++) {
       for (let col = 0; col < width; col++) {
@@ -1422,6 +1543,18 @@ export const Risk: React.FC = () => {
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
             ctx.lineWidth = Math.max(1, cellSize * 0.1);
             ctx.strokeRect(x + 0.5, y + 0.5, size - 1, size - 1);
+
+            // Collect for element effects (only cells large enough to see effects)
+            if (cellSize >= 4) {
+              aliveCellsForEffects.push({
+                screenX: x,
+                screenY: y,
+                size,
+                owner: cell.owner,
+                gridX: gridCol,
+                gridY: gridRow,
+              });
+            }
           } else {
             // For very small cells, just use bright fill
             ctx.fillStyle = playerColor;
@@ -1429,6 +1562,12 @@ export const Risk: React.FC = () => {
           }
         }
       }
+    }
+
+    // Render element-specific visual effects on alive cells
+    // (fire flicker, water shimmer, plasma crackle, etc.)
+    if (aliveCellsForEffects.length > 0) {
+      renderElementEffects(ctx, aliveCellsForEffects, territoryAnimTimeRef.current);
     }
 
     // Draw coin count on each base (centered in the 8x8 base)
@@ -1579,25 +1718,6 @@ export const Risk: React.FC = () => {
       ctx.stroke();
     }
   }, []);
-
-  // Calculate quadrant density for minimap heatmap
-  const calculateQuadrantDensity = useCallback((quadrant: number): number => {
-    if (localCells.length === 0) return 0;
-    const qRow = Math.floor(quadrant / QUADRANTS_PER_ROW);
-    const qCol = quadrant % QUADRANTS_PER_ROW;
-    const startY = qRow * QUADRANT_SIZE;
-    const startX = qCol * QUADRANT_SIZE;
-
-    let livingCells = 0;
-    for (let row = startY; row < startY + QUADRANT_SIZE; row++) {
-      for (let col = startX; col < startX + QUADRANT_SIZE; col++) {
-        const cell = localCells[row * GRID_SIZE + col];
-        if (cell && cell.alive && cell.owner > 0) livingCells++;
-      }
-    }
-
-    return livingCells / (QUADRANT_SIZE * QUADRANT_SIZE);
-  }, [localCells]);
 
   // Draw preview cells with pulsing animation (handles batched placements) - v2 rules
   const drawPreviewCells = useCallback((
@@ -1860,104 +1980,6 @@ export const Risk: React.FC = () => {
     draw();
   }, [draw]);
 
-  // Minimap drawing effect
-  useEffect(() => {
-    const canvas = minimapRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const size = canvas.width;
-    const quadSize = size / QUADRANTS_PER_ROW;
-
-    // Clear
-    ctx.fillStyle = '#1a1a2e';
-    ctx.fillRect(0, 0, size, size);
-
-    // Draw cell density per quadrant (heatmap)
-    for (let q = 0; q < TOTAL_QUADRANTS; q++) {
-      const qRow = Math.floor(q / QUADRANTS_PER_ROW);
-      const qCol = q % QUADRANTS_PER_ROW;
-      const density = calculateQuadrantDensity(q);
-
-      // Color based on density
-      const alpha = Math.min(0.8, density * 2);
-      ctx.fillStyle = `rgba(57, 255, 20, ${alpha})`;
-      ctx.fillRect(qCol * quadSize + 1, qRow * quadSize + 1, quadSize - 2, quadSize - 2);
-    }
-
-    // Highlight upcoming wipe quadrants (yellow, orange, red)
-    if (wipeInfo) {
-      // Third quadrant (+2m) - yellow
-      const q3 = (wipeInfo.quadrant + 2) % TOTAL_QUADRANTS;
-      const q3Row = Math.floor(q3 / QUADRANTS_PER_ROW);
-      const q3Col = q3 % QUADRANTS_PER_ROW;
-      ctx.fillStyle = 'rgba(234, 179, 8, 0.15)';
-      ctx.fillRect(q3Col * quadSize + 1, q3Row * quadSize + 1, quadSize - 2, quadSize - 2);
-      ctx.strokeStyle = '#EAB308';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(q3Col * quadSize, q3Row * quadSize, quadSize, quadSize);
-
-      // Second quadrant (+1m) - orange
-      const q2 = (wipeInfo.quadrant + 1) % TOTAL_QUADRANTS;
-      const q2Row = Math.floor(q2 / QUADRANTS_PER_ROW);
-      const q2Col = q2 % QUADRANTS_PER_ROW;
-      ctx.fillStyle = 'rgba(249, 115, 22, 0.15)';
-      ctx.fillRect(q2Col * quadSize + 1, q2Row * quadSize + 1, quadSize - 2, quadSize - 2);
-      ctx.strokeStyle = '#F97316';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(q2Col * quadSize, q2Row * quadSize, quadSize, quadSize);
-
-      // Next quadrant (imminent) - red with pulse
-      const wipeRow = Math.floor(wipeInfo.quadrant / QUADRANTS_PER_ROW);
-      const wipeCol = wipeInfo.quadrant % QUADRANTS_PER_ROW;
-      const pulseAlpha = wipeInfo.secondsUntil <= 10 ? 0.2 + 0.1 * Math.sin(Date.now() / 200) : 0.15;
-      ctx.fillStyle = `rgba(239, 68, 68, ${pulseAlpha})`;
-      ctx.fillRect(wipeCol * quadSize + 1, wipeRow * quadSize + 1, quadSize - 2, quadSize - 2);
-      ctx.strokeStyle = wipeInfo.secondsUntil <= 10 ? '#DC2626' : '#EF4444';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(wipeCol * quadSize, wipeRow * quadSize, quadSize, quadSize);
-    }
-
-    // Highlight current quadrant
-    ctx.strokeStyle = '#FFD700';
-    ctx.lineWidth = 3;
-    const curRow = Math.floor(currentQuadrant / QUADRANTS_PER_ROW);
-    const curCol = currentQuadrant % QUADRANTS_PER_ROW;
-    ctx.strokeRect(curCol * quadSize, curRow * quadSize, quadSize, quadSize);
-
-    // Draw grid
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= QUADRANTS_PER_ROW; i++) {
-      const pos = i * quadSize;
-      ctx.beginPath();
-      ctx.moveTo(pos, 0);
-      ctx.lineTo(pos, size);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(0, pos);
-      ctx.lineTo(size, pos);
-      ctx.stroke();
-    }
-  }, [localCells, currentQuadrant, calculateQuadrantDensity, wipeInfo]);
-
-  // Minimap click handler
-  const handleMinimapClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = minimapRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const quadSize = canvas.width / QUADRANTS_PER_ROW;
-
-    const qCol = Math.floor(x / quadSize);
-    const qRow = Math.floor(y / quadSize);
-    const quadrant = qRow * QUADRANTS_PER_ROW + qCol;
-
-    jumpToQuadrant(quadrant);
-  }, [jumpToQuadrant]);
 
   // Click handler for quadrant-based navigation and preview placement
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -2394,50 +2416,91 @@ export const Risk: React.FC = () => {
   // Login screen
   if (!isAuthenticated) {
     return (
-      <div className="flex flex-col items-center justify-center h-[calc(100vh-80px)] gap-6">
-        <div className="text-center">
-          <p className="text-gray-400">{GRID_WIDTH}x{GRID_HEIGHT} Persistent World</p>
-          <p className="text-gray-500 text-sm mt-2">Up to 9 players - your cells, your territory</p>
-        </div>
-
-        {/* Server selector */}
-        <div className="flex gap-2">
-          {RISK_SERVERS.map((server) => (
-            <button
-              key={server.id}
-              onClick={() => !server.locked && setSelectedServer(server)}
-              disabled={server.locked}
-              className={`px-4 py-2 rounded-lg font-mono text-sm transition-all ${
-                server.locked
-                  ? 'bg-white/5 text-gray-600 border border-white/5 cursor-not-allowed'
-                  : selectedServer.id === server.id
-                    ? 'bg-white/20 text-white border border-white/50'
-                    : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
-              }`}
-            >
-              {server.name}
-              {server.locked && <span className="ml-1">🔒</span>}
-              {!server.locked && activeServers[server.id] && <span className="ml-1 text-green-400">●</span>}
-            </button>
-          ))}
-        </div>
-
-        <button
-          onClick={() => setShowProviderSelector(true)}
-          disabled={isLoading}
-          className="px-6 py-3 rounded-lg font-mono text-lg bg-dfinity-turquoise/20 text-dfinity-turquoise border border-dfinity-turquoise/50 hover:bg-dfinity-turquoise/30 transition-all disabled:opacity-50"
+      <AnimatePresence mode="wait">
+        <motion.div
+          key="login-screen"
+          className="flex flex-col items-center justify-center h-[calc(100vh-80px)] gap-6"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -20 }}
+          transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
         >
-          {isLoading ? 'Connecting...' : 'Sign In'}
-        </button>
-        {error && <p className="text-red-400 text-sm">{error}</p>}
+          <motion.div
+            className="text-center"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+          >
+            <p className="text-gray-400">{GRID_WIDTH}x{GRID_HEIGHT} Persistent World</p>
+            <p className="text-gray-500 text-sm mt-2">Up to 9 players - your cells, your territory</p>
+          </motion.div>
 
-        {showProviderSelector && (
-          <AuthMethodSelector
-            onSelect={handleProviderSelect}
-            onCancel={() => setShowProviderSelector(false)}
-          />
-        )}
-      </div>
+          {/* Server selector */}
+          <motion.div
+            className="flex gap-2"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 }}
+          >
+            {RISK_SERVERS.map((server, index) => (
+              <motion.button
+                key={server.id}
+                onClick={() => !server.locked && setSelectedServer(server)}
+                disabled={server.locked}
+                className={`px-4 py-2 rounded-lg font-mono text-sm transition-all ${
+                  server.locked
+                    ? 'bg-white/5 text-gray-600 border border-white/5 cursor-not-allowed'
+                    : selectedServer.id === server.id
+                      ? 'bg-white/20 text-white border border-white/50'
+                      : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
+                }`}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.2 + index * 0.05 }}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                {server.name}
+                {server.locked && <span className="ml-1">🔒</span>}
+                {!server.locked && activeServers[server.id] && <span className="ml-1 text-green-400">●</span>}
+              </motion.button>
+            ))}
+          </motion.div>
+
+          <motion.button
+            onClick={() => setShowProviderSelector(true)}
+            disabled={isLoading}
+            className="px-6 py-3 rounded-lg font-mono text-lg bg-dfinity-turquoise/20 text-dfinity-turquoise border border-dfinity-turquoise/50 hover:bg-dfinity-turquoise/30 transition-all disabled:opacity-50"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.3, type: 'spring', stiffness: 300, damping: 25 }}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            {isLoading ? 'Connecting...' : 'Sign In'}
+          </motion.button>
+
+          <AnimatePresence>
+            {error && (
+              <motion.p
+                className="text-red-400 text-sm"
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+              >
+                {error}
+              </motion.p>
+            )}
+          </AnimatePresence>
+
+          {showProviderSelector && (
+            <AuthMethodSelector
+              onSelect={handleProviderSelect}
+              onCancel={() => setShowProviderSelector(false)}
+            />
+          )}
+        </motion.div>
+      </AnimatePresence>
     );
   }
 
@@ -2453,103 +2516,160 @@ export const Risk: React.FC = () => {
     }
 
     return (
-      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-80px)] gap-6 p-4">
-        <div className="text-center mb-4">
-          <h1 className="text-3xl font-bold text-white mb-2">Choose Your Region</h1>
-          <p className="text-gray-400">Select an elemental faction to command</p>
-        </div>
+      <AnimatePresence mode="wait">
+        <motion.div
+          key="region-selection"
+          className="flex flex-col items-center justify-center min-h-[calc(100vh-80px)] gap-6 p-4"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -20 }}
+          transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
+        >
+          <motion.div
+            className="text-center mb-4"
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1, type: 'spring', stiffness: 300, damping: 25 }}
+          >
+            <h1 className="text-3xl font-bold text-white mb-2">Choose Your Region</h1>
+            <p className="text-gray-400">Select an elemental faction to command</p>
+          </motion.div>
 
-        {/* Server selector */}
-        <div className="flex gap-2 mb-2">
-          {RISK_SERVERS.map((server) => (
-            <button
-              key={server.id}
-              onClick={() => !server.locked && setSelectedServer(server)}
-              disabled={server.locked}
-              className={`px-4 py-2 rounded-lg font-mono text-sm transition-all ${
-                server.locked
-                  ? 'bg-white/5 text-gray-600 border border-white/5 cursor-not-allowed'
-                  : selectedServer.id === server.id
-                    ? 'bg-white/20 text-white border border-white/50'
-                    : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
-              }`}
-            >
-              {server.name}
-              {server.locked && <span className="ml-1">🔒</span>}
-              {!server.locked && activeServers[server.id] && <span className="ml-1 text-green-400">●</span>}
-            </button>
-          ))}
-        </div>
-
-        {error && (
-          <div className="bg-red-500/20 border border-red-500/50 text-red-400 px-4 py-2 rounded-lg text-sm">
-            {error}
-          </div>
-        )}
-
-        {/* Region grid - 2 rows of 4 */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-4xl">
-          {Object.values(REGIONS).map((region) => {
-            const isTaken = takenRegions.has(region.id);
-
-            return (
-              <button
-                key={region.id}
-                onClick={() => {
-                  if (!isTaken) {
-                    setSelectedRegion(region);
-                    setShowRegionSelection(false);
-                    setShowSlotSelection(true);
-                  }
-                }}
-                disabled={isTaken}
-                className={`
-                  relative p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-3
-                  ${isTaken
-                    ? 'bg-gray-900/50 border-gray-700/50 opacity-50 cursor-not-allowed'
-                    : 'bg-black/40 border-white/20 hover:border-opacity-100 cursor-pointer hover:scale-105'
-                  }
-                `}
-                style={{
-                  borderColor: isTaken ? undefined : region.primaryColor,
-                }}
+          {/* Server selector */}
+          <motion.div
+            className="flex gap-2 mb-2"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.15 }}
+          >
+            {RISK_SERVERS.map((server, index) => (
+              <motion.button
+                key={server.id}
+                onClick={() => !server.locked && setSelectedServer(server)}
+                disabled={server.locked}
+                className={`px-4 py-2 rounded-lg font-mono text-sm transition-colors ${
+                  server.locked
+                    ? 'bg-white/5 text-gray-600 border border-white/5 cursor-not-allowed'
+                    : selectedServer.id === server.id
+                      ? 'bg-white/20 text-white border border-white/50'
+                      : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
+                }`}
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 + index * 0.05 }}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
               >
-                {/* Textured cell preview */}
-                <div
-                  className="relative"
-                  style={{
-                    boxShadow: isTaken ? 'none' : `0 0 20px ${region.primaryColor}40`,
+                {server.name}
+                {server.locked && <span className="ml-1">🔒</span>}
+                {!server.locked && activeServers[server.id] && <span className="ml-1 text-green-400">●</span>}
+              </motion.button>
+            ))}
+          </motion.div>
+
+          <AnimatePresence>
+            {error && (
+              <motion.div
+                className="bg-red-500/20 border border-red-500/50 text-red-400 px-4 py-2 rounded-lg text-sm"
+                initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+              >
+                {error}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Region grid - 2 rows of 4 */}
+          <motion.div
+            className="grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-4xl"
+            variants={staggerContainerVariants}
+            initial="initial"
+            animate="animate"
+          >
+            {Object.values(REGIONS).map((region, index) => {
+              const isTaken = takenRegions.has(region.id);
+
+              return (
+                <motion.button
+                  key={region.id}
+                  onClick={() => {
+                    if (!isTaken) {
+                      setSelectedRegion(region);
+                      setShowRegionSelection(false);
+                      setShowSlotSelection(true);
+                    }
                   }}
+                  disabled={isTaken}
+                  className={`
+                    relative p-4 rounded-xl border-2 flex flex-col items-center gap-3
+                    ${isTaken
+                      ? 'bg-gray-900/50 border-gray-700/50 opacity-50 cursor-not-allowed'
+                      : 'bg-black/40 border-white/20 cursor-pointer'
+                    }
+                  `}
+                  style={{
+                    borderColor: isTaken ? undefined : region.primaryColor,
+                  }}
+                  variants={staggerItemVariants}
+                  whileHover={isTaken ? {} : {
+                    scale: 1.05,
+                    y: -4,
+                    boxShadow: `0 10px 30px ${region.primaryColor}30`,
+                  }}
+                  whileTap={isTaken ? {} : { scale: 0.98 }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 25 }}
                 >
-                  <TexturedCellPreview regionId={region.id} size={64} />
-                </div>
-
-                {/* Region info */}
-                <div className="flex items-center justify-center gap-2">
-                  <span className="text-xl">{region.element}</span>
-                  <span
-                    className="font-bold text-lg"
-                    style={{ color: isTaken ? '#666' : region.primaryColor }}
+                  {/* Textured cell preview */}
+                  <div
+                    className="relative"
+                    style={{
+                      boxShadow: isTaken ? 'none' : `0 0 20px ${region.primaryColor}40`,
+                    }}
                   >
-                    {region.name}
-                  </span>
-                </div>
-
-                {/* Status badge */}
-                {isTaken && (
-                  <div className="absolute top-2 right-2 bg-red-500/80 text-white text-xs px-2 py-0.5 rounded">
-                    Taken
+                    <TexturedCellPreview regionId={region.id} size={64} />
                   </div>
-                )}
-              </button>
-            );
-          })}
-        </div>
 
-        <div className="text-gray-600 text-xs mt-4 text-center">
-          Your cells will match your chosen element
-        </div>
-      </div>
+                  {/* Region info */}
+                  <div className="flex items-center justify-center gap-2">
+                    <span className="text-xl">{region.element}</span>
+                    <span
+                      className="font-bold text-lg"
+                      style={{ color: isTaken ? '#666' : region.primaryColor }}
+                    >
+                      {region.name}
+                    </span>
+                  </div>
+
+                  {/* Status badge */}
+                  <AnimatePresence>
+                    {isTaken && (
+                      <motion.div
+                        className="absolute top-2 right-2 bg-red-500/80 text-white text-xs px-2 py-0.5 rounded"
+                        initial={{ opacity: 0, scale: 0.8 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.8 }}
+                      >
+                        Taken
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.button>
+              );
+            })}
+          </motion.div>
+
+          <motion.div
+            className="text-gray-600 text-xs mt-4 text-center"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.5 }}
+          >
+            Your cells will match your chosen element
+          </motion.div>
+        </motion.div>
+      </AnimatePresence>
     );
   }
 
@@ -2571,222 +2691,316 @@ export const Risk: React.FC = () => {
     const regionToUse = selectedRegion || REGIONS[1]; // Fallback to Earth if no region selected
 
     return (
-      <div className="flex flex-col items-center justify-center h-[calc(100vh-80px)] gap-6 p-4">
-        {/* Back button and selected region display */}
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => {
-              setShowSlotSelection(false);
-              setShowRegionSelection(true);
-            }}
-            className="px-3 py-2 bg-white/10 hover:bg-white/20 text-gray-300 rounded-lg transition-colors"
+      <AnimatePresence mode="wait">
+        <motion.div
+          key="slot-selection"
+          className="flex flex-col items-center justify-center h-[calc(100vh-80px)] gap-6 p-4"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -20 }}
+          transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
+        >
+          {/* Back button and selected region display */}
+          <motion.div
+            className="flex items-center gap-4"
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.1 }}
           >
-            ← Back
-          </button>
-          <div
-            className="flex items-center gap-3 px-4 py-2 rounded-lg border-2"
-            style={{
-              borderColor: regionToUse.primaryColor,
-              background: `${regionToUse.primaryColor}20`,
-            }}
-          >
-            <TexturedCellPreview regionId={regionToUse.id} size={32} />
-            <div>
-              <span className="text-xl mr-2">{regionToUse.element}</span>
-              <span className="font-bold" style={{ color: regionToUse.primaryColor }}>
-                {regionToUse.name}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className="text-center mb-4">
-          <h1 className="text-3xl font-bold text-white mb-2">Build Your Base</h1>
-          <p className="text-gray-400">Choose a quadrant for your {regionToUse.name} fortress</p>
-        </div>
-
-        {/* Server selector */}
-        <div className="flex gap-2 mb-2">
-          {RISK_SERVERS.map((server) => (
-            <button
-              key={server.id}
-              onClick={() => !server.locked && setSelectedServer(server)}
-              disabled={server.locked}
-              className={`px-4 py-2 rounded-lg font-mono text-sm transition-all ${
-                server.locked
-                  ? 'bg-white/5 text-gray-600 border border-white/5 cursor-not-allowed'
-                  : selectedServer.id === server.id
-                    ? 'bg-white/20 text-white border border-white/50'
-                    : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
-              }`}
+            <motion.button
+              onClick={() => {
+                setShowSlotSelection(false);
+                setShowRegionSelection(true);
+              }}
+              className="px-3 py-2 bg-white/10 hover:bg-white/20 text-gray-300 rounded-lg transition-colors"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
             >
-              {server.name}
-              {server.locked && <span className="ml-1">🔒</span>}
-              {!server.locked && activeServers[server.id] && <span className="ml-1 text-green-400">●</span>}
-            </button>
-          ))}
-        </div>
+              ← Back
+            </motion.button>
+            <motion.div
+              className="flex items-center gap-3 px-4 py-2 rounded-lg border-2"
+              style={{
+                borderColor: regionToUse.primaryColor,
+                background: `${regionToUse.primaryColor}20`,
+              }}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.15, type: 'spring', stiffness: 300, damping: 25 }}
+            >
+              <TexturedCellPreview regionId={regionToUse.id} size={32} />
+              <div>
+                <span className="text-xl mr-2">{regionToUse.element}</span>
+                <span className="font-bold" style={{ color: regionToUse.primaryColor }}>
+                  {regionToUse.name}
+                </span>
+              </div>
+            </motion.div>
+          </motion.div>
 
-        {/* Wallet balance and faucet */}
-        <div className="flex items-center gap-4 bg-white/5 px-4 py-3 rounded-lg">
-          <div className="text-gray-400">
-            Wallet: <span className={canAffordBase ? 'text-green-400' : 'text-red-400'}>{myBalance}</span> coins
-          </div>
-          <button
-            onClick={handleFaucet}
-            disabled={isRequestingFaucet}
-            className="px-3 py-1 text-sm bg-green-600 hover:bg-green-500 disabled:bg-gray-600 disabled:cursor-wait text-white rounded transition-colors"
+          <motion.div
+            className="text-center mb-4"
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2, type: 'spring', stiffness: 300, damping: 25 }}
           >
-            {isRequestingFaucet ? '...' : '+1000 coins'}
-          </button>
-        </div>
+            <h1 className="text-3xl font-bold text-white mb-2">Build Your Base</h1>
+            <p className="text-gray-400">Choose a quadrant for your {regionToUse.name} fortress</p>
+          </motion.div>
 
-        {!canAffordBase && (
-          <div className="text-yellow-400 text-sm">
-            You need {BASE_COST} coins to build a base. Use the faucet to get coins!
-          </div>
-        )}
-
-        {error && (
-          <div className="bg-red-500/20 border border-red-500/50 text-red-400 px-4 py-2 rounded-lg text-sm">
-            {error}
-          </div>
-        )}
-
-        {/* Quadrant grid for base placement */}
-        <div className="grid grid-cols-4 gap-2 max-w-md">
-          {Array.from({ length: TOTAL_QUADRANTS }, (_, q) => {
-            const isOccupied = occupiedQuadrants.has(q);
-            const qRow = Math.floor(q / QUADRANTS_PER_ROW);
-            const qCol = q % QUADRANTS_PER_ROW;
-            // Place base in center of quadrant
-            const baseX = qCol * QUADRANT_SIZE + Math.floor(QUADRANT_SIZE / 2) - Math.floor(BASE_SIZE / 2);
-            const baseY = qRow * QUADRANT_SIZE + Math.floor(QUADRANT_SIZE / 2) - Math.floor(BASE_SIZE / 2);
-
-            return (
-              <button
-                key={q}
-                onClick={async () => {
-                  if (!actor || isOccupied || !canAffordBase || isJoiningSlot) return;
-                  setIsJoiningSlot(true);
-                  setError(null);
-                  try {
-                    // Pass the desired slot (region.id - 1 because regions are 1-indexed, slots are 0-indexed)
-                    const result = await actor.join_game(baseX, baseY, regionToUse.id - 1);
-                    if ('Ok' in result) {
-                      // Backend returns slot index (0-7), but myPlayerNum is 1-indexed (1-8)
-                      const playerNum = result.Ok + 1;
-                      setMyPlayerNum(playerNum);
-
-                      // BUG #1 FIX: Save slot to localStorage for inactivity detection
-                      const LAST_SLOT_KEY = `risk-last-slot-${selectedServer.id}-${principal}`;
-                      localStorage.setItem(LAST_SLOT_KEY, JSON.stringify({
-                        slot: playerNum,
-                        timestamp: Date.now(),
-                      }));
-
-                      // Initialize elimination tracking for this session
-                      setIsEliminated(false);
-                      setEliminationStats(null);
-                      peakTerritoryRef.current = 0;
-                      hadBaseRef.current = true; // Mark that we now have a base
-
-                      // Immediately fetch game state so grid renders correctly
-                      try {
-                        const state = await actor.get_state();
-                        setGameState(state);
-                        setLocalCells(sparseToDense(state));
-                        setLocalGeneration(state.generation);
-                        setLastSyncedGeneration(state.generation);
-
-                        // Initialize join tracking with current generation and balance
-                        joinedAtGeneration.current = state.generation;
-
-                        // Extract base info
-                        const newBases = new Map<number, BaseInfo>();
-                        for (let i = 0; i < state.slots.length; i++) {
-                          const slotOpt = state.slots[i];
-                          if (slotOpt.length > 0 && slotOpt[0].base.length > 0) {
-                            newBases.set(i + 1, slotOpt[0].base[0]);
-                          }
-                        }
-                        setBases(newBases);
-
-                        // Update balance and track initial for elimination stats
-                        const balance = await actor.get_balance();
-                        setMyBalance(Number(balance));
-                        initialWalletRef.current = Number(balance);
-
-                        // Update wipe timer
-                        setWipeInfo({
-                          quadrant: state.next_wipe_quadrant,
-                          secondsUntil: Number(state.seconds_until_wipe)
-                        });
-                      } catch (syncErr) {
-                        console.error('Post-join sync error:', syncErr);
-                      }
-
-                      // Set view coordinates to the player's quadrant (for highlight in overview)
-                      // but stay in overview mode initially to avoid canvas sizing race condition
-                      const qRow = Math.floor(q / QUADRANTS_PER_ROW);
-                      const qCol = q % QUADRANTS_PER_ROW;
-                      setViewX(qCol * QUADRANT_SIZE);
-                      setViewY(qRow * QUADRANT_SIZE);
-                      // Stay in 'overview' mode - user can click to enter quadrant after canvas is ready
-                      setShowSlotSelection(false);
-                    } else {
-                      setError(parseError(result.Err));
-                    }
-                  } catch (err) {
-                    setError(`Failed to place base: ${parseError(err)}`);
-                  } finally {
-                    setIsJoiningSlot(false);
-                  }
-                }}
-                disabled={isOccupied || !canAffordBase || isJoiningSlot}
-                className={`
-                  relative p-4 rounded-lg border-2 transition-all aspect-square flex flex-col items-center justify-center
-                  ${isOccupied
-                    ? 'bg-red-900/30 border-red-700/50 opacity-50 cursor-not-allowed'
-                    : canAffordBase
-                      ? 'bg-white/5 border-white/20 hover:border-green-400 hover:bg-green-500/10 cursor-pointer'
-                      : 'bg-gray-800 border-gray-700 opacity-50 cursor-not-allowed'
-                  }
-                `}
+          {/* Server selector */}
+          <motion.div
+            className="flex gap-2 mb-2"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.25 }}
+          >
+            {RISK_SERVERS.map((server, index) => (
+              <motion.button
+                key={server.id}
+                onClick={() => !server.locked && setSelectedServer(server)}
+                disabled={server.locked}
+                className={`px-4 py-2 rounded-lg font-mono text-sm transition-colors ${
+                  server.locked
+                    ? 'bg-white/5 text-gray-600 border border-white/5 cursor-not-allowed'
+                    : selectedServer.id === server.id
+                      ? 'bg-white/20 text-white border border-white/50'
+                      : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
+                }`}
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 + index * 0.05 }}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
               >
-                <div className="text-white font-mono text-lg">Q{q}</div>
-                {isOccupied ? (
-                  <div className="text-red-400 text-xs mt-1">Occupied</div>
-                ) : (
-                  <div className="text-green-400 text-xs mt-1">Available</div>
-                )}
-              </button>
-            );
-          })}
-        </div>
+                {server.name}
+                {server.locked && <span className="ml-1">🔒</span>}
+                {!server.locked && activeServers[server.id] && <span className="ml-1 text-green-400">●</span>}
+              </motion.button>
+            ))}
+          </motion.div>
 
-        <div className="text-gray-600 text-xs mt-4 max-w-md text-center">
-          Cost: {BASE_COST} coins. Your base is an 8x8 territory that you always control.
-          Defend it from siege attacks or lose when your base reaches 0 coins!
-        </div>
-      </div>
+          {/* Wallet balance and faucet */}
+          <motion.div
+            className="flex items-center gap-4 bg-white/5 px-4 py-3 rounded-lg"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.35 }}
+          >
+            <div className="text-gray-400">
+              Wallet: <span className={canAffordBase ? 'text-green-400' : 'text-red-400'}>{myBalance}</span> coins
+            </div>
+            <motion.button
+              onClick={handleFaucet}
+              disabled={isRequestingFaucet}
+              className="px-3 py-1 text-sm bg-green-600 hover:bg-green-500 disabled:bg-gray-600 disabled:cursor-wait text-white rounded transition-colors"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              {isRequestingFaucet ? '...' : '+1000 coins'}
+            </motion.button>
+          </motion.div>
+
+          <AnimatePresence>
+            {!canAffordBase && (
+              <motion.div
+                className="text-yellow-400 text-sm"
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+              >
+                You need {BASE_COST} coins to build a base. Use the faucet to get coins!
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {error && (
+              <motion.div
+                className="bg-red-500/20 border border-red-500/50 text-red-400 px-4 py-2 rounded-lg text-sm"
+                initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+              >
+                {error}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Quadrant grid for base placement */}
+          <motion.div
+            className="grid grid-cols-4 gap-2 max-w-md"
+            variants={staggerContainerVariants}
+            initial="initial"
+            animate="animate"
+          >
+            {Array.from({ length: TOTAL_QUADRANTS }, (_, q) => {
+              const isOccupied = occupiedQuadrants.has(q);
+              const qRow = Math.floor(q / QUADRANTS_PER_ROW);
+              const qCol = q % QUADRANTS_PER_ROW;
+              // Place base in center of quadrant
+              const baseX = qCol * QUADRANT_SIZE + Math.floor(QUADRANT_SIZE / 2) - Math.floor(BASE_SIZE / 2);
+              const baseY = qRow * QUADRANT_SIZE + Math.floor(QUADRANT_SIZE / 2) - Math.floor(BASE_SIZE / 2);
+              const isAvailable = !isOccupied && canAffordBase && !isJoiningSlot;
+
+              return (
+                <motion.button
+                  key={q}
+                  onClick={async () => {
+                    if (!actor || isOccupied || !canAffordBase || isJoiningSlot) return;
+                    setIsJoiningSlot(true);
+                    setError(null);
+                    try {
+                      // Pass the desired slot (region.id - 1 because regions are 1-indexed, slots are 0-indexed)
+                      const result = await actor.join_game(baseX, baseY, regionToUse.id - 1);
+                      if ('Ok' in result) {
+                        // Backend returns slot index (0-7), but myPlayerNum is 1-indexed (1-8)
+                        const playerNum = result.Ok + 1;
+                        setMyPlayerNum(playerNum);
+
+                        // BUG #1 FIX: Save slot to localStorage for inactivity detection
+                        const LAST_SLOT_KEY = `risk-last-slot-${selectedServer.id}-${principal}`;
+                        localStorage.setItem(LAST_SLOT_KEY, JSON.stringify({
+                          slot: playerNum,
+                          timestamp: Date.now(),
+                        }));
+
+                        // Initialize elimination tracking for this session
+                        setIsEliminated(false);
+                        setEliminationStats(null);
+                        peakTerritoryRef.current = 0;
+                        hadBaseRef.current = true; // Mark that we now have a base
+
+                        // Immediately fetch game state so grid renders correctly
+                        try {
+                          const state = await actor.get_state();
+                          setGameState(state);
+                          setLocalCells(sparseToDense(state));
+                          setLocalGeneration(state.generation);
+                          setLastSyncedGeneration(state.generation);
+
+                          // Initialize join tracking with current generation and balance
+                          joinedAtGeneration.current = state.generation;
+
+                          // Extract base info
+                          const newBases = new Map<number, BaseInfo>();
+                          for (let i = 0; i < state.slots.length; i++) {
+                            const slotOpt = state.slots[i];
+                            if (slotOpt.length > 0 && slotOpt[0].base.length > 0) {
+                              newBases.set(i + 1, slotOpt[0].base[0]);
+                            }
+                          }
+                          setBases(newBases);
+
+                          // Update balance and track initial for elimination stats
+                          const balance = await actor.get_balance();
+                          setMyBalance(Number(balance));
+                          initialWalletRef.current = Number(balance);
+
+                          // Update wipe timer
+                          setWipeInfo({
+                            quadrant: state.next_wipe_quadrant,
+                            secondsUntil: Number(state.seconds_until_wipe)
+                          });
+                        } catch (syncErr) {
+                          console.error('Post-join sync error:', syncErr);
+                        }
+
+                        // Set view coordinates to the player's quadrant (for highlight in overview)
+                        // but stay in overview mode initially to avoid canvas sizing race condition
+                        const qRow = Math.floor(q / QUADRANTS_PER_ROW);
+                        const qCol = q % QUADRANTS_PER_ROW;
+                        setViewX(qCol * QUADRANT_SIZE);
+                        setViewY(qRow * QUADRANT_SIZE);
+                        // Stay in 'overview' mode - user can click to enter quadrant after canvas is ready
+                        setShowSlotSelection(false);
+                      } else {
+                        setError(parseError(result.Err));
+                      }
+                    } catch (err) {
+                      setError(`Failed to place base: ${parseError(err)}`);
+                    } finally {
+                      setIsJoiningSlot(false);
+                    }
+                  }}
+                  disabled={isOccupied || !canAffordBase || isJoiningSlot}
+                  className={`
+                    relative p-4 rounded-lg border-2 aspect-square flex flex-col items-center justify-center
+                    ${isOccupied
+                      ? 'bg-red-900/30 border-red-700/50 opacity-50 cursor-not-allowed'
+                      : canAffordBase
+                        ? 'bg-white/5 border-white/20 cursor-pointer'
+                        : 'bg-gray-800 border-gray-700 opacity-50 cursor-not-allowed'
+                    }
+                  `}
+                  variants={staggerItemVariants}
+                  whileHover={isAvailable ? {
+                    scale: 1.05,
+                    borderColor: '#4ade80',
+                    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                  } : {}}
+                  whileTap={isAvailable ? { scale: 0.98 } : {}}
+                  transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                >
+                  <div className="text-white font-mono text-lg">Q{q}</div>
+                  {isOccupied ? (
+                    <div className="text-red-400 text-xs mt-1">Occupied</div>
+                  ) : (
+                    <div className="text-green-400 text-xs mt-1">Available</div>
+                  )}
+                </motion.button>
+              );
+            })}
+          </motion.div>
+
+          <motion.div
+            className="text-gray-600 text-xs mt-4 max-w-md text-center"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.6 }}
+          >
+            Cost: {BASE_COST} coins. Your base is an 8x8 territory that you always control.
+            Defend it from siege attacks or lose when your base reaches 0 coins!
+          </motion.div>
+        </motion.div>
+      </AnimatePresence>
     );
   }
 
   // Game view - all JSX inlined to prevent component remounting
   return (
-    <div className="flex flex-col h-[calc(100vh-80px)]">
-      {/* Mobile warning banner */}
-      <div className="lg:hidden p-3 bg-yellow-500/20 border-b border-yellow-500/50 text-yellow-300 text-sm text-center">
-        <span className="font-bold">Best on Desktop:</span> Game of Life is optimized for larger screens. Some features may be limited on mobile.
-      </div>
+    <motion.div
+      className="flex flex-col h-[calc(100vh-80px)]"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.4 }}
+    >
+      {/* Mobile touch hints banner - shows only briefly */}
+      <motion.div
+        className="lg:hidden p-2 bg-cyan-500/20 border-b border-cyan-500/40 text-cyan-300 text-xs text-center"
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -10 }}
+        transition={{ delay: 0.1 }}
+      >
+        <span className="font-medium">Touch controls:</span> Pinch to zoom • Double-tap to toggle view • Swipe to navigate
+      </motion.div>
 
       {/* Error display */}
-      {error && (
-        <div className="p-2 bg-red-500/20 border border-red-500/50 text-red-400 text-sm">
-          {error}
-        </div>
-      )}
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            className="p-2 bg-red-500/20 border border-red-500/50 text-red-400 text-sm"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            {error}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Main content area */}
       <div className="flex flex-1 min-h-0">
@@ -2987,94 +3201,31 @@ export const Risk: React.FC = () => {
               </div>
             </div>
 
-            {/* Minimap - INLINED */}
+            {/* Minimap - Territory overview with owner colors */}
             <div className="minimap-container mb-4">
-              <div className="text-xs text-gray-400 mb-1">World Map</div>
-              <canvas
-                ref={minimapRef}
-                width={120}
-                height={120}
-                className="cursor-pointer border border-gray-700 rounded"
-                onClick={handleMinimapClick}
+              <Minimap
+                cells={localCells}
+                currentQuadrant={currentQuadrant}
+                wipeInfo={wipeInfo}
+                myPlayerNum={myPlayerNum}
+                onQuadrantClick={jumpToQuadrant}
+                size={120}
               />
-              <div className="text-xs text-gray-500 mt-1">
-                Q{currentQuadrant} ({viewX}, {viewY})
-              </div>
             </div>
 
             {/* Pattern Section - hidden when spectating */}
             {!isSpectating && (
-            <div className="flex-1">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-gray-400">Patterns</span>
-                <button
-                  onClick={() => setShowAdvanced(!showAdvanced)}
-                  className={`text-xs px-2 py-1 rounded font-mono ${
-                    showAdvanced
-                      ? 'bg-purple-600 text-white border border-purple-400'
-                      : 'bg-gray-700 text-gray-200 border border-gray-500 hover:bg-gray-600'
-                  }`}
-                >
-                  {showAdvanced ? 'Show Essential' : 'Show All'}
-                </button>
-              </div>
-              {/* Category filter buttons */}
-              <div className="flex flex-col gap-1 mb-3">
-                <button
-                  onClick={() => setSelectedCategory('all')}
-                  className={`px-3 py-1.5 rounded text-xs font-mono text-left ${
-                    selectedCategory === 'all'
-                      ? 'bg-white/20 text-white border border-white/30'
-                      : 'text-gray-400 hover:text-white hover:bg-white/5'
-                  }`}
-                >
-                  All Patterns
-                </button>
-                {(Object.keys(CATEGORY_INFO) as PatternCategory[])
-                  .filter(cat => categoriesWithPatterns.has(cat))
-                  .map((cat) => {
-                    const info = CATEGORY_INFO[cat];
-                    return (
-                      <button
-                        key={cat}
-                        onClick={() => setSelectedCategory(cat)}
-                        className={`px-3 py-1.5 rounded text-xs font-mono border text-left ${
-                          selectedCategory === cat ? info.color : 'text-gray-400 border-transparent hover:text-white hover:bg-white/5'
-                        }`}
-                      >
-                        {info.icon} {info.label}
-                      </button>
-                    );
-                  })}
-              </div>
-              {/* Pattern buttons */}
-              <div className="grid grid-cols-2 gap-1">
-                {filteredPatterns.map((pattern) => {
-                  const catInfo = CATEGORY_INFO[pattern.category];
-                  const isSelected = selectedPattern.name === pattern.name;
-                  return (
-                    <button
-                      key={pattern.name}
-                      onClick={() => setSelectedPattern(pattern)}
-                      className={`px-2 py-1.5 rounded text-xs font-mono border ${
-                        isSelected
-                          ? catInfo.color + ' ring-1 ring-white/30'
-                          : 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10'
-                      }`}
-                      title={pattern.description}
-                    >
-                      {pattern.name}
-                    </button>
-                  );
-                })}
-              </div>
-              {/* Selected pattern info */}
-              <div className="mt-3 pt-3 border-t border-white/10 text-xs">
-                <div className={`font-mono ${CATEGORY_INFO[selectedPattern.category].color.split(' ')[0]}`}>
-                  {selectedPattern.name} ({parsedPattern.length} cells)
-                </div>
-                <div className="text-gray-500 mt-1">{selectedPattern.description}</div>
-              </div>
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <PatternLibrary
+                selectedPattern={selectedPattern}
+                onSelectPattern={setSelectedPattern}
+                parsedPattern={parsedPattern}
+                patternRotation={patternRotation}
+                onRotate={rotateCurrentPattern}
+                showAdvanced={showAdvanced}
+                onToggleAdvanced={() => setShowAdvanced(!showAdvanced)}
+                playerColor={myPlayerNum ? getRegion(myPlayerNum).primaryColor : '#00d4aa'}
+              />
             </div>
             )}
           </div>
@@ -3217,11 +3368,40 @@ export const Risk: React.FC = () => {
               ref={canvasRef}
               onClick={handleCanvasClick}
               onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
               onTouchEnd={handleTouchEnd}
               onContextMenu={(e) => e.preventDefault()}
-              className={`w-full h-full ${viewMode === 'quadrant' ? 'cursor-crosshair' : 'cursor-pointer'}`}
+              className={`w-full h-full ${viewMode === 'quadrant' ? 'cursor-crosshair' : 'cursor-pointer'} touch-none`}
               style={{ display: 'block' }}
             />
+
+            {/* GameHUD - Clean overlay with essential info */}
+            {!isInitialLoading && !isFrozen && (
+              <GameHUD
+                myPlayerNum={myPlayerNum}
+                region={myPlayerNum ? getRegion(myPlayerNum) : null}
+                isSpectating={isSpectating}
+                generation={gameState?.generation || 0n}
+                localGeneration={localGeneration}
+                lastSyncedGeneration={lastSyncedGeneration}
+                myCellCount={myPlayerNum ? (cellCounts[myPlayerNum] || 0) : 0}
+                myTerritoryCount={myPlayerNum ? (territoryCounts[myPlayerNum] || 0) : 0}
+                myBaseCoins={myPlayerNum ? (baseCoins[myPlayerNum] || 0) : 0}
+                myWalletBalance={myBalance}
+                viewMode={viewMode}
+                currentQuadrant={currentQuadrant}
+                syncStatus={syncStatus}
+                lastSyncTime={lastSyncTime}
+                pendingTransactions={{
+                  isPlacingCells: isConfirmingPlacement,
+                  isRequestingFaucet: isRequestingFaucet,
+                  isJoiningGame: isJoiningSlot,
+                  pendingPlacementCount: pendingPlacements.reduce((sum, p) => sum + p.cells.length, 0),
+                }}
+                wipeInfo={wipeInfo}
+                onJoinGame={() => setShowRegionSelection(true)}
+              />
+            )}
 
             {/* Loading Overlay - Initial game load */}
             {isInitialLoading && (
@@ -3429,72 +3609,94 @@ export const Risk: React.FC = () => {
 
       {/* Mobile Bottom Bar - INLINED */}
       <div className="lg:hidden bg-black border-t border-white/20">
-        {/* Collapsed view */}
-        <div className="flex items-center justify-between p-2">
-          <div className="flex items-center gap-3 text-xs font-mono">
-            <span className="text-gray-400">Q{currentQuadrant}</span>
-            <span className="text-gray-400">Gen: <span className="text-dfinity-turquoise">{gameState?.generation.toString() || 0}</span></span>
+        {/* Collapsed view - larger touch targets */}
+        <div className="flex items-center justify-between px-3 py-2.5">
+          {/* Left: Quick stats */}
+          <div className="flex items-center gap-2">
             {myPlayerNum && (
-              <span className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[myPlayerNum] }} />
-              </span>
+              <div
+                className="flex items-center gap-1.5 px-2 py-1 rounded-md"
+                style={{
+                  backgroundColor: `${getRegion(myPlayerNum).primaryColor}20`,
+                }}
+              >
+                <span className="text-base">{getRegion(myPlayerNum).element}</span>
+                <span className="text-xs font-mono" style={{ color: getRegion(myPlayerNum).primaryColor }}>
+                  {cellCounts[myPlayerNum] || 0}
+                </span>
+              </div>
             )}
-            {/* Compact wipe indicator for mobile */}
+            {/* Compact wipe indicator */}
             {wipeInfo && (
               <button
                 onClick={() => jumpToQuadrant(wipeInfo.quadrant)}
-                className={`flex items-center gap-1 px-2 py-0.5 rounded ${
-                  wipeInfo.secondsUntil <= 10 ? 'bg-red-500/30 animate-pulse' : 'bg-red-500/20'
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs ${
+                  wipeInfo.secondsUntil <= 10 ? 'bg-red-500/40 animate-pulse' : 'bg-red-500/25'
                 }`}
               >
                 <span className="text-red-400">Q{wipeInfo.quadrant}</span>
-                <span className="text-red-500 font-bold">{wipeInfo.secondsUntil}s</span>
+                <span className="text-red-300 font-bold">{wipeInfo.secondsUntil}s</span>
               </button>
             )}
           </div>
+
+          {/* Right: Actions */}
           <div className="flex items-center gap-2">
             <button
               onClick={toggleViewMode}
-              className="px-2 py-1 text-xs bg-white/10 rounded text-white"
+              className="px-3 py-1.5 text-xs bg-white/10 active:bg-white/20 rounded-md text-white font-medium min-w-[50px]"
             >
-              {viewMode === 'overview' ? 'Enter' : 'Map'}
+              {viewMode === 'overview' ? 'Zoom' : 'World'}
             </button>
             <button
               onClick={() => setMobileExpanded(!mobileExpanded)}
-              className="p-2 text-gray-400 hover:text-white"
+              className="px-2.5 py-1.5 text-gray-400 active:text-white bg-white/5 active:bg-white/10 rounded-md"
             >
-              {mobileExpanded ? 'v' : '^'}
+              {mobileExpanded ? '▼' : '▲'}
             </button>
           </div>
         </div>
 
-        {/* Expanded view */}
+        {/* Expanded view with improved touch targets */}
         {mobileExpanded && (
-          <div className="p-3 border-t border-white/10 max-h-64 overflow-y-auto" style={{ overscrollBehavior: 'contain' }}>
-            {/* Swipe hint for mobile quadrant navigation */}
+          <div className="p-3 border-t border-white/10 max-h-72 overflow-y-auto" style={{ overscrollBehavior: 'contain' }}>
+            {/* Navigation hint */}
             {viewMode === 'quadrant' && (
+              <div className="text-xs text-gray-500 mb-3 flex items-center gap-2">
+                <span className="px-1.5 py-0.5 bg-white/10 rounded text-gray-400">Q{currentQuadrant}</span>
+                <span>Swipe to navigate • Pinch to zoom out</span>
+              </div>
+            )}
+            {viewMode === 'overview' && (
               <div className="text-xs text-gray-500 mb-3">
-                Swipe on grid to navigate • Q{currentQuadrant} ({viewX}, {viewY})
+                Tap a quadrant to enter • Pinch to zoom in
               </div>
             )}
 
             {/* Your faction indicator (mobile) */}
             {myPlayerNum && (
               <div
-                className="mb-3 px-2 py-1 rounded border-l-2 text-sm"
+                className="mb-3 px-3 py-2 rounded-lg border-l-4 text-sm"
                 style={{
-                  backgroundColor: `${getRegion(myPlayerNum).primaryColor}20`,
+                  backgroundColor: `${getRegion(myPlayerNum).primaryColor}15`,
                   borderLeftColor: getRegion(myPlayerNum).primaryColor,
                 }}
               >
-                <span className="text-gray-400">Playing as: </span>
-                <span className="font-bold" style={{ color: getRegion(myPlayerNum).primaryColor }}>
-                  {getRegion(myPlayerNum).element} {getRegion(myPlayerNum).name}
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="font-bold flex items-center gap-2" style={{ color: getRegion(myPlayerNum).primaryColor }}>
+                    <span className="text-lg">{getRegion(myPlayerNum).element}</span>
+                    {getRegion(myPlayerNum).name}
+                  </span>
+                  <div className="flex gap-3 text-xs">
+                    <span className="text-yellow-400">{baseCoins[myPlayerNum] || 0} base</span>
+                    <span className="text-green-400">{myBalance} wallet</span>
+                  </div>
+                </div>
               </div>
             )}
-            {/* Territory/cell stats */}
-            <div className="flex gap-4 mb-3 text-xs overflow-x-auto">
+
+            {/* Territory/cell stats - horizontal scroll */}
+            <div className="flex gap-4 mb-3 text-xs overflow-x-auto pb-1">
               <div className="flex items-center gap-2">
                 <span className="text-gray-500">Territory:</span>
                 {Object.entries(territoryCounts).slice(0, 4).map(([player, count]) => {
@@ -3527,11 +3729,11 @@ export const Risk: React.FC = () => {
             {/* Pattern controls - hidden when spectating */}
             {!isSpectating && (
             <>
-            {/* Essential/Advanced toggle + Category filters */}
-            <div className="flex gap-2 mb-2 overflow-x-auto pb-1">
+            {/* Essential/Advanced toggle + Category filters - larger touch targets */}
+            <div className="flex gap-2 mb-3 overflow-x-auto pb-1">
               <button
                 onClick={() => setShowAdvanced(!showAdvanced)}
-                className={`px-2 py-1 rounded text-xs font-mono whitespace-nowrap border ${
+                className={`px-3 py-2 rounded-lg text-xs font-mono whitespace-nowrap border active:scale-95 transition-transform ${
                   showAdvanced
                     ? 'bg-purple-600 text-white border-purple-400'
                     : 'bg-gray-700 text-gray-200 border-gray-500'
@@ -3539,11 +3741,11 @@ export const Risk: React.FC = () => {
               >
                 {showAdvanced ? 'Essential' : 'All'}
               </button>
-              <span className="text-gray-600">|</span>
+              <div className="w-px bg-gray-700 self-stretch mx-1" />
               <button
                 onClick={() => setSelectedCategory('all')}
-                className={`px-2 py-1 rounded text-xs font-mono whitespace-nowrap ${
-                  selectedCategory === 'all' ? 'bg-white/20 text-white' : 'text-gray-400'
+                className={`px-3 py-2 rounded-lg text-xs font-mono whitespace-nowrap active:scale-95 transition-transform ${
+                  selectedCategory === 'all' ? 'bg-white/20 text-white' : 'text-gray-400 bg-white/5'
                 }`}
               >
                 All
@@ -3556,8 +3758,8 @@ export const Risk: React.FC = () => {
                     <button
                       key={cat}
                       onClick={() => setSelectedCategory(cat)}
-                      className={`px-2 py-1 rounded text-xs font-mono whitespace-nowrap border ${
-                        selectedCategory === cat ? info.color : 'text-gray-400 border-transparent'
+                      className={`px-3 py-2 rounded-lg text-xs font-mono whitespace-nowrap border active:scale-95 transition-transform ${
+                        selectedCategory === cat ? info.color : 'text-gray-400 border-transparent bg-white/5'
                       }`}
                     >
                       {info.icon} {info.label}
@@ -3565,7 +3767,7 @@ export const Risk: React.FC = () => {
                   );
                 })}
             </div>
-            {/* Pattern selector */}
+            {/* Pattern selector - larger touch targets */}
             <div className="flex gap-2 overflow-x-auto pb-2">
               {filteredPatterns.map((pattern) => {
                 const catInfo = CATEGORY_INFO[pattern.category];
@@ -3574,9 +3776,9 @@ export const Risk: React.FC = () => {
                   <button
                     key={pattern.name}
                     onClick={() => setSelectedPattern(pattern)}
-                    className={`px-3 py-1.5 rounded text-xs font-mono whitespace-nowrap border ${
+                    className={`px-3 py-2 rounded-lg text-xs font-mono whitespace-nowrap border active:scale-95 transition-transform ${
                       isSelected
-                        ? catInfo.color + ' ring-1 ring-white/30'
+                        ? catInfo.color + ' ring-2 ring-white/40'
                         : 'bg-white/5 text-gray-300 border-white/10'
                     }`}
                   >
@@ -3585,19 +3787,27 @@ export const Risk: React.FC = () => {
                 );
               })}
             </div>
-            {/* Selected pattern info */}
-            <div className="text-xs text-gray-400 mt-2">
-              <span className={CATEGORY_INFO[selectedPattern.category].color.split(' ')[0]}>{selectedPattern.name}</span> ({parsedPattern.length} cells)
+            {/* Selected pattern info + rotate button */}
+            <div className="flex items-center justify-between mt-2">
+              <div className="text-xs text-gray-400">
+                <span className={CATEGORY_INFO[selectedPattern.category].color.split(' ')[0]}>{selectedPattern.name}</span> ({parsedPattern.length} cells)
+              </div>
+              <button
+                onClick={() => setPatternRotation(r => ((r + 1) % 4) as 0 | 1 | 2 | 3)}
+                className="px-3 py-1.5 text-xs bg-white/10 active:bg-white/20 rounded-md text-white flex items-center gap-1"
+              >
+                <span className="text-sm">↻</span> Rotate
+              </button>
             </div>
             </>
             )}
             {/* Spectator mode indicator in mobile */}
             {isSpectating && (
               <div className="py-2">
-                <p className="text-purple-400 text-sm mb-2">👁 Spectating</p>
+                <p className="text-purple-400 text-sm mb-3">👁 Spectating</p>
                 <button
                   onClick={() => setShowRegionSelection(true)}
-                  className="w-full px-3 py-2 bg-green-600 hover:bg-green-500 text-white text-sm rounded transition-colors"
+                  className="w-full px-4 py-3 bg-green-600 active:bg-green-500 text-white text-sm rounded-lg font-medium transition-colors"
                 >
                   Join Game
                 </button>
@@ -3627,61 +3837,102 @@ export const Risk: React.FC = () => {
       />
 
       {/* Early Access Warning Modal */}
-      {showEarlyAccessWarning && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm">
-          <div className="bg-black border border-purple-500/50 rounded-lg p-6 max-w-md mx-4 shadow-2xl shadow-purple-500/20">
-            {/* Header */}
-            <h2 className="text-2xl font-bold text-purple-400 mb-4">
-              Early Access
-            </h2>
-
-            {/* Warning content */}
-            <div className="space-y-4 text-gray-300">
-              <p>
-                Game of Life is in <span className="text-purple-400 font-semibold">early development</span>.
-                It will be actively iterated on if there's interest from the community.
-              </p>
-
-              <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg p-4">
-                <p className="text-sm">
-                  <span className="text-purple-400 font-semibold">Found a bug?</span> Help us improve!
-                </p>
-                <a
-                  href="https://x.com/alexandria_lbry"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 mt-2 text-purple-400 hover:text-purple-300 transition-colors"
-                >
-                  <span>Report to</span>
-                  <span className="font-mono font-bold">@alexandria_lbry</span>
-                  <span>on X</span>
-                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-                  </svg>
-                </a>
-              </div>
-
-              <p className="text-sm text-gray-500">
-                No money at stake - just for fun.
-              </p>
-            </div>
-
-            {/* Action button */}
-            <div className="mt-6">
-              <button
-                onClick={() => {
-                  localStorage.setItem('life_early_access_dismissed', 'true');
-                  setShowEarlyAccessWarning(false);
-                }}
-                className="w-full px-4 py-3 bg-purple-600 hover:bg-purple-500 text-white font-semibold rounded-lg transition-colors"
+      <AnimatePresence>
+        {showEarlyAccessWarning && (
+          <motion.div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            <motion.div
+              className="bg-black border border-purple-500/50 rounded-lg p-6 max-w-md mx-4 shadow-2xl shadow-purple-500/20"
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+            >
+              {/* Header */}
+              <motion.h2
+                className="text-2xl font-bold text-purple-400 mb-4"
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
               >
-                Got it
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+                Early Access
+              </motion.h2>
+
+              {/* Warning content */}
+              <motion.div
+                className="space-y-4 text-gray-300"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.15 }}
+              >
+                <p>
+                  Game of Life is in <span className="text-purple-400 font-semibold">early development</span>.
+                  It will be actively iterated on if there's interest from the community.
+                </p>
+
+                <motion.div
+                  className="bg-purple-500/10 border border-purple-500/30 rounded-lg p-4"
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.2 }}
+                >
+                  <p className="text-sm">
+                    <span className="text-purple-400 font-semibold">Found a bug?</span> Help us improve!
+                  </p>
+                  <a
+                    href="https://x.com/alexandria_lbry"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 mt-2 text-purple-400 hover:text-purple-300 transition-colors"
+                  >
+                    <span>Report to</span>
+                    <span className="font-mono font-bold">@alexandria_lbry</span>
+                    <span>on X</span>
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                    </svg>
+                  </a>
+                </motion.div>
+
+                <motion.p
+                  className="text-sm text-gray-500"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.25 }}
+                >
+                  No money at stake - just for fun.
+                </motion.p>
+              </motion.div>
+
+              {/* Action button */}
+              <motion.div
+                className="mt-6"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 }}
+              >
+                <motion.button
+                  onClick={() => {
+                    localStorage.setItem('life_early_access_dismissed', 'true');
+                    setShowEarlyAccessWarning(false);
+                  }}
+                  className="w-full px-4 py-3 bg-purple-600 hover:bg-purple-500 text-white font-semibold rounded-lg transition-colors"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                >
+                  Got it
+                </motion.button>
+              </motion.div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 };
 

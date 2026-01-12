@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { motion } from 'framer-motion';
 import useCrashActor from '../hooks/actors/useCrashActor';
 import useLedgerActor from '../hooks/actors/useLedgerActor';
 import { GameLayout } from '../components/game-ui';
@@ -294,26 +295,46 @@ export const Crash: React.FC = () => {
               {flyingCount} rocket{flyingCount !== 1 ? 's' : ''} flying...
             </div>
           ) : multiResult ? (
-            <div className="flex items-center gap-4 animate-in fade-in slide-in-from-bottom-2">
-              <div className="flex flex-col items-center">
+            <motion.div
+              className="flex items-center gap-4"
+              initial={{ scale: 0.8, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              transition={{ type: "spring", stiffness: 300, damping: 20 }}
+            >
+              <motion.div
+                className="flex flex-col items-center"
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2, delay: 0.1 }}
+              >
                 <span className="text-[10px] uppercase text-gray-500 font-bold">Rockets</span>
                 <span className="text-xl font-bold text-white">{multiResult.rocket_count}</span>
-              </div>
+              </motion.div>
               <div className="h-8 w-px bg-gray-800"></div>
-              <div className="flex flex-col items-center">
+              <motion.div
+                className="flex flex-col items-center"
+                initial={{ scale: 0.5 }}
+                animate={{ scale: [0.5, 1.15, 1] }}
+                transition={{ duration: 0.3, delay: 0.15 }}
+              >
                 <span className="text-[10px] uppercase text-gray-500 font-bold">Reached Target</span>
                 <span className={`text-xl font-bold ${multiResult.rockets_succeeded > 0 ? 'text-green-400' : 'text-red-400'}`}>
                   {multiResult.rockets_succeeded}/{multiResult.rocket_count}
                 </span>
-              </div>
+              </motion.div>
               <div className="h-8 w-px bg-gray-800"></div>
-              <div className="flex flex-col items-center">
+              <motion.div
+                className="flex flex-col items-center"
+                initial={{ scale: 0.5, opacity: 0 }}
+                animate={{ scale: [0.5, 1.2, 1], opacity: 1 }}
+                transition={{ duration: 0.3, delay: 0.2 }}
+              >
                 <span className="text-[10px] uppercase text-gray-500 font-bold">Net Profit</span>
                 <span className={`text-xl font-bold ${Number(multiResult.net_profit) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                   {Number(multiResult.net_profit) >= 0 ? '+' : ''}{formatUSDT(multiResult.net_profit)}
                 </span>
-              </div>
-            </div>
+              </motion.div>
+            </motion.div>
           ) : (
             <div className="text-gray-600 text-xs font-mono tracking-widest opacity-50 uppercase">
               Tap canvas to launch
@@ -322,13 +343,16 @@ export const Crash: React.FC = () => {
         </div>
 
         {/* Main Game Area - clickable to launch */}
-        <div
+        <motion.div
           className={`relative w-full max-h-[50vh] aspect-video mb-4 flex-shrink-0 ${!isPlaying && actor && isAuthenticated && balance.game > 0n ? 'cursor-pointer' : ''}`}
           onClick={() => {
             if (!isPlaying && actor && isAuthenticated && balance.game > 0n) {
               startGame();
             }
           }}
+          whileHover={(!isPlaying && actor && isAuthenticated && balance.game > 0n) ? { scale: 1.01 } : {}}
+          whileTap={(!isPlaying && actor && isAuthenticated && balance.game > 0n) ? { scale: 0.98 } : {}}
+          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
         >
           <CrashCanvas
             rocketStates={rocketStates}
@@ -353,7 +377,7 @@ export const Crash: React.FC = () => {
               </div>
             </div>
           )}
-        </div>
+        </motion.div>
 
         {/* Controls */}
         <div className="w-full max-w-md mx-auto space-y-3 flex-shrink-0">

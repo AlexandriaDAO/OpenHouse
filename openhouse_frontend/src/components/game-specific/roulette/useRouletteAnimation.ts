@@ -6,6 +6,10 @@ export interface AnimationState {
   wheelAngle: number;
   ballRadius: number;  // 100 = outer track, lower = more inward
   showResult: boolean;
+  // Ball animation polish
+  ballSpeed: number;   // 0-1, normalized speed for visual effects
+  wobbleOffset: number; // Small radius wobble during fast spin
+  bouncePhase: number; // 0-1 for micro-bounce animation during settle
 }
 
 interface UseRouletteAnimationProps {
@@ -39,6 +43,9 @@ export function useRouletteAnimation({
     wheelAngle: 0,
     ballRadius: 100,
     showResult: false,
+    ballSpeed: 0,
+    wobbleOffset: 0,
+    bouncePhase: 0,
   });
 
   // Calculate target position for ball to land on winning number
@@ -74,12 +81,20 @@ export function useRouletteAnimation({
         ballAngleRef.current += ANIMATION.BALL_SPEED * dt;
         wheelAngleRef.current += ANIMATION.WHEEL_SPEED * dt;
 
+        // Wobble effect - subtle oscillation during high-speed spin
+        // Uses two overlapping sine waves for more organic feel
+        const time = timestamp / 1000;
+        const wobble = Math.sin(time * 15) * 1.5 + Math.sin(time * 23) * 0.8;
+
         // Normalize angles for rendering to avoid browser issues with large values
         setState({
           ballAngle: ballAngleRef.current % 360,
           wheelAngle: wheelAngleRef.current % 360,
           ballRadius: 100,
           showResult: false,
+          ballSpeed: 1, // Full speed during spin
+          wobbleOffset: wobble,
+          bouncePhase: 0,
         });
 
         frameRef.current = requestAnimationFrame(animate);
@@ -139,11 +154,33 @@ export function useRouletteAnimation({
         const radiusEased = 1 - Math.pow(1 - progress, 2);
         const radius = 100 - radiusEased * 15;
 
+        // Speed decays from 1 to 0 during landing
+        const currentSpeed = 1 - progress;
+
+        // Wobble decreases as ball slows down (scaled by remaining speed)
+        const time = timestamp / 1000;
+        const wobbleDecay = Math.pow(1 - progress, 2); // Faster fadeout
+        const wobble = wobbleDecay * (Math.sin(time * 15) * 1.5 + Math.sin(time * 23) * 0.8);
+
+        // Micro-bounce effect in the final 20% of landing
+        // Creates 3-4 small bounces as ball settles into pocket
+        let bouncePhase = 0;
+        if (progress > 0.8) {
+          const bounceProgress = (progress - 0.8) / 0.2; // 0-1 in final 20%
+          // Damped oscillation for realistic bounce
+          const bounceFreq = 12;
+          const dampening = Math.pow(1 - bounceProgress, 3);
+          bouncePhase = Math.sin(bounceProgress * Math.PI * bounceFreq) * dampening;
+        }
+
         setState({
           ballAngle: newBall,
           wheelAngle: newWheel,
           ballRadius: radius,
           showResult: progress >= 1,
+          ballSpeed: currentSpeed,
+          wobbleOffset: wobble,
+          bouncePhase: bouncePhase,
         });
 
         if (progress >= 1) {
@@ -174,7 +211,14 @@ export function useRouletteAnimation({
     if (!isSpinning && !isLanding && winningNumber === null) {
       landingStartRef.current = null;
       completedRef.current = false;
-      setState(prev => ({ ...prev, showResult: false, ballRadius: 100 }));
+      setState(prev => ({
+        ...prev,
+        showResult: false,
+        ballRadius: 100,
+        ballSpeed: 0,
+        wobbleOffset: 0,
+        bouncePhase: 0,
+      }));
     }
   }, [isSpinning, isLanding, winningNumber]);
 

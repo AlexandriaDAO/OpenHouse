@@ -20,6 +20,11 @@ export {
   TERRITORY_BRIGHTNESS,
 } from './territoryRenderer';
 
+export {
+  renderElementEffects,
+  getElementEffect,
+} from './elementEffects';
+
 // Re-export individual element renderers for customization
 export { earthRenderer } from './elements/earth';
 export { waterRenderer } from './elements/water';

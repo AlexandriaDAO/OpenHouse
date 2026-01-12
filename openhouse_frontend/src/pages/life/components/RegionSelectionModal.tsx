@@ -8,11 +8,39 @@
  * - Clear indication of taken regions
  * - Proper server selection integration
  * - Accessibility improvements
+ * - Framer Motion animations
  */
 
 import React, { useRef, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import type { RegionInfo, RiskServer } from '../../lifeConstants';
 import { REGIONS, PLAYER_COLORS } from '../../lifeConstants';
+
+// Animation variants
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: { staggerChildren: 0.05, delayChildren: 0.1 }
+  },
+  exit: { opacity: 0, transition: { duration: 0.2 } }
+};
+
+const titleVariants = {
+  hidden: { opacity: 0, y: -20 },
+  visible: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 25 } }
+};
+
+const cardVariants = {
+  hidden: { opacity: 0, scale: 0.9, y: 20 },
+  visible: { opacity: 1, scale: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 25 } }
+};
+
+const errorVariants = {
+  hidden: { opacity: 0, scale: 0.95, y: -10 },
+  visible: { opacity: 1, scale: 1, y: 0, transition: { type: 'spring', stiffness: 400, damping: 25 } },
+  exit: { opacity: 0, scale: 0.95, y: -10, transition: { duration: 0.15 } }
+};
 
 // Textured cell preview for region cards
 const TexturedCellPreview: React.FC<{
@@ -82,102 +110,150 @@ export const RegionSelectionModal: React.FC<RegionSelectionModalProps> = ({
   onSelectRegion,
   onSelectServer,
 }) => {
-  if (!isOpen) return null;
-
   const regions = Object.values(REGIONS);
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-[calc(100vh-80px)] gap-6 p-4">
-      <div className="text-center mb-4">
-        <h1 className="text-3xl font-bold text-white mb-2">Choose Your Region</h1>
-        <p className="text-gray-400">Select an elemental faction to command</p>
-      </div>
+    <AnimatePresence mode="wait">
+      {isOpen && (
+        <motion.div
+          className="flex flex-col items-center justify-center min-h-[calc(100vh-80px)] gap-6 p-4"
+          variants={containerVariants}
+          initial="hidden"
+          animate="visible"
+          exit="exit"
+        >
+          <motion.div className="text-center mb-4" variants={titleVariants}>
+            <h1 className="text-3xl font-bold text-white mb-2">Choose Your Region</h1>
+            <p className="text-gray-400">Select an elemental faction to command</p>
+          </motion.div>
 
-      {/* Server selector */}
-      <div className="flex gap-2 mb-2">
-        {servers.map((server) => (
-          <button
-            key={server.id}
-            type="button"
-            onClick={() => onSelectServer(server)}
-            className={`px-4 py-2 rounded-lg font-mono text-sm transition-all ${
-              selectedServer.id === server.id
-                ? 'bg-white/20 text-white border border-white/50'
-                : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
-            }`}
-          >
-            {server.name}
-            {activeServers[server.id] && <span className="ml-1 text-green-400">●</span>}
-          </button>
-        ))}
-      </div>
-
-      {error && (
-        <div className="bg-red-500/20 border border-red-500/50 text-red-400 px-4 py-2 rounded-lg text-sm">
-          {error}
-        </div>
-      )}
-
-      {/* Region grid - 2 rows of 4 */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-4xl">
-        {regions.map((region) => {
-          const isTaken = takenRegions.has(region.id);
-
-          return (
-            <button
-              key={region.id}
-              type="button"
-              onClick={() => {
-                if (!isTaken) {
-                  onSelectRegion(region);
-                }
-              }}
-              disabled={isTaken}
-              className={`
-                relative p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-3
-                ${isTaken
-                  ? 'bg-gray-900/50 border-gray-700/50 opacity-50 cursor-not-allowed'
-                  : 'bg-black/40 border-white/20 hover:border-opacity-100 cursor-pointer hover:scale-105'
-                }
-              `}
-              style={{
-                borderColor: isTaken ? undefined : PLAYER_COLORS[region.id],
-              }}
-            >
-              {/* Textured preview */}
-              <TexturedCellPreview
-                regionId={region.id}
-                size={64}
-                className={isTaken ? 'opacity-50 grayscale' : ''}
-              />
-
-              {/* Region name */}
-              <span
-                className={`text-lg font-bold ${isTaken ? 'text-gray-500' : ''}`}
-                style={{ color: isTaken ? undefined : PLAYER_COLORS[region.id] }}
+          {/* Server selector */}
+          <motion.div className="flex gap-2 mb-2" variants={titleVariants}>
+            {servers.map((server, index) => (
+              <motion.button
+                key={server.id}
+                type="button"
+                onClick={() => onSelectServer(server)}
+                className={`px-4 py-2 rounded-lg font-mono text-sm transition-colors ${
+                  selectedServer.id === server.id
+                    ? 'bg-white/20 text-white border border-white/50'
+                    : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
+                }`}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.05 }}
               >
-                {region.name}
-              </span>
+                {server.name}
+                {activeServers[server.id] && <span className="ml-1 text-green-400">●</span>}
+              </motion.button>
+            ))}
+          </motion.div>
 
-              {/* Taken indicator */}
-              {isTaken && (
-                <span className="absolute top-2 right-2 text-xs bg-gray-800 text-gray-400 px-2 py-1 rounded">
-                  TAKEN
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+          <AnimatePresence mode="wait">
+            {error && (
+              <motion.div
+                key="error"
+                className="bg-red-500/20 border border-red-500/50 text-red-400 px-4 py-2 rounded-lg text-sm"
+                variants={errorVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+              >
+                {error}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-      {/* All regions taken message */}
-      {takenRegions.size >= regions.length && (
-        <div className="text-center text-gray-400 mt-4">
-          <p>All regions are currently occupied.</p>
-          <p className="text-sm">Wait for a spot to open up or try a different server.</p>
-        </div>
+          {/* Region grid - 2 rows of 4 */}
+          <motion.div
+            className="grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-4xl"
+            variants={containerVariants}
+          >
+            {regions.map((region) => {
+              const isTaken = takenRegions.has(region.id);
+
+              return (
+                <motion.button
+                  key={region.id}
+                  type="button"
+                  onClick={() => {
+                    if (!isTaken) {
+                      onSelectRegion(region);
+                    }
+                  }}
+                  disabled={isTaken}
+                  className={`
+                    relative p-4 rounded-xl border-2 flex flex-col items-center gap-3
+                    ${isTaken
+                      ? 'bg-gray-900/50 border-gray-700/50 opacity-50 cursor-not-allowed'
+                      : 'bg-black/40 border-white/20 cursor-pointer'
+                    }
+                  `}
+                  style={{
+                    borderColor: isTaken ? undefined : PLAYER_COLORS[region.id],
+                  }}
+                  variants={cardVariants}
+                  whileHover={isTaken ? {} : {
+                    scale: 1.05,
+                    y: -4,
+                    boxShadow: `0 10px 30px ${PLAYER_COLORS[region.id]}30`,
+                  }}
+                  whileTap={isTaken ? {} : { scale: 0.98 }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                >
+                  {/* Textured preview */}
+                  <TexturedCellPreview
+                    regionId={region.id}
+                    size={64}
+                    className={isTaken ? 'opacity-50 grayscale' : ''}
+                  />
+
+                  {/* Region name */}
+                  <span
+                    className={`text-lg font-bold ${isTaken ? 'text-gray-500' : ''}`}
+                    style={{ color: isTaken ? undefined : PLAYER_COLORS[region.id] }}
+                  >
+                    {region.name}
+                  </span>
+
+                  {/* Taken indicator */}
+                  <AnimatePresence>
+                    {isTaken && (
+                      <motion.span
+                        className="absolute top-2 right-2 text-xs bg-gray-800 text-gray-400 px-2 py-1 rounded"
+                        initial={{ opacity: 0, scale: 0.8 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.8 }}
+                      >
+                        TAKEN
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
+                </motion.button>
+              );
+            })}
+          </motion.div>
+
+          {/* All regions taken message */}
+          <AnimatePresence>
+            {takenRegions.size >= regions.length && (
+              <motion.div
+                className="text-center text-gray-400 mt-4"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 10 }}
+                transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+              >
+                <p>All regions are currently occupied.</p>
+                <p className="text-sm">Wait for a spot to open up or try a different server.</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
       )}
-    </div>
+    </AnimatePresence>
   );
 };
 

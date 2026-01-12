@@ -1,7 +1,19 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import { AuthButton } from './AuthButton';
 import { WhyOpenHouseModal } from './WhyOpenHouseModal';
+
+const pageVariants = {
+  initial: { opacity: 0, y: 10 },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -10 },
+};
+
+const pageTransition = {
+  duration: 0.2,
+  ease: 'easeOut',
+};
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -61,7 +73,19 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
       {/* Main Content */}
       <main className={`flex-1 ${isGameRoute ? 'overflow-hidden' : ''} container mx-auto ${isGameRoute ? 'px-0 py-0' : 'px-4 py-8'}`}>
-        {children}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={location.pathname}
+            variants={pageVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            transition={pageTransition}
+            className="h-full"
+          >
+            {children}
+          </motion.div>
+        </AnimatePresence>
       </main>
 
     </div>

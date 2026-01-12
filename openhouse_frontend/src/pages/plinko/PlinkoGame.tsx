@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { motion } from 'framer-motion';
 import { flushSync } from 'react-dom';
 import usePlinkoActor from '../../hooks/actors/usePlinkoActor';
 import useLedgerActor from '../../hooks/actors/useLedgerActor';
@@ -348,10 +349,13 @@ export const Plinko: React.FC = () => {
       <div className="flex-1 flex items-center justify-center overflow-hidden w-full pb-32">
 
         {/* Game Board - SVG with embedded controls */}
-        <div
-          className={`relative cursor-pointer transition-transform duration-100 h-full ${(isPlaying || isWaiting || isFilling) ? 'cursor-default' : 'active:scale-[0.99]'}`}
+        <motion.div
+          className={`relative h-full ${(isPlaying || isWaiting || isFilling) ? 'cursor-default' : 'cursor-pointer'}`}
           onClick={dropBalls}
           style={{ maxHeight: 'calc(100vh - 200px)' }}
+          whileHover={(isPlaying || isWaiting || isFilling) ? {} : { scale: 1.01 }}
+          whileTap={(isPlaying || isWaiting || isFilling) ? {} : { scale: 0.98 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
         >
           <svg
             viewBox={`0 0 ${PLINKO_LAYOUT.BOARD_WIDTH} ${PLINKO_LAYOUT.BOARD_HEIGHT}`}
@@ -506,7 +510,7 @@ export const Plinko: React.FC = () => {
             }
             onHide={() => setShowResultPopup(false)}
           />
-        </div>
+        </motion.div>
       </div>
 
       {/* Betting Controls - Bottom */}

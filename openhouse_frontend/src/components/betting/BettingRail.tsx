@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { useBettingState } from './hooks/useBettingState';
 import { useDepositFlow } from './hooks/useDepositFlow';
 import { ChipStack } from './ChipStack';
@@ -12,8 +13,20 @@ import './betting.css';
 export type { BettingRailProps, RailStyle } from './types';
 export { RAIL_STYLES } from './types';
 
+// Loading skeleton for balance values
+const BalanceSkeleton: React.FC<{ className?: string }> = ({ className = '' }) => (
+  <motion.span
+    className={`inline-block bg-gray-700 rounded ${className}`}
+    animate={{ opacity: [0.5, 1, 0.5] }}
+    transition={{ duration: 1.5, repeat: Infinity }}
+  >
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  </motion.span>
+);
+
 export function BettingRail(props: any) {
   const navigate = useNavigate();
+  const isBalanceLoading = props.isBalanceLoading ?? false;
 
   const betting = useBettingState(props);
   const deposit = useDepositFlow(props);
@@ -91,7 +104,19 @@ export function BettingRail(props: any) {
                 >
                   <span className="desktop-balance-icon desktop-balance-icon--plusminus">+/-</span>
                   <span className="desktop-balance-label">CHIPS</span>
-                  <span className="desktop-balance-value text-highlight">{formatUSDT(gameBalance)}</span>
+                  {isBalanceLoading ? (
+                    <BalanceSkeleton className="h-4 w-16" />
+                  ) : (
+                    <motion.span
+                      className="desktop-balance-value text-highlight"
+                      key={gameBalance.toString()}
+                      initial={{ scale: 1.1, opacity: 0.7 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      {formatUSDT(gameBalance)}
+                    </motion.span>
+                  )}
                 </button>
                 <button onClick={onBalanceRefresh} className="desktop-refresh-btn" title="Refresh Balances">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -107,7 +132,19 @@ export function BettingRail(props: any) {
               >
                 <span className="desktop-balance-icon desktop-balance-icon--house">⌂</span>
                 <span className="desktop-balance-label">HOUSE</span>
-                <span className="desktop-balance-value">{formatUSDT(houseBalance)}</span>
+                {isBalanceLoading ? (
+                  <BalanceSkeleton className="h-4 w-16" />
+                ) : (
+                  <motion.span
+                    className="desktop-balance-value"
+                    key={houseBalance.toString()}
+                    initial={{ scale: 1.1, opacity: 0.7 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    {formatUSDT(houseBalance)}
+                  </motion.span>
+                )}
               </button>
             </div>
 
@@ -195,7 +232,19 @@ export function BettingRail(props: any) {
                 >
                   <span className="balance-icon balance-icon--plusminus">+/-</span>
                   <span className="balance-label">CHIPS</span>
-                  <span className="balance-value text-highlight">{formatUSDT(gameBalance)}</span>
+                  {isBalanceLoading ? (
+                    <BalanceSkeleton className="h-3 w-12" />
+                  ) : (
+                    <motion.span
+                      className="balance-value text-highlight"
+                      key={gameBalance.toString()}
+                      initial={{ scale: 1.1, opacity: 0.7 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      {formatUSDT(gameBalance)}
+                    </motion.span>
+                  )}
                 </button>
                 <button
                   onClick={() => navigate('/liquidity')}
@@ -204,7 +253,19 @@ export function BettingRail(props: any) {
                 >
                   <span className="balance-icon balance-icon--house">⌂</span>
                   <span className="balance-label">HOUSE</span>
-                  <span className="balance-value">{formatUSDT(houseBalance)}</span>
+                  {isBalanceLoading ? (
+                    <BalanceSkeleton className="h-3 w-12" />
+                  ) : (
+                    <motion.span
+                      className="balance-value"
+                      key={houseBalance.toString()}
+                      initial={{ scale: 1.1, opacity: 0.7 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      {formatUSDT(houseBalance)}
+                    </motion.span>
+                  )}
                 </button>
               </div>
 
