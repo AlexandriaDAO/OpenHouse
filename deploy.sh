@@ -102,8 +102,12 @@ deploy_frontend() {
     fi
 
     # Deploy frontend to mainnet
-    echo "Deploying frontend to mainnet..."
-    dfx deploy openhouse_frontend --network ic
+    # NOTE: Using --mode reinstall to force asset upload
+    # Asset canisters use the same WASM module hash regardless of asset content,
+    # so --mode upgrade can skip uploading new assets. Reinstall ensures all assets
+    # are uploaded fresh.
+    echo "Deploying frontend to mainnet (reinstall mode)..."
+    yes | dfx deploy openhouse_frontend --network ic --mode reinstall
 
     echo "Frontend deployment completed!"
     echo "Access at: https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io"

@@ -2,15 +2,16 @@
 
 # Ralph Loop Runner
 # Usage:
-#   ./loop.sh              # runs .ralph/ (default)
+#   ./loop.sh              # auto-detects from script location
 #   ./loop.sh roulette     # runs .ralph-roulette/
 #   ./loop.sh life         # runs .ralph-life/
-#   ./loop.sh --attended   # runs .ralph/ with pauses
+#   ./loop.sh --attended   # with pauses between iterations
 #   ./loop.sh roulette --attended
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_RALPH_DIR="$(basename "$SCRIPT_DIR")"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_DIR"
@@ -28,8 +29,16 @@ for arg in "$@"; do
 done
 
 # Determine ralph folder
+# If no PROJECT arg, auto-detect from the directory this script lives in
 if [[ -z "$PROJECT" ]]; then
-    RALPH_DIR=".ralph"
+    if [[ "$SCRIPT_RALPH_DIR" == ".ralph" ]]; then
+        RALPH_DIR=".ralph"
+    elif [[ "$SCRIPT_RALPH_DIR" == .ralph-* ]]; then
+        # Script is in .ralph-{name}/, use that directory
+        RALPH_DIR="$SCRIPT_RALPH_DIR"
+    else
+        RALPH_DIR=".ralph"
+    fi
 elif [[ -d ".ralph-$PROJECT" ]]; then
     RALPH_DIR=".ralph-$PROJECT"
 else
