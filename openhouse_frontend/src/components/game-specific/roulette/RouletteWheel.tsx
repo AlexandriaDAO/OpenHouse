@@ -8,13 +8,8 @@ import {
   DIMENSIONS as D,
   COLORS,
   isRed,
+  getPocketColor,
 } from './rouletteConstants';
-
-// Get gradient ID for pocket based on number
-const getPocketGradient = (num: number): string => {
-  if (num === 0) return 'url(#pocketGreenGradient)';
-  return isRed(num) ? 'url(#pocketRedGradient)' : 'url(#pocketBlackGradient)';
-};
 
 interface RouletteWheelProps {
   winningNumber: number | null;
@@ -63,7 +58,9 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
     WHEEL_NUMBERS.map((num, i) => ({
       num,
       path: createSegmentPath(i, D.POCKET_INNER, D.POCKET_OUTER),
-      gradient: getPocketGradient(num),
+      // Inner shadow overlay path - thinner strip at inner edge for depth
+      shadowPath: createSegmentPath(i, D.POCKET_INNER, D.POCKET_INNER + 12),
+      color: getPocketColor(num),
       textAngle: i * SEGMENT_ANGLE + SEGMENT_ANGLE / 2,
       textRadius: (D.POCKET_INNER + D.POCKET_OUTER) / 2,
     })),
@@ -133,7 +130,7 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
     <div className="relative flex items-center justify-center">
       <svg
         viewBox={`0 0 ${D.VIEW_SIZE} ${D.VIEW_SIZE}`}
-        className="aspect-square h-[35vh] md:h-[32vh] w-auto"
+        className="aspect-square h-[28vh] md:h-[32vh] w-auto"
       >
         <defs>
           {/* Enhanced metallic gold rim gradient */}
@@ -151,28 +148,6 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
           <radialGradient id="rimHighlight" cx="30%" cy="30%">
             <stop offset="0%" stopColor="rgba(255,255,255,0.4)" />
             <stop offset="100%" stopColor="rgba(255,255,255,0)" />
-          </radialGradient>
-
-          {/* Enhanced pocket gradients with 3D depth */}
-          <radialGradient id="pocketRedGradient" cx="50%" cy="30%">
-            <stop offset="0%" stopColor="#E84057" />
-            <stop offset="50%" stopColor={COLORS.RED} />
-            <stop offset="85%" stopColor="#8C1228" />
-            <stop offset="100%" stopColor="#5C0A1A" />
-          </radialGradient>
-
-          <radialGradient id="pocketBlackGradient" cx="50%" cy="30%">
-            <stop offset="0%" stopColor="#3D3D3D" />
-            <stop offset="50%" stopColor={COLORS.BLACK} />
-            <stop offset="85%" stopColor="#0D0D0D" />
-            <stop offset="100%" stopColor="#000000" />
-          </radialGradient>
-
-          <radialGradient id="pocketGreenGradient" cx="50%" cy="30%">
-            <stop offset="0%" stopColor="#12A85A" />
-            <stop offset="50%" stopColor={COLORS.GREEN} />
-            <stop offset="85%" stopColor="#065D30" />
-            <stop offset="100%" stopColor="#03391D" />
           </radialGradient>
 
           {/* Inner cone with wooden texture feel */}
@@ -270,9 +245,9 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
             <feComposite in2="blur" operator="in" />
           </filter>
 
-          {/* Text shadow for legibility */}
-          <filter id="textShadow" x="-20%" y="-20%" width="140%" height="140%">
-            <feDropShadow dx="0" dy="0" stdDeviation="1" floodColor="#000000" floodOpacity="0.8" />
+          {/* Text shadow for legibility - expanded filter region to prevent clipping */}
+          <filter id="textShadow" x="-50%" y="-50%" width="200%" height="200%">
+            <feDropShadow dx="0" dy="0" stdDeviation="2" floodColor="#000000" floodOpacity="0.9" />
           </filter>
 
           {/* Wheel surface shine overlay */}
@@ -289,6 +264,28 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
             <stop offset="50%" stopColor={COLORS.GOLD} />
             <stop offset="100%" stopColor="#8B7355" />
           </linearGradient>
+
+          {/* Pocket inner shadow for depth - radial gradient fading inward */}
+          <radialGradient id="pocketInnerShadow" cx="50%" cy="0%" r="100%">
+            <stop offset="0%" stopColor="rgba(0,0,0,0)" />
+            <stop offset="60%" stopColor="rgba(0,0,0,0.15)" />
+            <stop offset="100%" stopColor="rgba(0,0,0,0.4)" />
+          </radialGradient>
+
+          {/* Rim bevel highlight */}
+          <linearGradient id="rimBevelLight" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="rgba(255,255,255,0.25)" />
+            <stop offset="30%" stopColor="rgba(255,255,255,0.08)" />
+            <stop offset="70%" stopColor="rgba(0,0,0,0.05)" />
+            <stop offset="100%" stopColor="rgba(0,0,0,0.15)" />
+          </linearGradient>
+
+          {/* Inner rim shadow for depth */}
+          <radialGradient id="rimInnerShadow" cx="50%" cy="50%" r="50%">
+            <stop offset="85%" stopColor="rgba(0,0,0,0)" />
+            <stop offset="95%" stopColor="rgba(0,0,0,0.2)" />
+            <stop offset="100%" stopColor="rgba(0,0,0,0.35)" />
+          </radialGradient>
 
           {/* Motion blur filter for ball trail */}
           <filter id="ballMotionBlur" x="-100%" y="-50%" width="300%" height="200%">
@@ -325,14 +322,32 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
             stroke="none"
           />
 
-          {/* Inner rim edge */}
+          {/* Rim bevel - outer highlight arc (top-left light source) */}
           <circle
             cx={D.CENTER}
             cy={D.CENTER}
-            r={D.POCKET_OUTER + 2}
+            r={D.OUTER_RADIUS - 2}
             fill="none"
-            stroke="#6B5B3D"
-            strokeWidth="2"
+            stroke="url(#rimBevelLight)"
+            strokeWidth="4"
+          />
+
+          {/* Inner rim edge - enhanced */}
+          <circle
+            cx={D.CENTER}
+            cy={D.CENTER}
+            r={D.POCKET_OUTER + 3}
+            fill="none"
+            stroke="#8B7355"
+            strokeWidth="1.5"
+          />
+          <circle
+            cx={D.CENTER}
+            cy={D.CENTER}
+            r={D.POCKET_OUTER + 1}
+            fill="none"
+            stroke="rgba(0,0,0,0.3)"
+            strokeWidth="1"
           />
 
           {/* Ball track groove - deeper shadow */}
@@ -355,8 +370,8 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
             strokeWidth="1"
           />
 
-          {/* Pocket segments with gradient fills */}
-          {segments.map(({ num, path, gradient }) => {
+          {/* Pocket segments with solid color fills */}
+          {segments.map(({ num, path, shadowPath, color }) => {
             const isWinner = showResult && num === winningNumber;
             return (
               <g key={`pocket-group-${num}`}>
@@ -372,49 +387,102 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
                 <path
                   key={`pocket-${num}`}
                   d={path}
-                  fill={isWinner ? COLORS.WINNER_HIGHLIGHT : gradient}
+                  fill={isWinner ? COLORS.WINNER_HIGHLIGHT : color}
                   stroke="#1A1A1A"
                   strokeWidth="0.8"
                   filter={isWinner ? 'url(#winnerGlow)' : undefined}
                 />
+                {/* Inner shadow overlay for pocket depth */}
+                {!isWinner && (
+                  <path
+                    d={shadowPath}
+                    fill="rgba(0,0,0,0.35)"
+                    stroke="none"
+                    style={{ pointerEvents: 'none' }}
+                  />
+                )}
               </g>
             );
           })}
 
-          {/* Frets (pocket dividers) */}
+          {/* Frets (pocket dividers) with 3D effect */}
           {frets.map((f, i) => (
-            <line
-              key={`fret-${i}`}
-              x1={f.x1}
-              y1={f.y1}
-              x2={f.x2}
-              y2={f.y2}
-              stroke={COLORS.FRET}
-              strokeWidth="2"
-            />
+            <g key={`fret-group-${i}`}>
+              {/* Shadow line - offset to create depth */}
+              <line
+                x1={f.x1 + 1}
+                y1={f.y1 + 1}
+                x2={f.x2 + 1}
+                y2={f.y2 + 1}
+                stroke="rgba(0,0,0,0.5)"
+                strokeWidth="2.5"
+              />
+              {/* Main fret */}
+              <line
+                x1={f.x1}
+                y1={f.y1}
+                x2={f.x2}
+                y2={f.y2}
+                stroke={COLORS.FRET}
+                strokeWidth="2"
+              />
+              {/* Highlight line - subtle gold sheen */}
+              <line
+                x1={f.x1 - 0.5}
+                y1={f.y1 - 0.5}
+                x2={f.x2 - 0.5}
+                y2={f.y2 - 0.5}
+                stroke="rgba(255,215,0,0.25)"
+                strokeWidth="1"
+              />
+            </g>
           ))}
 
-          {/* Numbers with shadow for legibility */}
+          {/* Numbers with shadow for legibility - using duplicate text for shadow instead of SVG filter */}
           {segments.map(({ num, textAngle, textRadius }) => {
             const [tx, ty] = polarToCartesian(textAngle, textRadius);
             const isWinner = showResult && num === winningNumber;
             return (
-              <text
-                key={`num-${num}`}
-                x={tx}
-                y={ty}
-                fill={isWinner ? '#000' : '#FFF'}
-                fontSize="11"
-                fontWeight="bold"
-                fontFamily="Arial, sans-serif"
-                textAnchor="middle"
-                dominantBaseline="central"
-                transform={`rotate(${textAngle + 90} ${tx} ${ty})`}
-                filter={isWinner ? undefined : 'url(#textShadow)'}
-                style={{ letterSpacing: '0.5px' }}
-              >
-                {num}
-              </text>
+              <g key={`num-group-${num}`}>
+                {/* Shadow text - rendered behind main text for depth */}
+                {!isWinner && (
+                  <>
+                    <text
+                      x={tx}
+                      y={ty}
+                      fill="#000"
+                      fontSize="14"
+                      fontWeight="900"
+                      fontFamily="Arial Black, Arial, sans-serif"
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      transform={`rotate(${textAngle + 90} ${tx} ${ty})`}
+                      style={{ opacity: 0.9 }}
+                      stroke="#000"
+                      strokeWidth="3"
+                    >
+                      {num}
+                    </text>
+                  </>
+                )}
+                {/* Main number text */}
+                <text
+                  x={tx}
+                  y={ty}
+                  fill={isWinner ? '#000' : '#FFFFFF'}
+                  fontSize="14"
+                  fontWeight="900"
+                  fontFamily="Arial Black, Arial, sans-serif"
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  transform={`rotate(${textAngle + 90} ${tx} ${ty})`}
+                  style={{
+                    letterSpacing: '-0.5px'
+                  }}
+                >
+                  {num}
+                </text>
+              </g>
             );
           })}
 

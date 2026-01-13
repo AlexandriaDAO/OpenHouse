@@ -1,5 +1,63 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+
+// Helper function to get gradient background style based on color
+const getBackgroundStyle = (bgColor: string, isWinner: boolean): React.CSSProperties => {
+  if (isWinner) {
+    return { background: 'linear-gradient(180deg, #fbbf24 0%, #f59e0b 50%, #d97706 100%)' };
+  }
+  if (bgColor.includes('red')) {
+    return { background: 'linear-gradient(180deg, #dc2626 0%, #b91c1c 50%, #991b1b 100%)' };
+  }
+  if (bgColor.includes('green')) {
+    return { background: 'linear-gradient(180deg, #16a34a 0%, #15803d 50%, #166534 100%)' };
+  }
+  // Black/zinc
+  return { background: 'linear-gradient(180deg, #3f3f46 0%, #27272a 50%, #18181b 100%)' };
+};
+
+// Enhanced chip badge component with casino chip styling
+interface ChipBadgeProps {
+  amount: number;
+  isNew: boolean;
+  isMobile: boolean;
+  style?: React.CSSProperties;
+}
+
+const ChipBadge: React.FC<ChipBadgeProps> = ({ amount, isNew, isMobile, style }) => {
+  if (amount <= 0) return null;
+
+  return (
+    <AnimatePresence mode="popLayout">
+      <motion.span
+        key={`chip-${amount}`}
+        className="absolute rounded-full shadow-lg z-20"
+        style={{
+          top: style?.top ?? (isMobile ? '-4px' : '-6px'),
+          right: style?.right ?? (isMobile ? '-4px' : '-6px'),
+          background: 'linear-gradient(135deg, #fde047 0%, #eab308 50%, #ca8a04 100%)',
+          fontSize: isMobile ? '9px' : '11px',
+          padding: isMobile ? '1px 5px' : '2px 7px',
+          fontWeight: 800,
+          color: '#1a1a1a',
+          border: '2px solid #ca8a04',
+          boxShadow: '0 2px 6px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.3)',
+          ...style,
+        }}
+        initial={isNew ? { scale: 0.3, opacity: 0, y: -20 } : false}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        transition={{
+          type: 'spring',
+          stiffness: 500,
+          damping: 20,
+          mass: 0.8,
+        }}
+      >
+        ${amount.toFixed(2)}
+      </motion.span>
+    </AnimatePresence>
+  );
+};
 
 interface BettingCellProps {
   /** Display text for the cell (number or label) */
@@ -48,39 +106,6 @@ const Ripple: React.FC<RippleProps> = ({ x, y, color, onComplete }) => (
   />
 );
 
-// Chip drop animation component
-interface ChipDropProps {
-  isNew: boolean;
-  amount: number;
-  isMobile: boolean;
-}
-
-const ChipDrop: React.FC<ChipDropProps> = ({ isNew, amount, isMobile }) => {
-  if (amount <= 0) return null;
-
-  return (
-    <AnimatePresence mode="popLayout">
-      <motion.span
-        key={`chip-${amount}`}
-        className={`absolute ${isMobile ? '-top-1 -right-1' : '-top-1 -right-1'} bg-yellow-500 text-black font-bold rounded-full shadow-lg z-20`}
-        style={{
-          fontSize: isMobile ? '8px' : '12px',
-          padding: isMobile ? '0 4px' : '2px 6px',
-        }}
-        initial={isNew ? { scale: 0.3, opacity: 0, y: -20 } : false}
-        animate={{ scale: 1, opacity: 1, y: 0 }}
-        transition={{
-          type: 'spring',
-          stiffness: 500,
-          damping: 20,
-          mass: 0.8,
-        }}
-      >
-        ${amount.toFixed(2)}
-      </motion.span>
-    </AnimatePresence>
-  );
-};
 
 export const BettingCell: React.FC<BettingCellProps> = ({
   label,
@@ -149,8 +174,8 @@ export const BettingCell: React.FC<BettingCellProps> = ({
   return (
     <motion.button
       ref={buttonRef}
-      className={`${widthClass} ${heightClass} ${bgColor} rounded text-white font-bold flex items-center justify-center relative overflow-hidden ${
-        disabled ? 'opacity-50 cursor-not-allowed' : ''
+      className={`${widthClass} ${heightClass} rounded text-white font-bold flex items-center justify-center relative overflow-hidden border border-zinc-600/50 shadow-inner ${
+        disabled ? 'opacity-50 cursor-not-allowed' : 'hover:border-yellow-500/50'
       } ${isWinner ? `ring-2 ${winnerRingColor} shadow-lg` : ''}`}
       onClick={handleClick}
       disabled={disabled}
@@ -160,7 +185,10 @@ export const BettingCell: React.FC<BettingCellProps> = ({
       }}
       whileTap={disabled ? {} : { scale: 0.95 }}
       transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-      style={isMobile ? { fontSize: '14px' } : { fontSize: '18px' }}
+      style={{
+        fontSize: isMobile ? '14px' : '18px',
+        ...getBackgroundStyle(bgColor, isWinner),
+      }}
     >
       {/* Winner pulse overlay */}
       <AnimatePresence>
@@ -195,7 +223,7 @@ export const BettingCell: React.FC<BettingCellProps> = ({
       </motion.span>
 
       {/* Chip amount badge */}
-      <ChipDrop isNew={isChipNew} amount={amount} isMobile={isMobile} />
+      <ChipBadge isNew={isChipNew} amount={amount} isMobile={isMobile} />
     </motion.button>
   );
 };
@@ -255,13 +283,14 @@ export const ZeroCell: React.FC<ZeroCellProps> = ({
   return (
     <motion.button
       ref={buttonRef}
-      className={`bg-green-600 rounded text-white font-bold flex items-center justify-center relative overflow-hidden ${
-        disabled ? 'opacity-50 cursor-not-allowed' : ''
+      className={`rounded text-white font-bold flex items-center justify-center relative overflow-hidden border border-green-700/50 shadow-inner ${
+        disabled ? 'opacity-50 cursor-not-allowed' : 'hover:border-yellow-500/50'
       } ${isWinner ? 'ring-2 ring-yellow-400 shadow-lg shadow-yellow-500/50' : ''}`}
       style={{
         width: isMobile ? '48px' : '64px',
         height: isMobile ? '132px' : '156px',
         fontSize: isMobile ? '18px' : '22px',
+        ...getBackgroundStyle('green', isWinner),
       }}
       onClick={handleClick}
       disabled={disabled}
@@ -305,26 +334,12 @@ export const ZeroCell: React.FC<ZeroCellProps> = ({
       </motion.span>
 
       {/* Chip amount badge */}
-      {amount > 0 && (
-        <motion.span
-          className={`absolute bg-yellow-500 text-black font-bold rounded-full shadow-lg z-20`}
-          style={{
-            top: isMobile ? '4px' : '8px',
-            right: isMobile ? '4px' : '8px',
-            fontSize: isMobile ? '8px' : '12px',
-            padding: isMobile ? '0 4px' : '2px 6px',
-          }}
-          initial={isChipNew ? { scale: 0.3, opacity: 0, y: -15 } : false}
-          animate={{ scale: 1, opacity: 1, y: 0 }}
-          transition={{
-            type: 'spring',
-            stiffness: 500,
-            damping: 20,
-          }}
-        >
-          ${amount.toFixed(2)}
-        </motion.span>
-      )}
+      <ChipBadge
+        isNew={isChipNew}
+        amount={amount}
+        isMobile={isMobile}
+        style={{ top: isMobile ? '4px' : '8px', right: isMobile ? '4px' : '8px' }}
+      />
     </motion.button>
   );
 };
@@ -394,21 +409,51 @@ export const OutsideBetCell: React.FC<OutsideBetCellProps> = ({
     setRipples(prev => prev.filter(r => r.id !== id));
   }, []);
 
+  // Memoize outside bet styles to prevent regenerating CSS strings on every render
+  const outsideBetStyle = useMemo((): React.CSSProperties => {
+    if (isWinner) {
+      return {
+        background: 'linear-gradient(180deg, #fbbf24 0%, #f59e0b 50%, #d97706 100%)'
+      };
+    }
+    if (bgColor.includes('red')) {
+      return {
+        background: `linear-gradient(180deg, rgba(220,38,38,0.95) 0%, rgba(185,28,28,0.95) 50%, rgba(153,27,27,0.95) 100%), repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(255,255,255,0.03) 4px, rgba(255,255,255,0.03) 8px)`,
+        backgroundBlendMode: 'normal, overlay',
+      };
+    }
+    // Default zinc/dark with diagonal stripe texture
+    return {
+      background: `linear-gradient(180deg, rgba(63,63,70,0.95) 0%, rgba(39,39,42,0.95) 50%, rgba(24,24,27,0.95) 100%), repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(255,255,255,0.03) 4px, rgba(255,255,255,0.03) 8px)`,
+      backgroundBlendMode: 'normal, overlay',
+    };
+  }, [isWinner, bgColor]);
+
+  // Determine border color based on bet type
+  const borderClass = bgColor.includes('red')
+    ? 'border-red-800/60'
+    : 'border-zinc-500/50';
+
   return (
     <motion.button
       ref={buttonRef}
-      className={`${widthClass} ${heightClass} ${bgColor} rounded text-white font-bold flex items-center justify-center relative overflow-hidden ${
-        disabled ? 'opacity-50 cursor-not-allowed' : ''
+      className={`${widthClass} ${heightClass} rounded-md text-white font-bold flex items-center justify-center relative overflow-hidden border-2 ${borderClass} shadow-inner ${
+        disabled ? 'opacity-50 cursor-not-allowed' : 'hover:border-yellow-500/60 hover:shadow-md'
       } ${isWinner ? 'ring-2 ring-green-400 shadow-lg shadow-green-500/50' : ''}`}
       onClick={handleClick}
       disabled={disabled}
       whileHover={disabled ? {} : {
         scale: 1.02,
-        boxShadow: '0 0 10px rgba(255, 255, 255, 0.15)',
+        boxShadow: '0 0 12px rgba(255, 255, 255, 0.18)',
       }}
       whileTap={disabled ? {} : { scale: 0.96 }}
       transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-      style={{ fontSize: isMobile ? '10px' : '14px' }}
+      style={{
+        fontSize: isMobile ? '11px' : '14px',
+        letterSpacing: '0.5px',
+        textTransform: 'uppercase',
+        ...outsideBetStyle,
+      }}
     >
       {/* Winner pulse overlay */}
       <AnimatePresence>
@@ -433,9 +478,13 @@ export const OutsideBetCell: React.FC<OutsideBetCellProps> = ({
         />
       ))}
 
-      {/* Label */}
+      {/* Label with enhanced text styling */}
       <motion.span
         className="relative z-10"
+        style={{
+          textShadow: '0 1px 2px rgba(0,0,0,0.5)',
+          fontWeight: 700,
+        }}
         animate={isWinner ? { scale: [1, 1.05, 1] } : {}}
         transition={{ duration: 0.6, repeat: isWinner ? Infinity : 0 }}
       >
@@ -443,24 +492,7 @@ export const OutsideBetCell: React.FC<OutsideBetCellProps> = ({
       </motion.span>
 
       {/* Chip amount badge */}
-      {amount > 0 && (
-        <motion.span
-          className="absolute -top-1 -right-1 bg-yellow-500 text-black font-bold rounded-full shadow-lg z-20"
-          style={{
-            fontSize: isMobile ? '8px' : '12px',
-            padding: isMobile ? '0 4px' : '2px 6px',
-          }}
-          initial={isChipNew ? { scale: 0.3, opacity: 0, y: -15 } : false}
-          animate={{ scale: 1, opacity: 1, y: 0 }}
-          transition={{
-            type: 'spring',
-            stiffness: 500,
-            damping: 20,
-          }}
-        >
-          ${amount.toFixed(2)}
-        </motion.span>
-      )}
+      <ChipBadge isNew={isChipNew} amount={amount} isMobile={isMobile} />
     </motion.button>
   );
 };
