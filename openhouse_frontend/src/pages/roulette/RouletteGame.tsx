@@ -46,17 +46,23 @@ function RecentResults({ results, maxDisplay = 12 }: RecentResultsProps) {
     return RED_NUMBERS.has(num) ? 'bg-red-600' : 'bg-zinc-800';
   };
 
-  const getBorderColor = (num: number) => {
-    if (num === 0) return 'ring-green-400';
-    return RED_NUMBERS.has(num) ? 'ring-red-400' : 'ring-zinc-500';
+  const getBorderColor = (num: number, isFirst: boolean) => {
+    if (num === 0) return isFirst ? 'border-green-400' : 'border-green-500/60';
+    if (RED_NUMBERS.has(num)) return isFirst ? 'border-red-400' : 'border-red-500/60';
+    return isFirst ? 'border-zinc-400' : 'border-zinc-500/60';
+  };
+
+  const getGlowColor = (num: number) => {
+    if (num === 0) return '#22c55e';
+    return RED_NUMBERS.has(num) ? '#ef4444' : '#71717a';
   };
 
   const displayResults = results.slice(0, maxDisplay);
 
   return (
-    <div className="flex items-center justify-center gap-1 px-2 py-1.5 bg-zinc-900/60 rounded-lg backdrop-blur-sm">
-      <span className="text-zinc-500 text-[10px] font-medium mr-1 hidden sm:inline">HISTORY</span>
-      <div className="flex items-center gap-1 overflow-hidden">
+    <div className="flex items-center justify-center gap-1.5 px-3 py-2 bg-zinc-900/70 rounded-xl backdrop-blur-sm border border-zinc-700/40 shadow-lg">
+      <span className="text-zinc-400 text-[10px] sm:text-xs font-semibold tracking-wider mr-1.5 hidden sm:inline uppercase">History</span>
+      <div className="flex items-center gap-1.5 overflow-hidden">
         {displayResults.map((num, index) => (
           <motion.div
             key={`${num}-${index}-${results.length}`}
@@ -69,14 +75,18 @@ function RecentResults({ results, maxDisplay = 12 }: RecentResultsProps) {
               delay: index === 0 ? 0 : 0,
             }}
             className={`
-              w-6 h-6 sm:w-7 sm:h-7 rounded-full flex items-center justify-center
-              ${getNumberColor(num)} ring-1 ${getBorderColor(num)}
-              text-white text-[10px] sm:text-xs font-bold
-              ${index === 0 ? 'shadow-lg' : 'opacity-80'}
-              transition-opacity duration-200
+              w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center
+              ${getNumberColor(num)} border-2 ${getBorderColor(num, index === 0)}
+              text-white text-[11px] sm:text-sm font-bold
+              ${index === 0 ? 'ring-2 ring-white/30 scale-110' : ''}
+              transition-all duration-200
             `}
             style={{
-              opacity: index === 0 ? 1 : Math.max(0.4, 1 - (index * 0.06)),
+              opacity: Math.max(0.5, 1 - (index * 0.05)),
+              boxShadow: index === 0
+                ? `0 0 14px ${getGlowColor(num)}, 0 0 6px ${getGlowColor(num)}, inset 0 1px 2px rgba(255,255,255,0.2)`
+                : 'inset 0 1px 2px rgba(255,255,255,0.1)',
+              textShadow: '0 1px 2px rgba(0,0,0,0.5)',
             }}
           >
             {num}
@@ -84,7 +94,7 @@ function RecentResults({ results, maxDisplay = 12 }: RecentResultsProps) {
         ))}
       </div>
       {results.length > maxDisplay && (
-        <span className="text-zinc-500 text-[10px] ml-1">+{results.length - maxDisplay}</span>
+        <span className="text-zinc-400 text-[10px] sm:text-xs ml-1.5 font-medium">+{results.length - maxDisplay}</span>
       )}
     </div>
   );
@@ -255,9 +265,16 @@ export function RouletteGame() {
 
   const handleAnimationComplete = useCallback(() => {
     setAnimationState('showing_result');
-    // Add to recent results
+    // Add to recent results - use functional update with duplicate check
     if (winningNumber !== null) {
-      setRecentResults(prev => [winningNumber, ...prev].slice(0, 15));
+      setRecentResults(prev => {
+        // Prevent duplicate if the last entry is the same number
+        // This can happen if the callback fires twice
+        if (prev[0] === winningNumber) {
+          return prev; // Already added, skip
+        }
+        return [winningNumber, ...prev].slice(0, 15);
+      });
     }
     setTimeout(() => {
       setAnimationState('resetting');
@@ -327,21 +344,14 @@ export function RouletteGame() {
     }
   };
 
-  // Get winning number display color
-  const getNumberColor = (num: number | null) => {
-    if (num === null) return 'bg-zinc-700';
-    if (num === 0) return 'bg-green-600';
-    return RED_NUMBERS.has(num) ? 'bg-red-600' : 'bg-zinc-900';
-  };
-
   return (
     <GameLayout hideFooter noScroll>
       {/* ===== MOBILE LAYOUT ===== */}
-      <div className="md:hidden flex flex-col h-full">
-        {/* Wheel section */}
-        <div className="flex-shrink-0 flex flex-col items-center py-2">
+      <div className="md:hidden flex flex-col h-full overflow-hidden">
+        {/* Wheel section - COMPACT with flex-none */}
+        <div className="flex-none flex flex-col items-center py-1">
           {/* Recent Results History */}
-          <RecentResults results={recentResults} maxDisplay={10} />
+          <RecentResults results={recentResults} maxDisplay={8} />
 
           <RouletteWheel
             winningNumber={winningNumber}
@@ -350,80 +360,47 @@ export function RouletteGame() {
             onAnimationComplete={handleAnimationComplete}
           />
 
-          {/* Result or stats */}
-          <div className="text-center">
+          {/* Compact stats - single line */}
+          <div className="text-center text-xs py-1">
             {lastResult && showResults ? (
               <motion.div
-                className="flex flex-col items-center"
-                initial={{ scale: 0.8, opacity: 0, y: 10 }}
-                animate={{ scale: 1, opacity: 1, y: 0 }}
+                className="flex items-center justify-center gap-2"
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
                 transition={{ type: "spring", stiffness: 300, damping: 20 }}
               >
                 {Number(lastResult.net_result) > 0 ? (
-                  <>
-                    <motion.span
-                      className="text-green-400 text-xl font-black tracking-wider"
-                      initial={{ scale: 0.5 }}
-                      animate={{ scale: [0.5, 1.2, 1] }}
-                      transition={{ duration: 0.3, delay: 0.1 }}
-                    >
-                      WIN
-                    </motion.span>
-                    <motion.span
-                      className="text-green-400 text-lg font-bold"
-                      initial={{ opacity: 0, y: 5 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.25, delay: 0.2 }}
-                    >
-                      +{formatUSDT(lastResult.total_payout)}
-                    </motion.span>
-                  </>
+                  <span className="text-green-400 font-black">WIN +{formatUSDT(lastResult.total_payout)}</span>
                 ) : (
-                  <>
-                    <motion.span
-                      className="text-red-400 text-xl font-black tracking-wider"
-                      initial={{ scale: 0.5 }}
-                      animate={{ scale: [0.5, 1.1, 1] }}
-                      transition={{ duration: 0.3, delay: 0.1 }}
-                    >
-                      LOSE
-                    </motion.span>
-                    <motion.span
-                      className="text-red-400 text-lg font-bold"
-                      initial={{ opacity: 0, y: 5 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.25, delay: 0.2 }}
-                    >
-                      -{formatUSDT(lastResult.total_bet)}
-                    </motion.span>
-                  </>
+                  <span className="text-red-400 font-black">LOSE -{formatUSDT(lastResult.total_bet)}</span>
                 )}
               </motion.div>
             ) : (
-              <div className="flex flex-col items-center gap-1">
-                <div className="flex items-center justify-center gap-3 text-sm">
-                  <span><span className="text-yellow-400 font-bold">{bets.length}</span> bets</span>
-                  <span className="text-white font-bold">${totalBetAmount.toFixed(2)}</span>
-                  {(isWaitingForResult || isLanding) && (
-                    <span className="text-yellow-400 animate-pulse">
-                      {isWaitingForResult ? 'Spinning...' : 'Landing...'}
-                    </span>
-                  )}
-                </div>
-                {exceedsHouseLimit && (
-                  <span className="text-red-400 text-xs">
-                    Max payout ${maxPayout.toFixed(2)} exceeds limit ${maxAllowedPayout.toFixed(2)}
+              <div className="flex items-center justify-center gap-2">
+                <span><span className="text-yellow-400 font-bold">{bets.length}</span> bets</span>
+                <span className="text-white font-bold">${totalBetAmount.toFixed(2)}</span>
+                {(isWaitingForResult || isLanding) && (
+                  <span className="text-yellow-400 animate-pulse text-xs">
+                    {isWaitingForResult ? 'Spinning...' : 'Landing...'}
                   </span>
                 )}
               </div>
             )}
+            {exceedsHouseLimit && (
+              <span className="text-red-400 text-xs block">
+                Max ${maxPayout.toFixed(2)} &gt; limit ${maxAllowedPayout.toFixed(2)}
+              </span>
+            )}
+            {error && <span className="text-red-400 text-xs block">{error}</span>}
           </div>
-          {error && <p className="text-red-400 text-xs">{error}</p>}
         </div>
 
-        {/* Betting table */}
+        {/* Visual separator - simplified */}
+        <div className="h-px mx-2 bg-gradient-to-r from-transparent via-zinc-600/50 to-transparent" />
+
+        {/* Betting table - takes remaining space, scrollable */}
         <motion.div
-          className="flex-shrink flex-grow-0 flex flex-col px-2 overflow-y-auto min-h-0 relative"
+          className="flex-1 min-h-0 flex flex-col px-2 overflow-y-auto relative bg-zinc-900/30 rounded-xl mx-1 py-2 border border-zinc-800/50"
           animate={{
             opacity: isSpinning && !showResults ? 0.5 : 1,
             filter: isSpinning && !showResults ? 'grayscale(0.3)' : 'grayscale(0)',
@@ -437,23 +414,42 @@ export function RouletteGame() {
           <AnticipationOverlay show={isLanding} />
 
           {/* Tab buttons */}
-          <div className="flex gap-1 mb-1">
+          <div className="flex gap-1.5 mb-1.5">
             <button
               onClick={() => setBoardTab('low')}
-              className={`flex-1 py-2 text-sm font-bold rounded ${
-                boardTab === 'low' ? 'bg-green-700 text-white' : 'bg-zinc-800 text-zinc-400'
+              className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${
+                boardTab === 'low'
+                  ? 'text-white shadow-lg border border-green-500/30'
+                  : 'bg-zinc-800/80 text-zinc-400 hover:bg-zinc-700/80 border border-zinc-700/50'
               }`}
+              style={boardTab === 'low' ? {
+                background: 'linear-gradient(to bottom, #16a34a 0%, #15803d 50%, #166534 100%)',
+                boxShadow: '0 4px 12px rgba(22, 163, 74, 0.3)'
+              } : undefined}
             >
               0-18
             </button>
             <button
               onClick={() => setBoardTab('high')}
-              className={`flex-1 py-2 text-sm font-bold rounded ${
-                boardTab === 'high' ? 'bg-green-700 text-white' : 'bg-zinc-800 text-zinc-400'
+              className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${
+                boardTab === 'high'
+                  ? 'text-white shadow-lg border border-green-500/30'
+                  : 'bg-zinc-800/80 text-zinc-400 hover:bg-zinc-700/80 border border-zinc-700/50'
               }`}
+              style={boardTab === 'high' ? {
+                background: 'linear-gradient(to bottom, #16a34a 0%, #15803d 50%, #166534 100%)',
+                boxShadow: '0 4px 12px rgba(22, 163, 74, 0.3)'
+              } : undefined}
             >
               19-36
             </button>
+          </div>
+
+          {/* Payout legend */}
+          <div className="flex justify-center flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-zinc-500 mb-1.5 px-1">
+            <span>Straight <span className="text-yellow-400 font-semibold">35:1</span></span>
+            <span>Dozen/Col <span className="text-yellow-400 font-semibold">2:1</span></span>
+            <span>Even Bets <span className="text-yellow-400 font-semibold">1:1</span></span>
           </div>
 
           {/* Number grid */}
@@ -584,7 +580,11 @@ export function RouletteGame() {
               <button
                 onClick={handleClearBets}
                 disabled={isSpinning}
-                className="px-4 py-3 bg-zinc-800 text-zinc-400 rounded-lg font-bold text-sm disabled:opacity-50"
+                className="px-4 py-3 rounded-xl font-bold text-sm disabled:opacity-40 transition-all border border-zinc-600/50 hover:border-zinc-500"
+                style={{
+                  background: 'linear-gradient(to bottom, #3f3f46 0%, #27272a 50%, #18181b 100%)',
+                  color: '#a1a1aa'
+                }}
               >
                 CLEAR
               </button>
@@ -592,9 +592,18 @@ export function RouletteGame() {
             <motion.button
               onClick={handleSpin}
               disabled={isSpinning || !isAuthenticated || bets.length === 0 || exceedsHouseLimit}
-              className={`flex-1 py-3 rounded-lg font-bold text-lg ${
-                isSpinning ? 'bg-yellow-600 animate-pulse' : 'bg-green-600'
-              } disabled:opacity-50`}
+              className={`flex-1 py-3.5 rounded-xl font-black text-lg tracking-wide disabled:opacity-40 disabled:shadow-none transition-all ${
+                isSpinning ? 'animate-pulse' : ''
+              }`}
+              style={isSpinning ? {
+                background: 'linear-gradient(to bottom, #eab308 0%, #ca8a04 50%, #a16207 100%)',
+                boxShadow: '0 4px 16px rgba(234, 179, 8, 0.3)',
+                border: '1px solid rgba(250, 204, 21, 0.3)'
+              } : {
+                background: 'linear-gradient(to bottom, #22c55e 0%, #16a34a 50%, #15803d 100%)',
+                boxShadow: '0 4px 16px rgba(22, 163, 74, 0.4)',
+                border: '1px solid rgba(74, 222, 128, 0.3)'
+              }}
               whileHover={(isSpinning || !isAuthenticated || bets.length === 0 || exceedsHouseLimit) ? {} : { scale: 1.02 }}
               whileTap={(isSpinning || !isAuthenticated || bets.length === 0 || exceedsHouseLimit) ? {} : { scale: 0.97 }}
               transition={{ type: 'spring', stiffness: 400, damping: 25 }}
@@ -711,9 +720,14 @@ export function RouletteGame() {
           {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
         </div>
 
+        {/* Visual separator */}
+        <div className="w-full max-w-2xl mx-auto px-4 mb-3">
+          <div className="h-px bg-gradient-to-r from-transparent via-zinc-600/50 to-transparent" />
+        </div>
+
         {/* Betting table */}
         <motion.div
-          className="flex-1 flex flex-col items-center px-4 max-w-2xl mx-auto w-full relative"
+          className="flex-1 flex flex-col items-center px-4 max-w-2xl mx-auto w-full relative bg-zinc-900/30 rounded-xl py-3 border border-zinc-800/50"
           animate={{
             opacity: isSpinning && !showResults ? 0.5 : 1,
             filter: isSpinning && !showResults ? 'grayscale(0.3)' : 'grayscale(0)',
@@ -727,23 +741,42 @@ export function RouletteGame() {
           <AnticipationOverlay show={isLanding} />
 
           {/* Tab buttons */}
-          <div className="flex gap-2 mb-2 w-full">
+          <div className="flex gap-2 mb-3 w-full">
             <button
               onClick={() => setBoardTab('low')}
-              className={`flex-1 py-2.5 text-base font-bold rounded-lg transition ${
-                boardTab === 'low' ? 'bg-green-700 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+              className={`flex-1 py-2.5 text-base font-bold rounded-lg transition-all ${
+                boardTab === 'low'
+                  ? 'text-white shadow-lg border border-green-500/30'
+                  : 'bg-zinc-800/80 text-zinc-400 hover:bg-zinc-700/80 border border-zinc-700/50'
               }`}
+              style={boardTab === 'low' ? {
+                background: 'linear-gradient(to bottom, #16a34a 0%, #15803d 50%, #166534 100%)',
+                boxShadow: '0 4px 12px rgba(22, 163, 74, 0.4)'
+              } : undefined}
             >
               0-18
             </button>
             <button
               onClick={() => setBoardTab('high')}
-              className={`flex-1 py-2.5 text-base font-bold rounded-lg transition ${
-                boardTab === 'high' ? 'bg-green-700 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+              className={`flex-1 py-2.5 text-base font-bold rounded-lg transition-all ${
+                boardTab === 'high'
+                  ? 'text-white shadow-lg border border-green-500/30'
+                  : 'bg-zinc-800/80 text-zinc-400 hover:bg-zinc-700/80 border border-zinc-700/50'
               }`}
+              style={boardTab === 'high' ? {
+                background: 'linear-gradient(to bottom, #16a34a 0%, #15803d 50%, #166534 100%)',
+                boxShadow: '0 4px 12px rgba(22, 163, 74, 0.4)'
+              } : undefined}
             >
               19-36
             </button>
+          </div>
+
+          {/* Payout legend */}
+          <div className="flex justify-center gap-4 text-xs text-zinc-500 mb-2">
+            <span>Straight: <span className="text-yellow-400 font-semibold">35:1</span></span>
+            <span>Dozen/Col: <span className="text-yellow-400 font-semibold">2:1</span></span>
+            <span>Even Bets: <span className="text-yellow-400 font-semibold">1:1</span></span>
           </div>
 
           {/* Number grid */}
@@ -874,7 +907,11 @@ export function RouletteGame() {
               <button
                 onClick={handleClearBets}
                 disabled={isSpinning}
-                className="px-6 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded-lg font-bold transition disabled:opacity-50"
+                className="px-6 py-3.5 rounded-xl font-bold transition-all disabled:opacity-40 border border-zinc-600/50 hover:border-zinc-500"
+                style={{
+                  background: 'linear-gradient(to bottom, #3f3f46 0%, #27272a 50%, #18181b 100%)',
+                  color: '#a1a1aa'
+                }}
               >
                 CLEAR
               </button>
@@ -882,9 +919,18 @@ export function RouletteGame() {
             <motion.button
               onClick={handleSpin}
               disabled={isSpinning || !isAuthenticated || bets.length === 0 || exceedsHouseLimit}
-              className={`flex-1 py-3 rounded-lg font-bold text-xl ${
-                isSpinning ? 'bg-yellow-600 animate-pulse' : 'bg-green-600'
-              } disabled:opacity-50`}
+              className={`flex-1 py-3.5 rounded-xl font-black text-xl tracking-wide disabled:opacity-40 disabled:shadow-none transition-all ${
+                isSpinning ? 'animate-pulse' : ''
+              }`}
+              style={isSpinning ? {
+                background: 'linear-gradient(to bottom, #eab308 0%, #ca8a04 50%, #a16207 100%)',
+                boxShadow: '0 4px 20px rgba(234, 179, 8, 0.4)',
+                border: '1px solid rgba(250, 204, 21, 0.3)'
+              } : {
+                background: 'linear-gradient(to bottom, #22c55e 0%, #16a34a 50%, #15803d 100%)',
+                boxShadow: '0 4px 20px rgba(22, 163, 74, 0.5)',
+                border: '1px solid rgba(74, 222, 128, 0.3)'
+              }}
               whileHover={(isSpinning || !isAuthenticated || bets.length === 0 || exceedsHouseLimit) ? {} : { scale: 1.02 }}
               whileTap={(isSpinning || !isAuthenticated || bets.length === 0 || exceedsHouseLimit) ? {} : { scale: 0.97 }}
               transition={{ type: 'spring', stiffness: 400, damping: 25 }}
