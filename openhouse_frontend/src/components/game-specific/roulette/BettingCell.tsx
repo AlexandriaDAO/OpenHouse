@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // Helper function to get gradient background style based on color
@@ -409,8 +409,8 @@ export const OutsideBetCell: React.FC<OutsideBetCellProps> = ({
     setRipples(prev => prev.filter(r => r.id !== id));
   }, []);
 
-  // Outside bet cells get a subtle diagonal stripe texture for distinct styling
-  const getOutsideBetStyle = (): React.CSSProperties => {
+  // Memoize outside bet styles to prevent regenerating CSS strings on every render
+  const outsideBetStyle = useMemo((): React.CSSProperties => {
     if (isWinner) {
       return {
         background: 'linear-gradient(180deg, #fbbf24 0%, #f59e0b 50%, #d97706 100%)'
@@ -418,36 +418,16 @@ export const OutsideBetCell: React.FC<OutsideBetCellProps> = ({
     }
     if (bgColor.includes('red')) {
       return {
-        background: `
-          linear-gradient(180deg, rgba(220,38,38,0.95) 0%, rgba(185,28,28,0.95) 50%, rgba(153,27,27,0.95) 100%),
-          repeating-linear-gradient(
-            45deg,
-            transparent,
-            transparent 4px,
-            rgba(255,255,255,0.03) 4px,
-            rgba(255,255,255,0.03) 8px
-          )
-        `.replace(/\s+/g, ' '),
+        background: `linear-gradient(180deg, rgba(220,38,38,0.95) 0%, rgba(185,28,28,0.95) 50%, rgba(153,27,27,0.95) 100%), repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(255,255,255,0.03) 4px, rgba(255,255,255,0.03) 8px)`,
         backgroundBlendMode: 'normal, overlay',
       };
     }
     // Default zinc/dark with diagonal stripe texture
     return {
-      background: `
-        linear-gradient(180deg, rgba(63,63,70,0.95) 0%, rgba(39,39,42,0.95) 50%, rgba(24,24,27,0.95) 100%),
-        repeating-linear-gradient(
-          45deg,
-          transparent,
-          transparent 4px,
-          rgba(255,255,255,0.03) 4px,
-          rgba(255,255,255,0.03) 8px
-        )
-      `.replace(/\s+/g, ' '),
+      background: `linear-gradient(180deg, rgba(63,63,70,0.95) 0%, rgba(39,39,42,0.95) 50%, rgba(24,24,27,0.95) 100%), repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(255,255,255,0.03) 4px, rgba(255,255,255,0.03) 8px)`,
       backgroundBlendMode: 'normal, overlay',
     };
-  };
-
-  const outsideBetStyle = getOutsideBetStyle();
+  }, [isWinner, bgColor]);
 
   // Determine border color based on bet type
   const borderClass = bgColor.includes('red')
