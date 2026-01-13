@@ -64,7 +64,41 @@ export const ROCKET_COLORS = [
   '#64FFDA', // Aqua
 ];
 
+// ============================================
 // Cosmic Encounters System - space objects that appear during flight
+// ============================================
+
+// Z-index hierarchy for proper layering
+const Z_INDEX = {
+  STARS: 5,
+  NEBULA: 8,
+  CANVAS: 10,
+  ENCOUNTERS: 15,      // Behind rockets
+  ROCKETS_FLYING: 20,
+  ROCKETS_CRASHED: 22,
+  UI: 30,
+} as const;
+
+// Encounter spawn configuration
+const ENCOUNTER_CONFIG = {
+  MAX_ON_SCREEN: 6,           // Prevent visual clutter
+  CHECK_INTERVAL_MS: 1500,    // How often to roll for new encounter
+  BASE_CHANCE: 0.10,          // 10% base probability
+  CHANCE_PER_MULT: 0.02,      // +2% per multiplier
+  MAX_CHANCE: 0.50,           // Cap at 50% to prevent spam
+  X_SPAWN_MIN: 20,            // Avoid left edge (rocket start area)
+  X_SPAWN_RANGE: 60,          // Spawn in center 60% of screen
+  Y_SPAWN_MIN: 5,             // Start near top for downward drift
+  Y_SPAWN_RANGE: 50,          // Upper half of screen
+  DURATION_MIN_MS: 5000,      // Minimum visibility time
+  DURATION_VARIANCE_MS: 3000, // Random additional duration
+} as const;
+
+// Animation class mappings (static, defined once)
+const SPIN_ENCOUNTER_TYPES = new Set(['wormhole', 'galaxy', 'blackHole', 'dysonSphere']);
+const WOBBLE_ENCOUNTER_TYPES = new Set(['alienShip', 'alienProbe', 'cosmicEntity', 'astronaut']);
+const RARE_ENCOUNTER_TYPES = new Set(['cosmicEntity', 'blackHole', 'wormhole']);
+
 type EncounterType =
   | 'satellite' | 'astronaut' | 'spaceStation'  // Low orbit (5x-20x)
   | 'asteroid' | 'comet' | 'moon'               // Deep space (20x-60x)
@@ -311,35 +345,41 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
   const stars = useMemo(() => generateStarLayers(), []);
 
   // Check for cosmic encounter based on current multiplier
-  const checkForEncounter = useCallback((multiplier: number, now: number) => {
-    // Only check every 1.5 seconds
-    if (now - lastEncounterCheckRef.current < 1500) return;
+  const checkForEncounter = useCallback((multiplier: number, now: number, currentCount: number) => {
+    // Throttle checks to prevent spam
+    if (now - lastEncounterCheckRef.current < ENCOUNTER_CONFIG.CHECK_INTERVAL_MS) return;
     lastEncounterCheckRef.current = now;
 
-    // Base 10% chance + 3% per multiplier, capped at 70%
-    // At 1x: 13%, at 5x: 25%, at 10x: 40%, at 20x+: 70%
-    const chance = Math.min(0.10 + 0.03 * multiplier, 0.70);
+    // Don't spawn if already at max capacity
+    if (currentCount >= ENCOUNTER_CONFIG.MAX_ON_SCREEN) return;
+
+    // Calculate spawn probability based on altitude
+    const chance = Math.min(
+      ENCOUNTER_CONFIG.BASE_CHANCE + ENCOUNTER_CONFIG.CHANCE_PER_MULT * multiplier,
+      ENCOUNTER_CONFIG.MAX_CHANCE
+    );
 
     if (Math.random() < chance) {
       const type = getEncounterTypeForAltitude(multiplier);
 
-      // Base drift speed scales with multiplier (faster flight = faster passing objects)
-      // Objects drift DOWN and LEFT (rocket is going UP and RIGHT)
-      const baseDriftSpeed = 3 + Math.min(multiplier / 10, 8); // 3-11 %/sec based on altitude
+      // Drift speed scales with altitude (faster rocket = faster parallax)
+      // Range: 3-11 %/sec based on multiplier
+      const baseDriftSpeed = 3 + Math.min(multiplier / 10, 8);
 
-      // Add variety to drift direction - mostly down-left but with some variance
-      const driftAngle = -0.6 + Math.random() * 0.4; // -0.6 to -0.2 radians (mostly down-left)
+      // Consistent down-left drift with slight variance for natural feel
+      // Angle range: -0.6 to -0.2 radians (mostly down-left)
+      const driftAngle = -0.6 + Math.random() * 0.4;
 
       const encounter: CosmicEncounter = {
         id: `enc-${Date.now()}-${Math.random()}`,
         type,
-        x: 20 + Math.random() * 60, // Spawn more centrally to allow drift room
-        y: 5 + Math.random() * 50, // Start higher to drift down through view
+        x: ENCOUNTER_CONFIG.X_SPAWN_MIN + Math.random() * ENCOUNTER_CONFIG.X_SPAWN_RANGE,
+        y: ENCOUNTER_CONFIG.Y_SPAWN_MIN + Math.random() * ENCOUNTER_CONFIG.Y_SPAWN_RANGE,
         startTime: now,
-        duration: 5000 + Math.random() * 3000, // 5-8 seconds visible (longer for more drift)
+        duration: ENCOUNTER_CONFIG.DURATION_MIN_MS + Math.random() * ENCOUNTER_CONFIG.DURATION_VARIANCE_MS,
         scale: 0.8 + Math.random() * 0.4,
-        velocityX: baseDriftSpeed * Math.cos(driftAngle) * -1, // Negative = drift left
-        velocityY: baseDriftSpeed * Math.abs(Math.sin(driftAngle)), // Positive = drift down
+        velocityX: baseDriftSpeed * Math.cos(driftAngle) * -1,
+        velocityY: baseDriftSpeed * Math.abs(Math.sin(driftAngle)),
       };
       setEncounters(prev => [...prev, encounter]);
     }
@@ -370,8 +410,12 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
   }, [rocketStates.length]);
 
   // Use a ref to track rocket states for the interval (avoids re-creating interval every frame)
+  // Refs to avoid recreating intervals on every state change
   const rocketStatesRef = useRef(rocketStates);
   rocketStatesRef.current = rocketStates;
+
+  const encountersRef = useRef(encounters);
+  encountersRef.current = encounters;
 
   // Trigger encounter checks during active flight
   // Uses an interval that reads from ref to avoid constant recreation
@@ -383,10 +427,11 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
 
       const currentMax = Math.max(...rockets.map(r => r.currentMultiplier), 1.0);
       const allRocketsCrashed = rockets.every(r => r.isCrashed);
+      const currentEncounterCount = encountersRef.current.length;
 
       // Only check for encounters during active flight (not after all crashed)
       if (!allRocketsCrashed) {
-        checkForEncounter(currentMax, Date.now());
+        checkForEncounter(currentMax, Date.now(), currentEncounterCount);
       }
     }, 500);
 
@@ -882,7 +927,7 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
               left: `${pos.xPercent}%`,
               top: `${pos.yPercent}%`,
               transform: `translate(-50%, -50%) rotate(${pos.angle}deg)`,
-              zIndex: rocket.isCrashed ? 25 : 20,
+              zIndex: rocket.isCrashed ? Z_INDEX.ROCKETS_CRASHED : Z_INDEX.ROCKETS_FLYING,
             }}
           >
             <img
@@ -948,7 +993,7 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
               top: `${yPercent}%`,
               // Rocket PNGs point UP, rotate 90deg to point RIGHT (horizontal)
               transform: 'translate(-50%, -50%) rotate(90deg)',
-              zIndex: 20 + i,
+              zIndex: Z_INDEX.ROCKETS_FLYING + i,
               // Chain animations: slide in first, then subtle hover bob
               animation: `slideInFromLeft ${slideInDuration}ms ease-out ${slideInDelay}ms both, rocketHover ${hoverDuration}s ease-in-out ${hoverDelay}ms infinite`,
             }}
@@ -1013,10 +1058,10 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
         Multiplier
       </div>
 
-      {/* Cosmic Encounters Layer - on top of everything except UI */}
+      {/* Cosmic Encounters Layer - behind rockets, in front of canvas */}
       <div
         className="absolute inset-0 pointer-events-none overflow-hidden"
-        style={{ zIndex: 25 }}
+        style={{ zIndex: Z_INDEX.ENCOUNTERS }}
       >
         {encounters.map(encounter => {
           const now = Date.now();
@@ -1043,26 +1088,24 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
 
           const visual = getEncounterVisual(encounter.type);
 
-          // Choose animation class based on encounter type
-          const spinTypes = ['wormhole', 'galaxy', 'blackHole', 'dysonSphere'];
-          const wobbleTypes = ['alienShip', 'alienProbe', 'cosmicEntity', 'astronaut'];
-          const rareTypes = ['cosmicEntity', 'blackHole', 'wormhole'];
-
+          // Determine animation class using pre-defined Sets
           let animClass = 'cosmic-encounter';
-          if (spinTypes.includes(encounter.type)) {
+          if (SPIN_ENCOUNTER_TYPES.has(encounter.type)) {
             animClass = 'cosmic-encounter-spin';
-          } else if (wobbleTypes.includes(encounter.type)) {
+          } else if (WOBBLE_ENCOUNTER_TYPES.has(encounter.type)) {
             animClass = 'cosmic-encounter-wobble';
           }
-          if (rareTypes.includes(encounter.type)) {
+          if (RARE_ENCOUNTER_TYPES.has(encounter.type)) {
             animClass += ' cosmic-encounter-rare';
           }
 
           return (
             // Outer wrapper handles position, inner span handles animation
+            // aria-hidden since encounters are decorative
             <div
               key={encounter.id}
               className="absolute"
+              aria-hidden="true"
               style={{
                 left: `${currentX}%`,
                 top: `${currentY}%`,
