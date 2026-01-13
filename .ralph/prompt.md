@@ -1,25 +1,23 @@
 # Task
-
-You are improving the OpenHouse casino frontend with Framer Motion animations.
+Add "Cosmic Encounters" system to Crash game: space objects (satellites, planets, aliens, galaxies) that appear during flight based on altitude. Higher multiplier = more frequent and exotic encounters.
 
 ## Instructions
-
-1. Read `.ralph/PROGRESS.md` - see what's done and what's next
-2. If ALL items are complete, output exactly "RALPH_COMPLETE" and stop
-3. Read `.ralph/SPEC.md` - detailed implementation guide
-4. Pick the NEXT uncompleted item from PROGRESS.md
-5. Implement it properly with TypeScript
-6. Run `cd openhouse_frontend && npm run build` to verify
-7. If build fails, fix the error
-8. Update `.ralph/PROGRESS.md` - mark item complete
+1. Read `.ralph/PROGRESS.md`
+2. If ALL items complete, output "RALPH_COMPLETE" and stop
+3. Read `.ralph/SPEC.md` - it has detailed code examples for each priority
+4. Pick NEXT uncompleted item
+5. Implement with TypeScript following the patterns in SPEC.md
+6. Build: `cd openhouse_frontend && npm run build`
+7. If build fails, fix it
+8. Update PROGRESS.md with what you did
+9. Deploy: `./deploy.sh`
 
 ## Rules
+- One priority per iteration
+- Build must pass before deploying
+- DO NOT git commit
+- Test at: https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/crash
+- DO NOT change: game logic, rocket images, betting UI
 
-- One feature per session
-- Build must pass
-- Don't break existing game functionality
-- Use `framer-motion` (already installed)
-- Keep animations snappy (under 300ms for micro-interactions)
-- DO NOT git commit - only make local changes
-- DO deploy to mainnet after build passes: `./deploy.sh`
-- Test at: https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io
+## Key Requirement
+The encounters must be VISIBLE and NOTICEABLE - not subtle. Use emoji placeholders (🛰️🪐🛸🌌) until real pixel art is added. Players should clearly see objects appearing and fading as they fly through space.

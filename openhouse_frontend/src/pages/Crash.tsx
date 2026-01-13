@@ -64,6 +64,31 @@ export const Crash: React.FC = () => {
   // Animation frame ref for cleanup
   const animationRef = useRef<number | null>(null);
 
+  // Track device orientation for responsive canvas sizing
+  const [isMobileLandscape, setIsMobileLandscape] = useState(() =>
+    typeof window !== 'undefined' && window.innerWidth <= 768 && window.innerWidth > window.innerHeight
+  );
+
+  // Listen for orientation changes on mobile
+  useEffect(() => {
+    const handleOrientationChange = () => {
+      const isMobile = window.innerWidth <= 768;
+      const isLandscape = window.innerWidth > window.innerHeight;
+      setIsMobileLandscape(isMobile && isLandscape);
+    };
+
+    window.addEventListener('orientationchange', handleOrientationChange);
+    window.addEventListener('resize', handleOrientationChange);
+
+    // Initial check
+    handleOrientationChange();
+
+    return () => {
+      window.removeEventListener('orientationchange', handleOrientationChange);
+      window.removeEventListener('resize', handleOrientationChange);
+    };
+  }, []);
+
   // Computed values
   const totalBet = betAmount * rocketCount;
   const maxPayout = totalBet * targetCashout;
@@ -343,8 +368,19 @@ export const Crash: React.FC = () => {
         </div>
 
         {/* Main Game Area - clickable to launch */}
+        {/* Mobile portrait: taller canvas (60vh) with 4:3 aspect ratio for better viewing */}
+        {/* Mobile landscape: wider canvas (70vh) with 16:9 aspect ratio */}
+        {/* Desktop: standard 50vh with 16:9 aspect-video */}
         <motion.div
-          className={`relative w-full max-h-[50vh] aspect-video mb-4 flex-shrink-0 ${!isPlaying && actor && isAuthenticated && balance.game > 0n ? 'cursor-pointer' : ''}`}
+          className={`relative w-full mb-4 flex-shrink-0 ${
+            isMobileLandscape
+              ? 'max-h-[70vh] aspect-video' // Mobile landscape: maximize horizontal space
+              : 'max-h-[60vh] md:max-h-[50vh] aspect-[4/3] md:aspect-video' // Portrait/desktop
+          } ${!isPlaying && actor && isAuthenticated && balance.game > 0n ? 'cursor-pointer' : ''}`}
+          style={{
+            // Smooth transition when orientation changes
+            transition: 'max-height 0.3s ease-out, aspect-ratio 0.3s ease-out',
+          }}
           onClick={() => {
             if (!isPlaying && actor && isAuthenticated && balance.game > 0n) {
               startGame();
