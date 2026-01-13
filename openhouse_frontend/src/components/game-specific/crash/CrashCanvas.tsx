@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import type { RocketState } from '../../../pages/Crash';
 import './CrashRocket.css';
 
@@ -64,6 +64,60 @@ export const ROCKET_COLORS = [
   '#64FFDA', // Aqua
 ];
 
+// ============================================
+// Cosmic Encounters System - space objects that appear during flight
+// ============================================
+
+// Z-index hierarchy for proper layering
+const Z_INDEX = {
+  STARS: 5,
+  NEBULA: 8,
+  CANVAS: 10,
+  ENCOUNTERS: 15,      // Behind rockets
+  ROCKETS_FLYING: 20,
+  ROCKETS_CRASHED: 22,
+  UI: 30,
+} as const;
+
+// Encounter spawn configuration
+const ENCOUNTER_CONFIG = {
+  MAX_ON_SCREEN: 6,           // Prevent visual clutter
+  CHECK_INTERVAL_MS: 1500,    // How often to roll for new encounter
+  BASE_CHANCE: 0.10,          // 10% base probability
+  CHANCE_PER_MULT: 0.02,      // +2% per multiplier
+  MAX_CHANCE: 0.50,           // Cap at 50% to prevent spam
+  X_SPAWN_MIN: 20,            // Avoid left edge (rocket start area)
+  X_SPAWN_RANGE: 60,          // Spawn in center 60% of screen
+  Y_SPAWN_MIN: 5,             // Start near top for downward drift
+  Y_SPAWN_RANGE: 50,          // Upper half of screen
+  DURATION_MIN_MS: 5000,      // Minimum visibility time
+  DURATION_VARIANCE_MS: 3000, // Random additional duration
+} as const;
+
+// Animation class mappings (static, defined once)
+const SPIN_ENCOUNTER_TYPES = new Set(['wormhole', 'galaxy', 'blackHole', 'dysonSphere']);
+const WOBBLE_ENCOUNTER_TYPES = new Set(['alienShip', 'alienProbe', 'cosmicEntity', 'astronaut']);
+const RARE_ENCOUNTER_TYPES = new Set(['cosmicEntity', 'blackHole', 'wormhole']);
+
+type EncounterType =
+  | 'satellite' | 'astronaut' | 'spaceStation'  // Low orbit (5x-20x)
+  | 'asteroid' | 'comet' | 'moon'               // Deep space (20x-60x)
+  | 'planet_ringed' | 'planet_gas' | 'alienProbe' // Outer system (60x-120x)
+  | 'alienShip' | 'wormhole' | 'dysonSphere'    // Interstellar (120x-250x)
+  | 'galaxy' | 'blackHole' | 'cosmicEntity';    // Cosmic (250x+)
+
+interface CosmicEncounter {
+  id: string;
+  type: EncounterType;
+  x: number; // starting percentage 0-100
+  y: number; // starting percentage 0-100
+  startTime: number;
+  duration: number; // ms, typically 3000-6000
+  scale: number; // size multiplier
+  velocityX: number; // drift speed in % per second (negative = left)
+  velocityY: number; // drift speed in % per second (positive = down)
+}
+
 interface CrashCanvasProps {
   rocketStates: RocketState[];
   targetMultiplier?: number;
@@ -73,6 +127,74 @@ interface CrashCanvasProps {
   isWaitingForBackend?: boolean;
   rocketCount?: number;
 }
+
+// Get encounter type based on current altitude (multiplier)
+const getEncounterTypeForAltitude = (multiplier: number): EncounterType => {
+  if (multiplier < 20) {
+    // Low orbit zone
+    const options: EncounterType[] = ['satellite', 'satellite', 'astronaut', 'spaceStation'];
+    return options[Math.floor(Math.random() * options.length)];
+  } else if (multiplier < 60) {
+    // Deep space zone
+    const options: EncounterType[] = ['asteroid', 'asteroid', 'comet', 'moon', 'satellite'];
+    return options[Math.floor(Math.random() * options.length)];
+  } else if (multiplier < 120) {
+    // Outer system zone
+    const options: EncounterType[] = ['planet_ringed', 'planet_gas', 'alienProbe', 'asteroid', 'comet'];
+    return options[Math.floor(Math.random() * options.length)];
+  } else if (multiplier < 250) {
+    // Interstellar zone
+    const options: EncounterType[] = ['alienShip', 'wormhole', 'dysonSphere', 'planet_gas', 'alienProbe'];
+    return options[Math.floor(Math.random() * options.length)];
+  } else {
+    // Cosmic zone (250x+)
+    const options: EncounterType[] = ['galaxy', 'blackHole', 'cosmicEntity', 'wormhole', 'alienShip'];
+    return options[Math.floor(Math.random() * options.length)];
+  }
+};
+
+// Get visual properties (emoji placeholder) for each encounter type
+const getEncounterVisual = (type: EncounterType): { emoji: string; color: string; size: number } => {
+  switch (type) {
+    // Low orbit
+    case 'satellite':
+      return { emoji: '🛰️', color: '#88aacc', size: 32 };
+    case 'astronaut':
+      return { emoji: '👨‍🚀', color: '#ffffff', size: 36 };
+    case 'spaceStation':
+      return { emoji: '🏗️', color: '#cccccc', size: 40 };
+    // Deep space
+    case 'asteroid':
+      return { emoji: '🪨', color: '#8b7355', size: 28 };
+    case 'comet':
+      return { emoji: '☄️', color: '#66ccff', size: 38 };
+    case 'moon':
+      return { emoji: '🌙', color: '#d4d4aa', size: 44 };
+    // Outer system
+    case 'planet_ringed':
+      return { emoji: '🪐', color: '#e8c88a', size: 56 };
+    case 'planet_gas':
+      return { emoji: '🟠', color: '#e87040', size: 52 };
+    case 'alienProbe':
+      return { emoji: '🔷', color: '#44ffaa', size: 30 };
+    // Interstellar
+    case 'alienShip':
+      return { emoji: '🛸', color: '#88ff88', size: 48 };
+    case 'wormhole':
+      return { emoji: '🌀', color: '#aa66ff', size: 60 };
+    case 'dysonSphere':
+      return { emoji: '⭕', color: '#ffcc00', size: 50 };
+    // Cosmic
+    case 'galaxy':
+      return { emoji: '🌌', color: '#6644aa', size: 70 };
+    case 'blackHole':
+      return { emoji: '⚫', color: '#220033', size: 55 };
+    case 'cosmicEntity':
+      return { emoji: '👁️', color: '#ff44ff', size: 64 };
+    default:
+      return { emoji: '✨', color: '#ffffff', size: 24 };
+  }
+};
 
 // Fisher-Yates shuffle algorithm
 function shuffleArray<T>(array: T[]): T[] {
@@ -108,8 +230,19 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
   // Use state for dynamic sizing, initialized with props
   const [size, setSize] = useState({ width: initialWidth, height: initialHeight });
 
+  // Track device orientation for mobile layout optimization
+  const [isLandscape, setIsLandscape] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth > window.innerHeight : true
+  );
+  // Track if orientation is transitioning for smooth animation
+  const [isOrientationTransitioning, setIsOrientationTransitioning] = useState(false);
+
   // Track when images are preloaded
   const [imagesReady, setImagesReady] = useState(imagesPreloaded);
+
+  // Cosmic Encounters state - space objects that appear during flight
+  const [encounters, setEncounters] = useState<CosmicEncounter[]>([]);
+  const lastEncounterCheckRef = useRef<number>(0);
 
   // Preload images on mount
   useEffect(() => {
@@ -117,6 +250,43 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
       preloadAllRocketImages().then(() => setImagesReady(true));
     }
   }, []);
+
+  // Orientation change handler for smooth mobile transitions
+  useEffect(() => {
+    const handleOrientationChange = () => {
+      // Trigger transition state for smooth visual update
+      setIsOrientationTransitioning(true);
+
+      // Small delay to let the browser settle after orientation change
+      const orientationTimeout = setTimeout(() => {
+        const newIsLandscape = window.innerWidth > window.innerHeight;
+        setIsLandscape(newIsLandscape);
+
+        // Clear transition state after animation completes
+        setTimeout(() => {
+          setIsOrientationTransitioning(false);
+        }, 300); // Match CSS transition duration
+      }, 100);
+
+      return () => clearTimeout(orientationTimeout);
+    };
+
+    // Listen for both orientationchange (mobile) and resize (desktop/PWA)
+    window.addEventListener('orientationchange', handleOrientationChange);
+    // Also check on resize for devices that don't fire orientationchange
+    const handleResize = () => {
+      const newIsLandscape = window.innerWidth > window.innerHeight;
+      if (newIsLandscape !== isLandscape) {
+        handleOrientationChange();
+      }
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('orientationchange', handleOrientationChange);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [isLandscape]);
 
   // Resize Observer to handle fluid layout
   useEffect(() => {
@@ -141,6 +311,9 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
 
   // Store positions as percentages (0-100) and angle in degrees
   const [rocketPositions, setRocketPositions] = useState<Map<number, { xPercent: number; yPercent: number; angle: number }>>(new Map());
+
+  // Store smoothed angles per rocket for exponential moving average (persists between frames)
+  const smoothedAnglesRef = useRef<Map<number, number>>(new Map());
 
   // Assign each rocket a unique design (no duplicates)
   // Shuffle all available designs and assign them to rockets by index
@@ -168,8 +341,102 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
     return shuffled.slice(0, rocketCount);
   }, [rocketCount]);
 
-  // Generate stars once - more stars for deep space effect
-  const stars = useMemo(() => generateStars(100), []);
+  // Generate stars once with three depth layers for parallax effect
+  const stars = useMemo(() => generateStarLayers(), []);
+
+  // Check for cosmic encounter based on current multiplier
+  const checkForEncounter = useCallback((multiplier: number, now: number, currentCount: number) => {
+    // Throttle checks to prevent spam
+    if (now - lastEncounterCheckRef.current < ENCOUNTER_CONFIG.CHECK_INTERVAL_MS) return;
+    lastEncounterCheckRef.current = now;
+
+    // Don't spawn if already at max capacity
+    if (currentCount >= ENCOUNTER_CONFIG.MAX_ON_SCREEN) return;
+
+    // Calculate spawn probability based on altitude
+    const chance = Math.min(
+      ENCOUNTER_CONFIG.BASE_CHANCE + ENCOUNTER_CONFIG.CHANCE_PER_MULT * multiplier,
+      ENCOUNTER_CONFIG.MAX_CHANCE
+    );
+
+    if (Math.random() < chance) {
+      const type = getEncounterTypeForAltitude(multiplier);
+
+      // Drift speed scales with altitude (faster rocket = faster parallax)
+      // Range: 3-11 %/sec based on multiplier
+      const baseDriftSpeed = 3 + Math.min(multiplier / 10, 8);
+
+      // Consistent down-left drift with slight variance for natural feel
+      // Angle range: -0.6 to -0.2 radians (mostly down-left)
+      const driftAngle = -0.6 + Math.random() * 0.4;
+
+      const encounter: CosmicEncounter = {
+        id: `enc-${Date.now()}-${Math.random()}`,
+        type,
+        x: ENCOUNTER_CONFIG.X_SPAWN_MIN + Math.random() * ENCOUNTER_CONFIG.X_SPAWN_RANGE,
+        y: ENCOUNTER_CONFIG.Y_SPAWN_MIN + Math.random() * ENCOUNTER_CONFIG.Y_SPAWN_RANGE,
+        startTime: now,
+        duration: ENCOUNTER_CONFIG.DURATION_MIN_MS + Math.random() * ENCOUNTER_CONFIG.DURATION_VARIANCE_MS,
+        scale: 0.8 + Math.random() * 0.4,
+        velocityX: baseDriftSpeed * Math.cos(driftAngle) * -1,
+        velocityY: baseDriftSpeed * Math.abs(Math.sin(driftAngle)),
+      };
+      setEncounters(prev => [...prev, encounter]);
+    }
+  }, []);
+
+  // Clear smoothed angles when game resets (no rockets = new game starting)
+  useEffect(() => {
+    if (rocketStates.length === 0) {
+      smoothedAnglesRef.current.clear();
+    }
+  }, [rocketStates.length]);
+
+  // Cleanup expired cosmic encounters periodically
+  useEffect(() => {
+    const cleanup = setInterval(() => {
+      const now = Date.now();
+      setEncounters(prev => prev.filter(e => now - e.startTime < e.duration));
+    }, 1000);
+    return () => clearInterval(cleanup);
+  }, []);
+
+  // Clear all encounters when game resets (no rockets = new game)
+  useEffect(() => {
+    if (rocketStates.length === 0) {
+      setEncounters([]);
+      lastEncounterCheckRef.current = 0;
+    }
+  }, [rocketStates.length]);
+
+  // Use a ref to track rocket states for the interval (avoids re-creating interval every frame)
+  // Refs to avoid recreating intervals on every state change
+  const rocketStatesRef = useRef(rocketStates);
+  rocketStatesRef.current = rocketStates;
+
+  const encountersRef = useRef(encounters);
+  encountersRef.current = encounters;
+
+  // Trigger encounter checks during active flight
+  // Uses an interval that reads from ref to avoid constant recreation
+  useEffect(() => {
+    // Check for encounters every 500ms
+    const encounterInterval = setInterval(() => {
+      const rockets = rocketStatesRef.current;
+      if (rockets.length === 0) return;
+
+      const currentMax = Math.max(...rockets.map(r => r.currentMultiplier), 1.0);
+      const allRocketsCrashed = rockets.every(r => r.isCrashed);
+      const currentEncounterCount = encountersRef.current.length;
+
+      // Only check for encounters during active flight (not after all crashed)
+      if (!allRocketsCrashed) {
+        checkForEncounter(currentMax, Date.now(), currentEncounterCount);
+      }
+    }, 500);
+
+    return () => clearInterval(encounterInterval);
+  }, [checkForEncounter]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -258,7 +525,8 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
 
       // Calculate angle from a longer segment of the trajectory
       // This smooths out jitter caused by tiny dy values at high multipliers
-      let rocketAngle = 0;
+      // Initialize to 90 degrees (horizontal right) to match pre-launch orientation
+      let targetAngle = 90;
       if (recentPoints.length >= 2) {
         const startPoint = recentPoints[0];
         const endPoint = recentPoints[recentPoints.length - 1];
@@ -268,8 +536,23 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
         const angleRad = Math.atan2(-dy, dx);
         const trajectoryAngle = (angleRad * 180) / Math.PI;
         // Rocket PNG points straight UP (nose at 12 o'clock position)
-        rocketAngle = 90 - trajectoryAngle;
+        targetAngle = 90 - trajectoryAngle;
       }
+
+      // Apply exponential moving average for ultra-smooth angle transitions
+      // Lower ANGLE_SMOOTHING = smoother but slower response
+      const ANGLE_SMOOTHING = 0.15;
+      const prevSmoothedAngle = smoothedAnglesRef.current.get(rocket.index);
+      let rocketAngle: number;
+      if (prevSmoothedAngle !== undefined) {
+        // Lerp from previous smoothed angle toward target angle
+        rocketAngle = prevSmoothedAngle + (targetAngle - prevSmoothedAngle) * ANGLE_SMOOTHING;
+      } else {
+        // First frame: initialize with target angle
+        rocketAngle = targetAngle;
+      }
+      // Store the smoothed angle for next frame
+      smoothedAnglesRef.current.set(rocket.index, rocketAngle);
 
       // Use the exact line endpoint coordinates for the rocket position
       // This ensures the rocket is always precisely at the end of its trajectory line
@@ -298,45 +581,81 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
 
   // Dynamic background colors based on altitude
   // Cypherpunk aesthetic: dark ionosphere dusk -> void of space -> cosmic depths
+  // More granular progression with 8 distinct layers for ultra-smooth transitions
   const getAtmosphereGradient = () => {
-    if (atmosphereProgress < 0.15) {
-      // Ionosphere at dusk: more purple/blue, subtle rust horizon
-      const t = atmosphereProgress / 0.15;
+    if (atmosphereProgress < 0.08) {
+      // Ground level / troposphere: warmest tones, rust/amber horizon glow
+      const t = atmosphereProgress / 0.08;
       return {
-        top: `rgb(${Math.round(12 + t * 3)}, ${Math.round(8 + t * 4)}, ${Math.round(30 + t * 10)})`,      // Dark purple-blue
-        bottom: `rgb(${Math.round(50 - t * 10)}, ${Math.round(20 + t * 5)}, ${Math.round(35 + t * 5)})`,  // Muted rust with purple
+        top: `rgb(${Math.round(10 + t * 4)}, ${Math.round(6 + t * 3)}, ${Math.round(25 + t * 8)})`,
+        mid: `rgb(${Math.round(30 + t * 10)}, ${Math.round(15 + t * 5)}, ${Math.round(35 + t * 5)})`,
+        bottom: `rgb(${Math.round(55 - t * 5)}, ${Math.round(22 + t * 3)}, ${Math.round(38 + t * 2)})`,
       };
-    } else if (atmosphereProgress < 0.35) {
-      // Upper ionosphere: deeper purple, fading warmth
-      const t = (atmosphereProgress - 0.15) / 0.2;
+    } else if (atmosphereProgress < 0.18) {
+      // Lower stratosphere: purple starting to dominate, rust fading
+      const t = (atmosphereProgress - 0.08) / 0.10;
       return {
-        top: `rgb(${Math.round(15 - t * 8)}, ${Math.round(12 - t * 6)}, ${Math.round(40 - t * 15)})`,     // Darker purple-blue
-        bottom: `rgb(${Math.round(40 - t * 20)}, ${Math.round(25 - t * 12)}, ${Math.round(40 - t * 15)})`, // Fading to deep purple
+        top: `rgb(${Math.round(14 + t * 2)}, ${Math.round(9 + t * 3)}, ${Math.round(33 + t * 7)})`,
+        mid: `rgb(${Math.round(40 - t * 5)}, ${Math.round(20 + t * 3)}, ${Math.round(40 + t * 3)})`,
+        bottom: `rgb(${Math.round(50 - t * 8)}, ${Math.round(25 - t * 2)}, ${Math.round(40 + t * 2)})`,
       };
-    } else if (atmosphereProgress < 0.6) {
-      // Exosphere: last traces of atmosphere
-      const t = (atmosphereProgress - 0.35) / 0.25;
+    } else if (atmosphereProgress < 0.30) {
+      // Upper stratosphere: cooler purples, hints of teal entering
+      const t = (atmosphereProgress - 0.18) / 0.12;
       return {
-        top: `rgb(${Math.round(7 - t * 4)}, ${Math.round(6 - t * 4)}, ${Math.round(25 - t * 15)})`,
-        bottom: `rgb(${Math.round(20 - t * 12)}, ${Math.round(13 - t * 8)}, ${Math.round(25 - t * 15)})`,
+        top: `rgb(${Math.round(16 - t * 4)}, ${Math.round(12 - t * 2)}, ${Math.round(40 - t * 5)})`,
+        mid: `rgb(${Math.round(35 - t * 10)}, ${Math.round(23 - t * 5)}, ${Math.round(43 - t * 5)})`,
+        bottom: `rgb(${Math.round(42 - t * 12)}, ${Math.round(23 - t * 6)}, ${Math.round(42 - t * 8)})`,
       };
-    } else if (atmosphereProgress < 0.85) {
-      // Thermosphere: entering the void
-      const t = (atmosphereProgress - 0.6) / 0.25;
+    } else if (atmosphereProgress < 0.45) {
+      // Mesosphere: deep blue-purple, warmth nearly gone
+      const t = (atmosphereProgress - 0.30) / 0.15;
       return {
-        top: `rgb(${Math.round(3 - t * 2)}, ${Math.round(2 - t * 1)}, ${Math.round(10 - t * 7)})`,
-        bottom: `rgb(${Math.round(8 - t * 5)}, ${Math.round(5 - t * 3)}, ${Math.round(10 - t * 6)})`,
+        top: `rgb(${Math.round(12 - t * 5)}, ${Math.round(10 - t * 4)}, ${Math.round(35 - t * 10)})`,
+        mid: `rgb(${Math.round(25 - t * 10)}, ${Math.round(18 - t * 8)}, ${Math.round(38 - t * 13)})`,
+        bottom: `rgb(${Math.round(30 - t * 14)}, ${Math.round(17 - t * 8)}, ${Math.round(34 - t * 12)})`,
+      };
+    } else if (atmosphereProgress < 0.60) {
+      // Lower thermosphere: last atmospheric glow
+      const t = (atmosphereProgress - 0.45) / 0.15;
+      return {
+        top: `rgb(${Math.round(7 - t * 3)}, ${Math.round(6 - t * 3)}, ${Math.round(25 - t * 12)})`,
+        mid: `rgb(${Math.round(15 - t * 7)}, ${Math.round(10 - t * 5)}, ${Math.round(25 - t * 12)})`,
+        bottom: `rgb(${Math.round(16 - t * 8)}, ${Math.round(9 - t * 4)}, ${Math.round(22 - t * 10)})`,
+      };
+    } else if (atmosphereProgress < 0.75) {
+      // Upper thermosphere: transition to void
+      const t = (atmosphereProgress - 0.60) / 0.15;
+      return {
+        top: `rgb(${Math.round(4 - t * 2)}, ${Math.round(3 - t * 1)}, ${Math.round(13 - t * 8)})`,
+        mid: `rgb(${Math.round(8 - t * 4)}, ${Math.round(5 - t * 2)}, ${Math.round(13 - t * 7)})`,
+        bottom: `rgb(${Math.round(8 - t * 4)}, ${Math.round(5 - t * 2)}, ${Math.round(12 - t * 6)})`,
+      };
+    } else if (atmosphereProgress < 0.90) {
+      // Exosphere: near-void, only faintest traces of color
+      const t = (atmosphereProgress - 0.75) / 0.15;
+      return {
+        top: `rgb(${Math.round(2 - t * 1)}, ${Math.round(2 - t * 1)}, ${Math.round(5 - t * 3)})`,
+        mid: `rgb(${Math.round(4 - t * 2)}, ${Math.round(3 - t * 1)}, ${Math.round(6 - t * 3)})`,
+        bottom: `rgb(${Math.round(4 - t * 2)}, ${Math.round(3 - t * 1)}, ${Math.round(6 - t * 3)})`,
       };
     } else {
-      // Deep space: the void
+      // Deep space: the void - essentially black
       return {
         top: '#010102',
+        mid: '#020203',
         bottom: '#030204',
       };
     }
   };
 
   const atmosphereColors = getAtmosphereGradient();
+
+  // Heat shimmer intensity - only visible at low altitudes (ground level to lower stratosphere)
+  // Peaks at ground level and fades completely by 0.25 atmosphere progress
+  const heatShimmerIntensity = atmosphereProgress < 0.25
+    ? Math.max(0, 1 - atmosphereProgress / 0.25) * 0.5
+    : 0;
 
   // Star visibility increases with altitude
   const starOpacity = 0.2 + atmosphereProgress * 0.6;
@@ -365,46 +684,98 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full rounded-lg border border-pure-white/20 shadow-2xl overflow-hidden"
+      className={`relative w-full h-full rounded-lg border border-pure-white/20 shadow-2xl overflow-hidden crash-canvas-container ${
+        isOrientationTransitioning ? 'orientation-transitioning' : ''
+      }`}
       style={{
-        background: `linear-gradient(to bottom, ${atmosphereColors.top}, ${atmosphereColors.bottom})`,
-        transition: 'background 0.3s ease-out',
+        // Three-color gradient for smoother atmosphere transitions
+        background: `linear-gradient(to bottom, ${atmosphereColors.top} 0%, ${atmosphereColors.mid} 50%, ${atmosphereColors.bottom} 100%)`,
+        // Smooth transitions for background and orientation changes
+        transition: isOrientationTransitioning
+          ? 'background 0.3s ease-out, opacity 0.3s ease-out, transform 0.3s ease-out'
+          : 'background 0.5s ease-out',
+        // Subtle fade during orientation transition to mask layout shifts
+        opacity: isOrientationTransitioning ? 0.85 : 1,
       }}
     >
-      {/* Horizon glow effect - muted rust/purple glow at bottom */}
+      {/* Heat shimmer effect - subtle atmospheric distortion at low altitudes */}
+      {heatShimmerIntensity > 0 && (
+        <div
+          className="absolute bottom-0 left-0 right-0 h-1/5 pointer-events-none"
+          style={{
+            background: `linear-gradient(to top, rgba(255, 180, 120, ${heatShimmerIntensity * 0.15}), transparent)`,
+            animation: 'heatShimmer 3s ease-in-out infinite',
+            mixBlendMode: 'overlay',
+          }}
+        />
+      )}
+
+      {/* Horizon glow effect - layered for smoother transition */}
+      {/* Layer 1: Inner warm glow (closest to horizon) */}
+      <div
+        className="absolute bottom-0 left-0 right-0 h-1/6 pointer-events-none"
+        style={{
+          background: `linear-gradient(to top, rgba(90, 40, 50, ${horizonGlowOpacity * 1.2}), rgba(70, 30, 55, ${horizonGlowOpacity * 0.6}), transparent)`,
+          transition: 'opacity 0.5s ease-out',
+        }}
+      />
+      {/* Layer 2: Outer atmospheric glow (extends further up) */}
       <div
         className="absolute bottom-0 left-0 right-0 h-1/4 pointer-events-none"
         style={{
-          background: `linear-gradient(to top, rgba(80, 35, 45, ${horizonGlowOpacity}), rgba(50, 20, 50, ${horizonGlowOpacity * 0.5}), transparent)`,
-          transition: 'opacity 0.3s ease-out',
+          background: `linear-gradient(to top, rgba(60, 25, 55, ${horizonGlowOpacity * 0.7}), rgba(40, 15, 45, ${horizonGlowOpacity * 0.3}), transparent)`,
+          transition: 'opacity 0.5s ease-out',
+        }}
+      />
+      {/* Layer 3: Subtle ambient glow (highest layer, very faint) */}
+      <div
+        className="absolute bottom-0 left-0 right-0 h-1/3 pointer-events-none"
+        style={{
+          background: `linear-gradient(to top, rgba(35, 15, 50, ${horizonGlowOpacity * 0.35}), transparent 70%)`,
+          transition: 'opacity 0.5s ease-out',
         }}
       />
 
-      {/* Stars Background - visibility increases with altitude */}
+      {/* Stars Background - visibility increases with altitude, parallax drift at high multipliers */}
       <div
         className="absolute inset-0 overflow-hidden"
         style={{ opacity: starOpacity, transition: 'opacity 0.3s ease-out' }}
       >
-        {stars.map(star => (
-          <div
-            key={star.id}
-            className="absolute rounded-full bg-white star"
-            style={{
-              left: star.style.left,
-              top: star.style.top,
-              width: star.style.width,
-              height: star.style.height,
-              opacity: star.style.opacity,
-              animationDelay: star.style.animationDelay,
-            }}
-          />
-        ))}
+        {stars.map(star => {
+          // Calculate parallax drift offset based on multiplier progress
+          // Drift only kicks in at high multipliers (100x+) for subtle effect
+          const driftProgress = maxCurrentMultiplier > 100
+            ? Math.min(Math.log10(maxCurrentMultiplier / 100) / Math.log10(20), 1)
+            : 0;
+          // Max drift of 15px for near stars, scaled by layer's driftSpeed
+          const driftOffset = driftProgress * star.driftSpeed * 15;
+
+          return (
+            <div
+              key={star.id}
+              className="absolute rounded-full bg-white"
+              style={{
+                left: star.style.left,
+                top: star.style.top,
+                width: star.style.width,
+                height: star.style.height,
+                opacity: star.style.opacity,
+                // Layer-specific twinkle duration and parallax transform
+                animation: `twinkle-${star.layer} ${star.twinkleDuration}s ease-in-out infinite`,
+                animationDelay: star.style.animationDelay,
+                // Apply horizontal drift for parallax effect (stars appear to pass by)
+                transform: driftOffset > 0 ? `translateX(-${driftOffset}px)` : undefined,
+                transition: 'transform 0.5s ease-out',
+              }}
+            />
+          );
+        })}
       </div>
 
-      {/* Deep space nebula effect - appears at high multipliers */}
+      {/* Deep space nebula effect - appears at high multipliers with drift animation */}
       {deepSpaceProgress > 0 && (
         <>
-          {/* Purple/blue nebula cloud - top left */}
+          {/* Purple/blue nebula cloud - top left - drifts slowly */}
           <div
             className="absolute pointer-events-none"
             style={{
@@ -414,10 +785,10 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
               height: '35%',
               background: `radial-gradient(ellipse at center, rgba(60, 20, 80, ${nebulaOpacity}) 0%, rgba(30, 15, 60, ${nebulaOpacity * 0.5}) 40%, transparent 70%)`,
               filter: 'blur(30px)',
-              transition: 'opacity 0.5s ease-out',
+              animation: 'nebulaDrift1 18s ease-in-out infinite',
             }}
           />
-          {/* Cyan/teal nebula wisp - right side */}
+          {/* Cyan/teal nebula wisp - right side - counter-drifts */}
           <div
             className="absolute pointer-events-none"
             style={{
@@ -427,23 +798,53 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
               height: '40%',
               background: `radial-gradient(ellipse at center, rgba(20, 50, 70, ${nebulaOpacity * 0.8}) 0%, rgba(15, 35, 55, ${nebulaOpacity * 0.4}) 50%, transparent 75%)`,
               filter: 'blur(25px)',
-              transition: 'opacity 0.5s ease-out',
+              animation: 'nebulaDrift2 22s ease-in-out infinite',
             }}
           />
-          {/* Distant galaxy cluster glow - bottom */}
+          {/* Distant galaxy cluster glow - bottom - has translateX(-50%) in animation */}
           <div
             className="absolute pointer-events-none"
             style={{
               bottom: '15%',
               left: '50%',
-              transform: 'translateX(-50%)',
               width: '25%',
               height: '20%',
               background: `radial-gradient(ellipse at center, rgba(80, 40, 100, ${nebulaOpacity * 0.6}) 0%, transparent 60%)`,
               filter: 'blur(20px)',
-              transition: 'opacity 0.5s ease-out',
+              animation: 'nebulaDrift3 25s ease-in-out infinite',
             }}
           />
+          {/* Deep cosmic veil - appears at extreme multipliers (500x+) with color variation */}
+          {maxCurrentMultiplier > 500 && (
+            <>
+              {/* Intense magenta/violet cosmic veil - upper right */}
+              <div
+                className="absolute pointer-events-none"
+                style={{
+                  top: '5%',
+                  right: '15%',
+                  width: '35%',
+                  height: '30%',
+                  background: `radial-gradient(ellipse at center, rgba(100, 30, 120, ${Math.min((maxCurrentMultiplier - 500) / 1500, 1) * 0.4}) 0%, rgba(60, 20, 90, ${Math.min((maxCurrentMultiplier - 500) / 1500, 1) * 0.2}) 50%, transparent 75%)`,
+                  filter: 'blur(35px)',
+                  animation: 'nebulaDrift4 15s ease-in-out infinite',
+                }}
+              />
+              {/* Deep blue cosmic dust - lower left */}
+              <div
+                className="absolute pointer-events-none"
+                style={{
+                  bottom: '25%',
+                  left: '10%',
+                  width: '30%',
+                  height: '25%',
+                  background: `radial-gradient(ellipse at center, rgba(30, 40, 90, ${Math.min((maxCurrentMultiplier - 500) / 1500, 1) * 0.35}) 0%, transparent 65%)`,
+                  filter: 'blur(28px)',
+                  animation: 'nebulaDrift2 20s ease-in-out infinite reverse',
+                }}
+              />
+            </>
+          )}
           {/* Bright cosmic stars - appear in deep space (starts ~30x) */}
           {cosmicStarIntensity > 0.1 && (
             <div className="absolute inset-0 pointer-events-none overflow-hidden">
@@ -526,7 +927,7 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
               left: `${pos.xPercent}%`,
               top: `${pos.yPercent}%`,
               transform: `translate(-50%, -50%) rotate(${pos.angle}deg)`,
-              zIndex: rocket.isCrashed ? 25 : 20,
+              zIndex: rocket.isCrashed ? Z_INDEX.ROCKETS_CRASHED : Z_INDEX.ROCKETS_FLYING,
             }}
           >
             <img
@@ -576,6 +977,13 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
         const xPercent = 10; // X_START_PERCENT * 100
         const yPercent = (1 - Y_BOTTOM_MARGIN) * 100; // 88%
 
+        // Stagger hover animation timing per rocket for organic feel
+        const slideInDuration = 300;
+        const slideInDelay = i * 150;
+        const hoverDelay = slideInDelay + slideInDuration; // Start hover after slide-in completes
+        const hoverDuration = 1.5 + (i % 3) * 0.3; // Vary duration: 1.5s, 1.8s, 2.1s
+        const warmupDuration = 0.8 + (i % 4) * 0.15; // Vary warmup: 0.8s, 0.95s, 1.1s, 1.25s
+
         return (
           <div
             key={`prelaunch-${i}`}
@@ -585,8 +993,9 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
               top: `${yPercent}%`,
               // Rocket PNGs point UP, rotate 90deg to point RIGHT (horizontal)
               transform: 'translate(-50%, -50%) rotate(90deg)',
-              zIndex: 20 + i,
-              animation: `slideInFromLeft 300ms ease-out ${i * 150}ms both`,
+              zIndex: Z_INDEX.ROCKETS_FLYING + i,
+              // Chain animations: slide in first, then subtle hover bob
+              animation: `slideInFromLeft ${slideInDuration}ms ease-out ${slideInDelay}ms both, rocketHover ${hoverDuration}s ease-in-out ${hoverDelay}ms infinite`,
             }}
           >
             <img
@@ -595,7 +1004,8 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
               style={{
                 height: `${rocketSize}px`,
                 width: 'auto',
-                filter: 'drop-shadow(0 0 5px rgba(255, 200, 100, 0.35))'
+                // Engine warmup glow animation with staggered timing
+                animation: `engineWarmup ${warmupDuration}s ease-in-out ${slideInDelay}ms infinite`,
               }}
             />
           </div>
@@ -647,6 +1057,78 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
       <div className="absolute top-2 left-2 text-xs text-pure-white/40 font-mono">
         Multiplier
       </div>
+
+      {/* Cosmic Encounters Layer - behind rockets, in front of canvas */}
+      <div
+        className="absolute inset-0 pointer-events-none overflow-hidden"
+        style={{ zIndex: Z_INDEX.ENCOUNTERS }}
+      >
+        {encounters.map(encounter => {
+          const now = Date.now();
+          const elapsed = now - encounter.startTime;
+          const elapsedSeconds = elapsed / 1000;
+          const progress = elapsed / encounter.duration;
+
+          if (progress >= 1) return null;
+
+          // Calculate drifted position
+          const currentX = encounter.x + encounter.velocityX * elapsedSeconds;
+          const currentY = encounter.y + encounter.velocityY * elapsedSeconds;
+
+          // Skip if drifted off screen
+          if (currentX < -10 || currentX > 110 || currentY < -10 || currentY > 110) return null;
+
+          // Fade in for first 15%, full opacity middle, fade out last 20%
+          let opacity = 1;
+          if (progress < 0.15) {
+            opacity = progress / 0.15;
+          } else if (progress > 0.8) {
+            opacity = (1 - progress) / 0.2;
+          }
+
+          const visual = getEncounterVisual(encounter.type);
+
+          // Determine animation class using pre-defined Sets
+          let animClass = 'cosmic-encounter';
+          if (SPIN_ENCOUNTER_TYPES.has(encounter.type)) {
+            animClass = 'cosmic-encounter-spin';
+          } else if (WOBBLE_ENCOUNTER_TYPES.has(encounter.type)) {
+            animClass = 'cosmic-encounter-wobble';
+          }
+          if (RARE_ENCOUNTER_TYPES.has(encounter.type)) {
+            animClass += ' cosmic-encounter-rare';
+          }
+
+          return (
+            // Outer wrapper handles position, inner span handles animation
+            // aria-hidden since encounters are decorative
+            <div
+              key={encounter.id}
+              className="absolute"
+              aria-hidden="true"
+              style={{
+                left: `${currentX}%`,
+                top: `${currentY}%`,
+                transform: `translate(-50%, -50%)`,
+              }}
+            >
+              <span
+                className={animClass}
+                style={{
+                  display: 'inline-block',
+                  transform: `scale(${encounter.scale})`,
+                  opacity: opacity,
+                  fontSize: `${visual.size}px`,
+                  filter: `drop-shadow(0 0 ${visual.size / 3}px ${visual.color})`,
+                  textShadow: `0 0 10px ${visual.color}, 0 0 20px ${visual.color}`,
+                }}
+              >
+                {visual.emoji}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 };
@@ -692,16 +1174,80 @@ function drawTargetLine(
   ctx.fillText(`TARGET ${targetMultiplier.toFixed(2)}x`, width - 120, y - 5);
 }
 
-function generateStars(count: number) {
-  return Array.from({ length: count }, (_, i) => ({
-    id: i,
-    style: {
-      left: `${Math.random() * 100}%`,
-      top: `${Math.random() * 100}%`,
-      width: `${Math.random() * 2 + 1}px`,
-      height: `${Math.random() * 2 + 1}px`,
-      opacity: Math.random() * 0.7 + 0.3,
-      animationDelay: `${Math.random() * 3}s`,
+// Star layer configuration for parallax depth effect
+interface StarLayerConfig {
+  count: number;
+  sizeRange: [number, number]; // [min, max] in px
+  opacityRange: [number, number]; // [min, max] opacity
+  twinkleDuration: number; // seconds
+  driftSpeed: number; // 0 = no drift, higher = faster parallax drift at high multipliers
+}
+
+interface Star {
+  id: string;
+  layer: 'distant' | 'mid' | 'near';
+  style: {
+    left: string;
+    top: string;
+    width: string;
+    height: string;
+    opacity: number;
+    animationDelay: string;
+  };
+  driftSpeed: number;
+  twinkleDuration: number;
+}
+
+// Generate stars with three depth layers for parallax effect
+function generateStarLayers(): Star[] {
+  const layers: Record<'distant' | 'mid' | 'near', StarLayerConfig> = {
+    distant: {
+      count: 60,
+      sizeRange: [0.5, 1],
+      opacityRange: [0.2, 0.4],
+      twinkleDuration: 4, // Slower twinkle for distant stars
+      driftSpeed: 0, // No drift - these are infinitely far
+    },
+    mid: {
+      count: 30,
+      sizeRange: [1, 2],
+      opacityRange: [0.4, 0.7],
+      twinkleDuration: 2.5, // Medium twinkle
+      driftSpeed: 0.3, // Subtle drift
+    },
+    near: {
+      count: 15,
+      sizeRange: [2, 3],
+      opacityRange: [0.7, 1],
+      twinkleDuration: 1.5, // Faster twinkle for near stars
+      driftSpeed: 0.8, // More noticeable parallax
+    },
+  };
+
+  const allStars: Star[] = [];
+
+  (Object.keys(layers) as Array<'distant' | 'mid' | 'near'>).forEach((layerName) => {
+    const config = layers[layerName];
+    for (let i = 0; i < config.count; i++) {
+      const size = config.sizeRange[0] + Math.random() * (config.sizeRange[1] - config.sizeRange[0]);
+      const opacity = config.opacityRange[0] + Math.random() * (config.opacityRange[1] - config.opacityRange[0]);
+
+      allStars.push({
+        id: `${layerName}-${i}`,
+        layer: layerName,
+        style: {
+          left: `${Math.random() * 100}%`,
+          top: `${Math.random() * 100}%`,
+          width: `${size}px`,
+          height: `${size}px`,
+          opacity,
+          animationDelay: `${Math.random() * config.twinkleDuration}s`,
+        },
+        driftSpeed: config.driftSpeed,
+        twinkleDuration: config.twinkleDuration,
+      });
     }
-  }));
+  });
+
+  return allStars;
 }
