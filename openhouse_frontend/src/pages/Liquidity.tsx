@@ -67,7 +67,11 @@ function GamePoolCard({
       `}
     >
       <div className="flex items-center gap-3 mb-3">
-        <span className="text-2xl">{config.icon}</span>
+        {config.icon.startsWith('/') ? (
+          <img src={config.icon} alt={config.name} className="w-8 h-8 flex-shrink-0" />
+        ) : (
+          <span className="text-2xl">{config.icon}</span>
+        )}
         <span className={`font-bold text-lg ${isSelected ? colors.text : 'text-white'}`}>
           {config.name}
         </span>
