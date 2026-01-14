@@ -10,6 +10,23 @@ const TOTAL_ROCKET_DESIGNS = 10;
 const getRocketImage = (variant: number) => `/rockets/${variant}a.png`;
 const getCrashedImage = (variant: number) => `/rockets/${variant}b.png`;
 
+// ============================================
+// Space Asset Configuration - celestial object images
+// ============================================
+const SPACE_ASSETS = {
+  planets: ['planet0.png', 'planet1.png', 'planet2.png', 'planet3.png', 'planet4.png', 'planet5.png'],
+  galaxies: ['galaxy0.png', 'galaxy1.png', 'galaxy2.png', 'galaxy3.png', 'galaxy5.png'],
+  blackholes: ['blackhole0.png', 'blackhole1.png', 'blackhole2.png', 'blackhole3.png'],
+  nebulas: ['nebula0.png', 'nebula1.png'],
+} as const;
+
+// Get a random space asset path from a category
+const getRandomSpaceAsset = (category: keyof typeof SPACE_ASSETS): string => {
+  const assets = SPACE_ASSETS[category];
+  const randomIndex = Math.floor(Math.random() * assets.length);
+  return `/space-stuff/${assets[randomIndex]}`;
+};
+
 // Preload all rocket images to prevent placeholder text showing
 const preloadedImages: Map<string, HTMLImageElement> = new Map();
 let imagesPreloaded = false;
@@ -42,6 +59,23 @@ const preloadAllRocketImages = (): Promise<void> => {
         crashedImg.src = crashedPath;
       }));
       preloadedImages.set(crashedPath, crashedImg);
+    }
+  }
+
+  // Preload space-stuff images for cosmic encounters
+  const spaceCategories: (keyof typeof SPACE_ASSETS)[] = ['planets', 'galaxies', 'blackholes', 'nebulas'];
+  for (const category of spaceCategories) {
+    for (const asset of SPACE_ASSETS[category]) {
+      const path = `/space-stuff/${asset}`;
+      if (!preloadedImages.has(path)) {
+        const img = new Image();
+        imagePromises.push(new Promise((resolve) => {
+          img.onload = () => resolve();
+          img.onerror = () => resolve();
+          img.src = path;
+        }));
+        preloadedImages.set(path, img);
+      }
     }
   }
 
@@ -95,16 +129,16 @@ const ENCOUNTER_CONFIG = {
 } as const;
 
 // Animation class mappings (static, defined once)
-const SPIN_ENCOUNTER_TYPES = new Set(['wormhole', 'galaxy', 'blackHole', 'dysonSphere']);
-const WOBBLE_ENCOUNTER_TYPES = new Set(['alienShip', 'alienProbe', 'cosmicEntity', 'astronaut']);
-const RARE_ENCOUNTER_TYPES = new Set(['cosmicEntity', 'blackHole', 'wormhole']);
+// All image-based encounters - spinning cosmic objects
+const SPIN_ENCOUNTER_TYPES = new Set(['wormhole', 'galaxy', 'blackHole', 'nebula']);
+const RARE_ENCOUNTER_TYPES = new Set(['blackHole', 'wormhole', 'galaxy']);
 
+// Simplified encounter types - all image-based celestial objects only
 type EncounterType =
-  | 'satellite' | 'astronaut' | 'spaceStation'  // Low orbit (5x-20x)
-  | 'asteroid' | 'comet' | 'moon'               // Deep space (20x-60x)
-  | 'planet_ringed' | 'planet_gas' | 'alienProbe' // Outer system (60x-120x)
-  | 'alienShip' | 'wormhole' | 'dysonSphere'    // Interstellar (120x-250x)
-  | 'galaxy' | 'blackHole' | 'cosmicEntity';    // Cosmic (250x+)
+  | 'planet_small' | 'planet_large'    // Planets at various distances
+  | 'nebula'                            // Ethereal cosmic clouds
+  | 'wormhole' | 'blackHole'           // Cosmic phenomena
+  | 'galaxy';                          // Distant galaxies
 
 interface CosmicEncounter {
   id: string;
@@ -116,6 +150,8 @@ interface CosmicEncounter {
   scale: number; // size multiplier
   velocityX: number; // drift speed in % per second (negative = left)
   velocityY: number; // drift speed in % per second (positive = down)
+  imagePath: string; // path to PNG for this celestial object
+  baseSize: number; // base size in pixels (varies for visual interest)
 }
 
 interface CrashCanvasProps {
@@ -129,70 +165,60 @@ interface CrashCanvasProps {
 }
 
 // Get encounter type based on current altitude (multiplier)
+// All encounters are now image-based celestial objects
 const getEncounterTypeForAltitude = (multiplier: number): EncounterType => {
-  if (multiplier < 20) {
-    // Low orbit zone
-    const options: EncounterType[] = ['satellite', 'satellite', 'astronaut', 'spaceStation'];
+  if (multiplier < 40) {
+    // Near space - smaller planets/moons drifting by
+    const options: EncounterType[] = ['planet_small', 'planet_small', 'planet_small'];
     return options[Math.floor(Math.random() * options.length)];
-  } else if (multiplier < 60) {
-    // Deep space zone
-    const options: EncounterType[] = ['asteroid', 'asteroid', 'comet', 'moon', 'satellite'];
+  } else if (multiplier < 100) {
+    // Deep space - larger planets, occasional nebula
+    const options: EncounterType[] = ['planet_large', 'planet_large', 'planet_small', 'nebula'];
     return options[Math.floor(Math.random() * options.length)];
-  } else if (multiplier < 120) {
-    // Outer system zone
-    const options: EncounterType[] = ['planet_ringed', 'planet_gas', 'alienProbe', 'asteroid', 'comet'];
-    return options[Math.floor(Math.random() * options.length)];
-  } else if (multiplier < 250) {
-    // Interstellar zone
-    const options: EncounterType[] = ['alienShip', 'wormhole', 'dysonSphere', 'planet_gas', 'alienProbe'];
+  } else if (multiplier < 200) {
+    // Interstellar - nebulas, black holes start appearing
+    const options: EncounterType[] = ['nebula', 'nebula', 'blackHole', 'planet_large', 'wormhole'];
     return options[Math.floor(Math.random() * options.length)];
   } else {
-    // Cosmic zone (250x+)
-    const options: EncounterType[] = ['galaxy', 'blackHole', 'cosmicEntity', 'wormhole', 'alienShip'];
+    // Cosmic zone (200x+) - galaxies, black holes, wormholes
+    const options: EncounterType[] = ['galaxy', 'galaxy', 'blackHole', 'wormhole', 'nebula'];
     return options[Math.floor(Math.random() * options.length)];
   }
 };
 
-// Get visual properties (emoji placeholder) for each encounter type
-const getEncounterVisual = (type: EncounterType): { emoji: string; color: string; size: number } => {
-  switch (type) {
-    // Low orbit
-    case 'satellite':
-      return { emoji: '🛰️', color: '#88aacc', size: 32 };
-    case 'astronaut':
-      return { emoji: '👨‍🚀', color: '#ffffff', size: 36 };
-    case 'spaceStation':
-      return { emoji: '🏗️', color: '#cccccc', size: 40 };
-    // Deep space
-    case 'asteroid':
-      return { emoji: '🪨', color: '#8b7355', size: 28 };
-    case 'comet':
-      return { emoji: '☄️', color: '#66ccff', size: 38 };
-    case 'moon':
-      return { emoji: '🌙', color: '#d4d4aa', size: 44 };
-    // Outer system
-    case 'planet_ringed':
-      return { emoji: '🪐', color: '#e8c88a', size: 56 };
-    case 'planet_gas':
-      return { emoji: '🟠', color: '#e87040', size: 52 };
-    case 'alienProbe':
-      return { emoji: '🔷', color: '#44ffaa', size: 30 };
-    // Interstellar
-    case 'alienShip':
-      return { emoji: '🛸', color: '#88ff88', size: 48 };
+// Visual properties for image-based encounters only
+interface EncounterVisual {
+  imagePath: string;
+  color: string; // glow color
+  baseSize: number; // base size in pixels
+  sizeVariance: number; // random variance range (±)
+}
+
+// Get visual properties for each encounter type - all image-based
+const getEncounterVisual = (encounterType: EncounterType): EncounterVisual => {
+  switch (encounterType) {
+    // Planets - varying sizes based on "distance"
+    case 'planet_small':
+      return { imagePath: getRandomSpaceAsset('planets'), color: '#d4d4aa', baseSize: 35, sizeVariance: 12 };
+    case 'planet_large':
+      return { imagePath: getRandomSpaceAsset('planets'), color: '#e8c88a', baseSize: 55, sizeVariance: 18 };
+
+    // Nebulas - ethereal cosmic clouds
+    case 'nebula':
+      return { imagePath: getRandomSpaceAsset('nebulas'), color: '#aa66ff', baseSize: 65, sizeVariance: 25 };
+
+    // Black holes and wormholes - cosmic phenomena
     case 'wormhole':
-      return { emoji: '🌀', color: '#aa66ff', size: 60 };
-    case 'dysonSphere':
-      return { emoji: '⭕', color: '#ffcc00', size: 50 };
-    // Cosmic
-    case 'galaxy':
-      return { emoji: '🌌', color: '#6644aa', size: 70 };
+      return { imagePath: getRandomSpaceAsset('blackholes'), color: '#8844cc', baseSize: 55, sizeVariance: 20 };
     case 'blackHole':
-      return { emoji: '⚫', color: '#220033', size: 55 };
-    case 'cosmicEntity':
-      return { emoji: '👁️', color: '#ff44ff', size: 64 };
+      return { imagePath: getRandomSpaceAsset('blackholes'), color: '#331155', baseSize: 60, sizeVariance: 22 };
+
+    // Galaxies - distant cosmic structures
+    case 'galaxy':
+      return { imagePath: getRandomSpaceAsset('galaxies'), color: '#6644aa', baseSize: 75, sizeVariance: 30 };
+
     default:
-      return { emoji: '✨', color: '#ffffff', size: 24 };
+      return { imagePath: getRandomSpaceAsset('planets'), color: '#ffffff', baseSize: 40, sizeVariance: 15 };
   }
 };
 
@@ -362,6 +388,14 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
     if (Math.random() < chance) {
       const type = getEncounterTypeForAltitude(multiplier);
 
+      // Get visual properties at spawn time (captures random image selection)
+      const visual = getEncounterVisual(type);
+
+      // Calculate unique size for this encounter (never exactly the same)
+      // Random variance in both directions to create natural size distribution
+      const sizeOffset = (Math.random() - 0.5) * 2 * visual.sizeVariance;
+      const uniqueSize = visual.baseSize + sizeOffset;
+
       // Drift speed scales with altitude (faster rocket = faster parallax)
       // Range: 3-11 %/sec based on multiplier
       const baseDriftSpeed = 3 + Math.min(multiplier / 10, 8);
@@ -380,6 +414,9 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
         scale: 0.8 + Math.random() * 0.4,
         velocityX: baseDriftSpeed * Math.cos(driftAngle) * -1,
         velocityY: baseDriftSpeed * Math.abs(Math.sin(driftAngle)),
+        // Store visual properties at spawn time
+        imagePath: visual.imagePath,
+        baseSize: uniqueSize,
       };
       setEncounters(prev => [...prev, encounter]);
     }
@@ -1078,29 +1115,41 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
           // Skip if drifted off screen
           if (currentX < -10 || currentX > 110 || currentY < -10 || currentY > 110) return null;
 
-          // Fade in for first 15%, full opacity middle, fade out last 20%
-          let opacity = 1;
-          if (progress < 0.15) {
-            opacity = progress / 0.15;
-          } else if (progress > 0.8) {
-            opacity = (1 - progress) / 0.2;
-          }
-
+          // Get visual properties for glow color
           const visual = getEncounterVisual(encounter.type);
 
-          // Determine animation class using pre-defined Sets
-          let animClass = 'cosmic-encounter';
+          // Distance fade effect: objects emerge from the cosmic distance
+          // Fade in phase (0-25%): low opacity, slight blur -> full clarity
+          // Stable phase (25-75%): full visibility
+          // Fade out phase (75-100%): gradual fade to simulate moving past
+          let opacity = 1;
+          let blurAmount = 0;
+
+          if (progress < 0.25) {
+            // Emerging from distance: start very dim and slightly blurred
+            const fadeInProgress = progress / 0.25;
+            opacity = 0.15 + fadeInProgress * 0.85; // 0.15 -> 1.0
+            blurAmount = (1 - fadeInProgress) * 2; // 2px -> 0px blur
+          } else if (progress > 0.75) {
+            // Fading as it passes: gradual opacity reduction
+            opacity = (1 - progress) / 0.25;
+            blurAmount = 0;
+          }
+
+          // Determine animation class - all image-based now
+          let animClass = 'cosmic-encounter-image';
           if (SPIN_ENCOUNTER_TYPES.has(encounter.type)) {
-            animClass = 'cosmic-encounter-spin';
-          } else if (WOBBLE_ENCOUNTER_TYPES.has(encounter.type)) {
-            animClass = 'cosmic-encounter-wobble';
+            animClass += ' cosmic-encounter-spin';
           }
           if (RARE_ENCOUNTER_TYPES.has(encounter.type)) {
             animClass += ' cosmic-encounter-rare';
           }
 
+          // Use stored baseSize for unique sizing
+          const displaySize = encounter.baseSize || visual.baseSize;
+
           return (
-            // Outer wrapper handles position, inner span handles animation
+            // Outer wrapper handles position, inner element handles animation
             // aria-hidden since encounters are decorative
             <div
               key={encounter.id}
@@ -1109,22 +1158,22 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
               style={{
                 left: `${currentX}%`,
                 top: `${currentY}%`,
-                transform: `translate(-50%, -50%)`,
+                transform: 'translate(-50%, -50%)',
               }}
             >
-              <span
+              <img
+                src={encounter.imagePath}
+                alt=""
                 className={animClass}
                 style={{
-                  display: 'inline-block',
-                  transform: `scale(${encounter.scale})`,
+                  display: 'block',
+                  width: `${displaySize * encounter.scale}px`,
+                  height: 'auto',
                   opacity: opacity,
-                  fontSize: `${visual.size}px`,
-                  filter: `drop-shadow(0 0 ${visual.size / 3}px ${visual.color})`,
-                  textShadow: `0 0 10px ${visual.color}, 0 0 20px ${visual.color}`,
+                  filter: `blur(${blurAmount}px) drop-shadow(0 0 ${displaySize / 4}px ${visual.color})`,
+                  transition: 'opacity 0.3s ease-out, filter 0.3s ease-out',
                 }}
-              >
-                {visual.emoji}
-              </span>
+              />
             </div>
           );
         })}

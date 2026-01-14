@@ -223,26 +223,26 @@
 
 /* ====================================
    Cosmic Encounter Animations
-   Space objects that appear during flight
+   Celestial objects that appear during flight (all image-based)
    ==================================== */
 
-/* Base cosmic encounter animation - gentle pulse */
-.cosmic-encounter {
-  animation: encounterPulse 2s ease-in-out infinite;
+/* Base animation for celestial objects - subtle glow pulse */
+.cosmic-encounter-image {
+  animation: imageEncounterPulse 3s ease-in-out infinite;
 }
 
-@keyframes encounterPulse {
+@keyframes imageEncounterPulse {
   0%, 100% {
-    filter: brightness(1);
+    filter: brightness(0.95);
   }
   50% {
-    filter: brightness(1.25);
+    filter: brightness(1.1);
   }
 }
 
-/* Slow spin for wormholes, galaxies - uses rotate() only, combine with inline scale */
+/* Slow majestic spin for galaxies, black holes, wormholes, nebulas */
 .cosmic-encounter-spin {
-  animation: encounterSpin 6s linear infinite;
+  animation: encounterSpin 12s linear infinite;
 }
 
 @keyframes encounterSpin {
@@ -250,27 +250,17 @@
   to { rotate: 360deg; }
 }
 
-/* Gentle wobble for aliens - uses rotate() only */
-.cosmic-encounter-wobble {
-  animation: encounterWobble 1.2s ease-in-out infinite;
-}
-
-@keyframes encounterWobble {
-  0%, 100% { rotate: -5deg; }
-  50% { rotate: 5deg; }
-}
-
-/* Intense glow pulse for rare encounters */
+/* Enhanced glow for rare celestial encounters */
 .cosmic-encounter-rare {
-  animation: encounterGlow 1.5s ease-in-out infinite;
+  animation: imageEncounterGlow 2s ease-in-out infinite;
 }
 
-@keyframes encounterGlow {
+@keyframes imageEncounterGlow {
   0%, 100% {
-    filter: brightness(1) saturate(1);
+    filter: brightness(1) saturate(1.1);
   }
   50% {
-    filter: brightness(1.5) saturate(1.3);
+    filter: brightness(1.25) saturate(1.2);
   }
 }
 
