@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
 import type { RocketState } from '../../../pages/Crash';
 import './CrashRocket.css';
 
@@ -9,23 +9,6 @@ const TOTAL_ROCKET_DESIGNS = 10;
 // Format: 1a.png (flying), 1b.png (crashed) through 10a.png, 10b.png
 const getRocketImage = (variant: number) => `/rockets/${variant}a.png`;
 const getCrashedImage = (variant: number) => `/rockets/${variant}b.png`;
-
-// ============================================
-// Space Asset Configuration - celestial object images
-// ============================================
-const SPACE_ASSETS = {
-  planets: ['planet0.png', 'planet1.png', 'planet2.png', 'planet3.png', 'planet4.png', 'planet5.png'],
-  galaxies: ['galaxy0.png', 'galaxy1.png', 'galaxy2.png', 'galaxy3.png', 'galaxy5.png'],
-  blackholes: ['blackhole0.png', 'blackhole1.png', 'blackhole2.png', 'blackhole3.png'],
-  nebulas: ['nebula0.png', 'nebula1.png'],
-} as const;
-
-// Get a random space asset path from a category
-const getRandomSpaceAsset = (category: keyof typeof SPACE_ASSETS): string => {
-  const assets = SPACE_ASSETS[category];
-  const randomIndex = Math.floor(Math.random() * assets.length);
-  return `/space-stuff/${assets[randomIndex]}`;
-};
 
 // Preload all rocket images to prevent placeholder text showing
 const preloadedImages: Map<string, HTMLImageElement> = new Map();
@@ -62,23 +45,6 @@ const preloadAllRocketImages = (): Promise<void> => {
     }
   }
 
-  // Preload space-stuff images for cosmic encounters
-  const spaceCategories: (keyof typeof SPACE_ASSETS)[] = ['planets', 'galaxies', 'blackholes', 'nebulas'];
-  for (const category of spaceCategories) {
-    for (const asset of SPACE_ASSETS[category]) {
-      const path = `/space-stuff/${asset}`;
-      if (!preloadedImages.has(path)) {
-        const img = new Image();
-        imagePromises.push(new Promise((resolve) => {
-          img.onload = () => resolve();
-          img.onerror = () => resolve();
-          img.src = path;
-        }));
-        preloadedImages.set(path, img);
-      }
-    }
-  }
-
   return Promise.all(imagePromises).then(() => {
     imagesPreloaded = true;
   });
@@ -98,61 +64,15 @@ export const ROCKET_COLORS = [
   '#64FFDA', // Aqua
 ];
 
-// ============================================
-// Cosmic Encounters System - space objects that appear during flight
-// ============================================
-
 // Z-index hierarchy for proper layering
 const Z_INDEX = {
   STARS: 5,
   NEBULA: 8,
   CANVAS: 10,
-  ENCOUNTERS: 15,      // Behind rockets
   ROCKETS_FLYING: 20,
   ROCKETS_CRASHED: 22,
   UI: 30,
 } as const;
-
-// Encounter spawn configuration
-const ENCOUNTER_CONFIG = {
-  MAX_ON_SCREEN: 6,           // Prevent visual clutter
-  CHECK_INTERVAL_MS: 1500,    // How often to roll for new encounter
-  BASE_CHANCE: 0.10,          // 10% base probability
-  CHANCE_PER_MULT: 0.02,      // +2% per multiplier
-  MAX_CHANCE: 0.50,           // Cap at 50% to prevent spam
-  X_SPAWN_MIN: 20,            // Avoid left edge (rocket start area)
-  X_SPAWN_RANGE: 60,          // Spawn in center 60% of screen
-  Y_SPAWN_MIN: 5,             // Start near top for downward drift
-  Y_SPAWN_RANGE: 50,          // Upper half of screen
-  DURATION_MIN_MS: 5000,      // Minimum visibility time
-  DURATION_VARIANCE_MS: 3000, // Random additional duration
-} as const;
-
-// Animation class mappings (static, defined once)
-// All image-based encounters - spinning cosmic objects
-const SPIN_ENCOUNTER_TYPES = new Set(['wormhole', 'galaxy', 'blackHole', 'nebula']);
-const RARE_ENCOUNTER_TYPES = new Set(['blackHole', 'wormhole', 'galaxy']);
-
-// Simplified encounter types - all image-based celestial objects only
-type EncounterType =
-  | 'planet_small' | 'planet_large'    // Planets at various distances
-  | 'nebula'                            // Ethereal cosmic clouds
-  | 'wormhole' | 'blackHole'           // Cosmic phenomena
-  | 'galaxy';                          // Distant galaxies
-
-interface CosmicEncounter {
-  id: string;
-  type: EncounterType;
-  x: number; // starting percentage 0-100
-  y: number; // starting percentage 0-100
-  startTime: number;
-  duration: number; // ms, typically 3000-6000
-  scale: number; // size multiplier
-  velocityX: number; // drift speed in % per second (negative = left)
-  velocityY: number; // drift speed in % per second (positive = down)
-  imagePath: string; // path to PNG for this celestial object
-  baseSize: number; // base size in pixels (varies for visual interest)
-}
 
 interface CrashCanvasProps {
   rocketStates: RocketState[];
@@ -163,64 +83,6 @@ interface CrashCanvasProps {
   isWaitingForBackend?: boolean;
   rocketCount?: number;
 }
-
-// Get encounter type based on current altitude (multiplier)
-// All encounters are now image-based celestial objects
-const getEncounterTypeForAltitude = (multiplier: number): EncounterType => {
-  if (multiplier < 40) {
-    // Near space - smaller planets/moons drifting by
-    const options: EncounterType[] = ['planet_small', 'planet_small', 'planet_small'];
-    return options[Math.floor(Math.random() * options.length)];
-  } else if (multiplier < 100) {
-    // Deep space - larger planets, occasional nebula
-    const options: EncounterType[] = ['planet_large', 'planet_large', 'planet_small', 'nebula'];
-    return options[Math.floor(Math.random() * options.length)];
-  } else if (multiplier < 200) {
-    // Interstellar - nebulas, black holes start appearing
-    const options: EncounterType[] = ['nebula', 'nebula', 'blackHole', 'planet_large', 'wormhole'];
-    return options[Math.floor(Math.random() * options.length)];
-  } else {
-    // Cosmic zone (200x+) - galaxies, black holes, wormholes
-    const options: EncounterType[] = ['galaxy', 'galaxy', 'blackHole', 'wormhole', 'nebula'];
-    return options[Math.floor(Math.random() * options.length)];
-  }
-};
-
-// Visual properties for image-based encounters only
-interface EncounterVisual {
-  imagePath: string;
-  color: string; // glow color
-  baseSize: number; // base size in pixels
-  sizeVariance: number; // random variance range (±)
-}
-
-// Get visual properties for each encounter type - all image-based
-const getEncounterVisual = (encounterType: EncounterType): EncounterVisual => {
-  switch (encounterType) {
-    // Planets - varying sizes based on "distance"
-    case 'planet_small':
-      return { imagePath: getRandomSpaceAsset('planets'), color: '#d4d4aa', baseSize: 35, sizeVariance: 12 };
-    case 'planet_large':
-      return { imagePath: getRandomSpaceAsset('planets'), color: '#e8c88a', baseSize: 55, sizeVariance: 18 };
-
-    // Nebulas - ethereal cosmic clouds
-    case 'nebula':
-      return { imagePath: getRandomSpaceAsset('nebulas'), color: '#aa66ff', baseSize: 65, sizeVariance: 25 };
-
-    // Black holes and wormholes - cosmic phenomena
-    case 'wormhole':
-      return { imagePath: getRandomSpaceAsset('blackholes'), color: '#8844cc', baseSize: 55, sizeVariance: 20 };
-    case 'blackHole':
-      return { imagePath: getRandomSpaceAsset('blackholes'), color: '#331155', baseSize: 60, sizeVariance: 22 };
-
-    // Galaxies - distant cosmic structures
-    case 'galaxy':
-      return { imagePath: getRandomSpaceAsset('galaxies'), color: '#6644aa', baseSize: 75, sizeVariance: 30 };
-
-    default:
-      return { imagePath: getRandomSpaceAsset('planets'), color: '#ffffff', baseSize: 40, sizeVariance: 15 };
-  }
-};
 
 // Fisher-Yates shuffle algorithm
 function shuffleArray<T>(array: T[]): T[] {
@@ -265,10 +127,6 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
 
   // Track when images are preloaded
   const [imagesReady, setImagesReady] = useState(imagesPreloaded);
-
-  // Cosmic Encounters state - space objects that appear during flight
-  const [encounters, setEncounters] = useState<CosmicEncounter[]>([]);
-  const lastEncounterCheckRef = useRef<number>(0);
 
   // Preload images on mount
   useEffect(() => {
@@ -370,110 +228,12 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
   // Generate stars once with three depth layers for parallax effect
   const stars = useMemo(() => generateStarLayers(), []);
 
-  // Check for cosmic encounter based on current multiplier
-  const checkForEncounter = useCallback((multiplier: number, now: number, currentCount: number) => {
-    // Throttle checks to prevent spam
-    if (now - lastEncounterCheckRef.current < ENCOUNTER_CONFIG.CHECK_INTERVAL_MS) return;
-    lastEncounterCheckRef.current = now;
-
-    // Don't spawn if already at max capacity
-    if (currentCount >= ENCOUNTER_CONFIG.MAX_ON_SCREEN) return;
-
-    // Calculate spawn probability based on altitude
-    const chance = Math.min(
-      ENCOUNTER_CONFIG.BASE_CHANCE + ENCOUNTER_CONFIG.CHANCE_PER_MULT * multiplier,
-      ENCOUNTER_CONFIG.MAX_CHANCE
-    );
-
-    if (Math.random() < chance) {
-      const type = getEncounterTypeForAltitude(multiplier);
-
-      // Get visual properties at spawn time (captures random image selection)
-      const visual = getEncounterVisual(type);
-
-      // Calculate unique size for this encounter (never exactly the same)
-      // Random variance in both directions to create natural size distribution
-      const sizeOffset = (Math.random() - 0.5) * 2 * visual.sizeVariance;
-      const uniqueSize = visual.baseSize + sizeOffset;
-
-      // Drift speed scales with altitude (faster rocket = faster parallax)
-      // Range: 3-11 %/sec based on multiplier
-      const baseDriftSpeed = 3 + Math.min(multiplier / 10, 8);
-
-      // Consistent down-left drift with slight variance for natural feel
-      // Angle range: -0.6 to -0.2 radians (mostly down-left)
-      const driftAngle = -0.6 + Math.random() * 0.4;
-
-      const encounter: CosmicEncounter = {
-        id: `enc-${Date.now()}-${Math.random()}`,
-        type,
-        x: ENCOUNTER_CONFIG.X_SPAWN_MIN + Math.random() * ENCOUNTER_CONFIG.X_SPAWN_RANGE,
-        y: ENCOUNTER_CONFIG.Y_SPAWN_MIN + Math.random() * ENCOUNTER_CONFIG.Y_SPAWN_RANGE,
-        startTime: now,
-        duration: ENCOUNTER_CONFIG.DURATION_MIN_MS + Math.random() * ENCOUNTER_CONFIG.DURATION_VARIANCE_MS,
-        scale: 0.8 + Math.random() * 0.4,
-        velocityX: baseDriftSpeed * Math.cos(driftAngle) * -1,
-        velocityY: baseDriftSpeed * Math.abs(Math.sin(driftAngle)),
-        // Store visual properties at spawn time
-        imagePath: visual.imagePath,
-        baseSize: uniqueSize,
-      };
-      setEncounters(prev => [...prev, encounter]);
-    }
-  }, []);
-
   // Clear smoothed angles when game resets (no rockets = new game starting)
   useEffect(() => {
     if (rocketStates.length === 0) {
       smoothedAnglesRef.current.clear();
     }
   }, [rocketStates.length]);
-
-  // Cleanup expired cosmic encounters periodically
-  useEffect(() => {
-    const cleanup = setInterval(() => {
-      const now = Date.now();
-      setEncounters(prev => prev.filter(e => now - e.startTime < e.duration));
-    }, 1000);
-    return () => clearInterval(cleanup);
-  }, []);
-
-  // Clear all encounters when game resets (no rockets = new game)
-  useEffect(() => {
-    if (rocketStates.length === 0) {
-      setEncounters([]);
-      lastEncounterCheckRef.current = 0;
-    }
-  }, [rocketStates.length]);
-
-  // Use a ref to track rocket states for the interval (avoids re-creating interval every frame)
-  // Refs to avoid recreating intervals on every state change
-  const rocketStatesRef = useRef(rocketStates);
-  rocketStatesRef.current = rocketStates;
-
-  const encountersRef = useRef(encounters);
-  encountersRef.current = encounters;
-
-  // Trigger encounter checks during active flight
-  // Uses an interval that reads from ref to avoid constant recreation
-  useEffect(() => {
-    // Check for encounters every 500ms
-    const encounterInterval = setInterval(() => {
-      const rockets = rocketStatesRef.current;
-      if (rockets.length === 0) return;
-
-      const currentMax = Math.max(...rockets.map(r => r.currentMultiplier), 1.0);
-      const allRocketsCrashed = rockets.every(r => r.isCrashed);
-      const currentEncounterCount = encountersRef.current.length;
-
-      // Only check for encounters during active flight (not after all crashed)
-      if (!allRocketsCrashed) {
-        checkForEncounter(currentMax, Date.now(), currentEncounterCount);
-      }
-    }, 500);
-
-    return () => clearInterval(encounterInterval);
-  }, [checkForEncounter]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -707,7 +467,8 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
     : 0;
 
   // Nebula glow intensity - cosmic clouds appearing in deep space
-  const nebulaOpacity = deepSpaceProgress * 0.35;
+  // Subtle but visible - about 30% dimmer than original
+  const nebulaOpacity = deepSpaceProgress * 0.25;
 
   // Extra bright stars at extreme distances - starts appearing early
   const cosmicStarIntensity = deepSpaceProgress;
@@ -862,7 +623,7 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
                   right: '15%',
                   width: '35%',
                   height: '30%',
-                  background: `radial-gradient(ellipse at center, rgba(100, 30, 120, ${Math.min((maxCurrentMultiplier - 500) / 1500, 1) * 0.4}) 0%, rgba(60, 20, 90, ${Math.min((maxCurrentMultiplier - 500) / 1500, 1) * 0.2}) 50%, transparent 75%)`,
+                  background: `radial-gradient(ellipse at center, rgba(100, 30, 120, ${Math.min((maxCurrentMultiplier - 500) / 1500, 1) * 0.3}) 0%, rgba(60, 20, 90, ${Math.min((maxCurrentMultiplier - 500) / 1500, 1) * 0.15}) 50%, transparent 75%)`,
                   filter: 'blur(35px)',
                   animation: 'nebulaDrift4 15s ease-in-out infinite',
                 }}
@@ -875,7 +636,7 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
                   left: '10%',
                   width: '30%',
                   height: '25%',
-                  background: `radial-gradient(ellipse at center, rgba(30, 40, 90, ${Math.min((maxCurrentMultiplier - 500) / 1500, 1) * 0.35}) 0%, transparent 65%)`,
+                  background: `radial-gradient(ellipse at center, rgba(30, 40, 90, ${Math.min((maxCurrentMultiplier - 500) / 1500, 1) * 0.25}) 0%, transparent 65%)`,
                   filter: 'blur(28px)',
                   animation: 'nebulaDrift2 20s ease-in-out infinite reverse',
                 }}
@@ -1093,90 +854,6 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
       </div>
       <div className="absolute top-2 left-2 text-xs text-pure-white/40 font-mono">
         Multiplier
-      </div>
-
-      {/* Cosmic Encounters Layer - behind rockets, in front of canvas */}
-      <div
-        className="absolute inset-0 pointer-events-none overflow-hidden"
-        style={{ zIndex: Z_INDEX.ENCOUNTERS }}
-      >
-        {encounters.map(encounter => {
-          const now = Date.now();
-          const elapsed = now - encounter.startTime;
-          const elapsedSeconds = elapsed / 1000;
-          const progress = elapsed / encounter.duration;
-
-          if (progress >= 1) return null;
-
-          // Calculate drifted position
-          const currentX = encounter.x + encounter.velocityX * elapsedSeconds;
-          const currentY = encounter.y + encounter.velocityY * elapsedSeconds;
-
-          // Skip if drifted off screen
-          if (currentX < -10 || currentX > 110 || currentY < -10 || currentY > 110) return null;
-
-          // Get visual properties for glow color
-          const visual = getEncounterVisual(encounter.type);
-
-          // Distance fade effect: objects emerge from the cosmic distance
-          // Fade in phase (0-25%): low opacity, slight blur -> full clarity
-          // Stable phase (25-75%): full visibility
-          // Fade out phase (75-100%): gradual fade to simulate moving past
-          let opacity = 1;
-          let blurAmount = 0;
-
-          if (progress < 0.25) {
-            // Emerging from distance: start very dim and slightly blurred
-            const fadeInProgress = progress / 0.25;
-            opacity = 0.15 + fadeInProgress * 0.85; // 0.15 -> 1.0
-            blurAmount = (1 - fadeInProgress) * 2; // 2px -> 0px blur
-          } else if (progress > 0.75) {
-            // Fading as it passes: gradual opacity reduction
-            opacity = (1 - progress) / 0.25;
-            blurAmount = 0;
-          }
-
-          // Determine animation class - all image-based now
-          let animClass = 'cosmic-encounter-image';
-          if (SPIN_ENCOUNTER_TYPES.has(encounter.type)) {
-            animClass += ' cosmic-encounter-spin';
-          }
-          if (RARE_ENCOUNTER_TYPES.has(encounter.type)) {
-            animClass += ' cosmic-encounter-rare';
-          }
-
-          // Use stored baseSize for unique sizing
-          const displaySize = encounter.baseSize || visual.baseSize;
-
-          return (
-            // Outer wrapper handles position, inner element handles animation
-            // aria-hidden since encounters are decorative
-            <div
-              key={encounter.id}
-              className="absolute"
-              aria-hidden="true"
-              style={{
-                left: `${currentX}%`,
-                top: `${currentY}%`,
-                transform: 'translate(-50%, -50%)',
-              }}
-            >
-              <img
-                src={encounter.imagePath}
-                alt=""
-                className={animClass}
-                style={{
-                  display: 'block',
-                  width: `${displaySize * encounter.scale}px`,
-                  height: 'auto',
-                  opacity: opacity,
-                  filter: `blur(${blurAmount}px) drop-shadow(0 0 ${displaySize / 4}px ${visual.color})`,
-                  transition: 'opacity 0.3s ease-out, filter 0.3s ease-out',
-                }}
-              />
-            </div>
-          );
-        })}
       </div>
     </div>
   );

@@ -221,49 +221,6 @@
   }
 }
 
-/* ====================================
-   Cosmic Encounter Animations
-   Celestial objects that appear during flight (all image-based)
-   ==================================== */
-
-/* Base animation for celestial objects - subtle glow pulse */
-.cosmic-encounter-image {
-  animation: imageEncounterPulse 3s ease-in-out infinite;
-}
-
-@keyframes imageEncounterPulse {
-  0%, 100% {
-    filter: brightness(0.95);
-  }
-  50% {
-    filter: brightness(1.1);
-  }
-}
-
-/* Slow majestic spin for galaxies, black holes, wormholes, nebulas */
-.cosmic-encounter-spin {
-  animation: encounterSpin 12s linear infinite;
-}
-
-@keyframes encounterSpin {
-  from { rotate: 0deg; }
-  to { rotate: 360deg; }
-}
-
-/* Enhanced glow for rare celestial encounters */
-.cosmic-encounter-rare {
-  animation: imageEncounterGlow 2s ease-in-out infinite;
-}
-
-@keyframes imageEncounterGlow {
-  0%, 100% {
-    filter: brightness(1) saturate(1.1);
-  }
-  50% {
-    filter: brightness(1.25) saturate(1.2);
-  }
-}
-
 /* Ensure smooth canvas resizing on orientation change */
 @media (orientation: portrait) {
   .crash-canvas-container {
